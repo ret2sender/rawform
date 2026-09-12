@@ -1,0 +1,66 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Derived from the tree's dominant conventions (measured, not guessed: the
+# 99th percentile of all source lines is 89 columns, hence the limit below).
+# Scope: keep NEW and CHANGED code consistent. The tree is deliberately not
+# bulk-reformatted; hand-tuned alignment exists (declaration columns, case
+# tables) that a whole-file pass would fight. Format touched lines only,
+# e.g. `git clang-format` before committing.
+
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+
+# Layout
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 90
+MaxEmptyLinesToKeep: 1
+AccessModifierOffset: -4
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# Braces and short constructs
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: All
+
+# Switch: indented case labels; short case bodies may share the label's line
+# and are column-aligned into a table (the Engine command dispatch is the
+# reference shape).
+IndentCaseLabels: true
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCaseColons: false
+
+# Declarations
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Constructors: break before the colon, initializers packed and indented one
+# level (": QObject(parent), m_controller(controller)").
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 4
+PackConstructorInitializers: BinPack
+
+# Comments: two spaces before trailing comments, aligned runs kept; comment
+# reflow respects the 90-column convention the prose is already written to.
+SpacesBeforeTrailingComments: 2
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+ReflowComments: true
+
+# Includes: the tree groups them by hand (own header, project headers, Qt,
+# std) with blank lines and per-line purpose comments. Preserve the groups;
+# sort only within each one.
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive

@@ -1,0 +1,47 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# LeakSanitizer suppressions for the rawform UI app.
+#
+# The PROVEN floor of leak suppressions is baked into the sanitizer builds
+# (utils/SanitizerSuppressions.cpp, __lsan_default_suppressions), because
+# env-var delivery through IDE run configurations proved fragile. This file
+# is the no-rebuild STAGING overlay for triage, added ON TOP of the baked
+# list when pointed at through the environment of the RUN (not the build):
+#
+#   LSAN_OPTIONS=suppressions=/path/to/rawform/ui/tools/lsan.supp
+#
+# An entry that proves out here graduates into SanitizerSuppressions.cpp.
+#
+# ADMISSION CRITERIA, strict by design (same bar as tsan.supp): a pattern
+# lands here only when every frame of the reported allocation stack sits in
+# third-party code (Qt platform plugins, system libraries) AND the leak is a
+# process-lifetime singleton the library never frees on exit, so it cannot
+# implicate rawform code and cannot grow over a session. A leak that recurs
+# per action (per file, per track, per dialog open) does NOT qualify, however
+# third-party its stack looks: growth means a real bug somewhere.
+
+# libxkbcommon keymap/compose state, allocated once by the Qt Wayland platform
+# plugin (QWaylandDisplay::setupConnection and the text-input compose table
+# the first time a text field takes a key). Held for the life of the process
+# and not released by the Wayland client teardown path; reported at exit.
+# Typing in any text field "triggers" the compose-table half, which is why it
+# first surfaced against the rename dialog's pattern field; the field is
+# incidental. Graduated into SanitizerSuppressions.cpp; kept here so a run
+# with a stale binary still has it.
+leak:libxkbcommon

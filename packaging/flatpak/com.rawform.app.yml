@@ -1,0 +1,278 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# ---------------------------------------------------------------------------
+# Flatpak manifest: the Linux deployment path for immutable distros
+# (SteamOS, Bazzite, Aurora) and everyone else.
+#
+# Build and install locally first (a Flathub submission is outside this
+# manifest's scope). Run flatpak-builder from a SCRATCH
+# directory, never the repo root: the tool drops its state dir, the build
+# dir, and (a git/git-lfs quirk) zero-byte ref-named files into the CWD, and
+# anything of that living inside the repo would also be swept into this
+# manifest's own dir-source copy. The source path below is relative to THIS
+# FILE, so the manifest works from any CWD. --force-clean only wipes the
+# target build dir; it never cleans the state dir or the stray ref files.
+#
+#   # FIRST: the dev-installed desktop/icon must not shadow the export
+#   ui/tools/install_linux_icons.sh --uninstall
+#
+#   flatpak install flathub org.kde.Platform//6.11 org.kde.Sdk//6.11
+#   mkdir -p ~/build/rawform-flatpak && cd ~/build/rawform-flatpak
+#   flatpak-builder --user --install --force-clean \
+#       build-flatpak ~/dev/cpp/rawform/packaging/flatpak/com.rawform.app.yml
+#   flatpak run com.rawform.app
+#
+# Runtime choice: the KDE runtime tracks Qt releases branch-for-branch; 6.11
+# matches the Qt 6.11.1 both dev machines run and is published on Flathub.
+# The project sets no Qt minimum and uses no 6.11-only API, so an older
+# branch would also build if a target ever needed one. The freedesktop base
+# under the KDE runtime supplies the PipeWire client libraries (and the Sdk
+# their headers), ALSA, ogg/vorbis, and the graphics stack.
+#
+# Bundling policy: the audio libraries the engine links that no runtime
+# ships are built as modules below: FLAC, mpg123, libsndfile, libebur128,
+# TagLib, yaml-cpp, FFmpeg. FFmpeg must be a module (not the runtime ffmpeg
+# extension) because rawform LINKS libav* at build time and the extension is
+# runtime-only; the module builds with the same --enable-gpl --enable-version3
+# posture that forces the project's GPLv3 outbound license. Audio-only
+# codec trimming is outside this manifest's scope: it is its own change.
+#
+# Source pinning: git tags for everything with a canonical git host (this
+# also fetches TagLib's utfcpp submodule, which its GitHub tarballs omit);
+# mpg123 has no canonical git, so it is the one tarball, pinned by the
+# checksum BLFS publishes. Flathub-readiness (out of scope) would pin each
+# git source to a commit hash and swap the mpg123 checksum to sha256.
+#
+# Sandbox notes:
+#   - --filesystem=xdg-run/pipewire-0 is a HARD requirement: direct
+#     daemon-socket access is what makes the stream a real graph node
+#     (node.force-rate, driver-format watch). The portal audio path would
+#     not preserve bit-perfect.
+#   - Config files (every store under userConfigDir(): settings.yaml,
+#     playback.yaml, window.yaml, spectrum.yaml, rename_patterns.yaml,
+#     playlist_custom_columns.yaml, columns.rwftp, live_playlist/) resolve
+#     through XDG under the sandbox to ~/.var/app/com.rawform.app/config/...
+#     automatically; no code change. rate_ledger.yaml is CoreAudio-only and
+#     never exists on Linux.
+#   - Music access is host, read-write (the reasons are on the
+#     --filesystem line below): a player that persists arbitrary library
+#     paths needs real read grants beyond xdg-music, and in-place tag and
+#     ReplayGain writes through TagLib need write access.
+# ---------------------------------------------------------------------------
+
+app-id: com.rawform.app
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+command: rawform
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc                        # required for X11 fallback (MIT-SHM)
+  - --device=dri
+  - --filesystem=xdg-run/pipewire-0    # HARD: direct PipeWire node access (bit-perfect)
+  # Broad host access, read-write. The read half: a library
+  # player ingests arbitrary paths (drag and drop from any mount, network
+  # shares) and PERSISTS them in .rwfpl playlists, so portal-scoped
+  # transient grants cannot serve it, and xdg-music alone fails at the first
+  # drag-and-drop from /mnt. The write half: rawform edits tags and
+  # writes ReplayGain values IN PLACE through TagLib; under :ro every tag
+  # operation on the user's own library would fail, and in-place tag
+  # editing is core to this app class, so read-write is the honest model
+  # of what the app actually does. Per-user tightening stays available via
+  # `flatpak override --filesystem=host:ro com.rawform.app`; the
+  # Flathub-review justification is "in-place tag editing on a user-located
+  # library".
+  - --filesystem=host
+
+cleanup:
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /share/man
+  - /share/doc
+  - /share/aclocal
+  - '*.la'
+  - '*.a'
+  # mpg123's command-line players ride along with libmpg123; the app is the
+  # only entry point this Flatpak offers.
+  - /bin/mpg123
+  - /bin/mpg123-id3dump
+  - /bin/mpg123-strip
+  - /bin/out123
+
+modules:
+  # Build order is dependency order: FLAC and mpg123 before libsndfile so its
+  # configure finds them in /app rather than silently dropping formats.
+  #
+  # Every cmake module pins -DCMAKE_INSTALL_LIBDIR=lib: left alone,
+  # GNUInstallDirs decides lib vs lib64 heuristically from the SDK image,
+  # and a 2026 SDK snapshot flipped the answer to lib64, which is on
+  # neither the build sandbox's PKG_CONFIG_PATH nor the runtime's
+  # LD_LIBRARY_PATH (first observed as release CI failing to find
+  # libebur128.pc at rawform configure time, with the SDK's own /usr
+  # copies of FLAC and libsndfile silently shadowing the bundled ones).
+  # Pinning removes the heuristic from every snapshot, past and future;
+  # mpg123 (autotools) and FFmpeg (own configure) default to lib by
+  # themselves.
+  - name: flac
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_PROGRAMS=OFF
+      - -DBUILD_EXAMPLES=OFF
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_DOCS=OFF
+      - -DINSTALL_MANPAGES=OFF
+    sources:
+      - type: git
+        url: https://github.com/xiph/flac.git
+        tag: '1.5.0'
+
+  - name: mpg123
+    buildsystem: autotools
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://downloads.sourceforge.net/mpg123/mpg123-1.33.6.tar.bz2
+        sha256: 929a7c18ba662b8927aed4de229ad9ae8ab2b4806dd0f30b90113eb1b4e2195a
+
+  - name: libsndfile
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_PROGRAMS=OFF
+      - -DBUILD_EXAMPLES=OFF
+      - -DBUILD_TESTING=OFF
+      - -DENABLE_EXTERNAL_LIBS=ON      # ogg/vorbis from the runtime, FLAC from above
+      - -DENABLE_MPEG=OFF              # rawform decodes MPEG via libmpg123 directly;
+                                       # OFF also removes the LAME question entirely
+      # The SDK's CMake 4.x removed compatibility with the pre-3.5
+      # cmake_minimum_required this 2023 release declares; this is CMake's
+      # own documented escape hatch, not a build hack.
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    sources:
+      - type: git
+        url: https://github.com/libsndfile/libsndfile.git
+        tag: '1.2.2'
+
+  - name: libebur128
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      # Same CMake-4 policy floor as libsndfile (same-era release).
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    sources:
+      - type: git
+        url: https://github.com/jiixyj/libebur128.git
+        tag: v1.2.6
+
+  - name: taglib
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_TESTING=OFF
+      - -DBUILD_EXAMPLES=OFF
+    sources:
+      # git (not the GitHub tarball) so the utfcpp submodule comes along;
+      # TagLib 2.x does not build without it.
+      - type: git
+        url: https://github.com/taglib/taglib.git
+        tag: v2.1
+
+  - name: yaml-cpp
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DYAML_BUILD_SHARED_LIBS=ON
+      - -DYAML_CPP_BUILD_TESTS=OFF
+      - -DYAML_CPP_BUILD_TOOLS=OFF
+      # Same CMake-4 policy floor as libsndfile (same-era release).
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    sources:
+      - type: git
+        url: https://github.com/jbeder/yaml-cpp.git
+        tag: '0.8.0'
+      # The SDK's GCC 15 no longer includes <cstdint> transitively through
+      # the standard headers, and 0.8.0 predates that (uint16_t in
+      # emitterutils.cpp with no explicit include; upstream fixed it after
+      # 0.8.0 without a release). Blanket-inserting the include into every
+      # TU is deliberately complete: an explicit <cstdint> is a no-op where
+      # it was not needed, and no sibling file can fail the same way in a
+      # later build.
+      - type: shell
+        commands:
+          - sed -i '1i\#include <cstdint>' src/*.cpp
+
+  - name: ffmpeg
+    # buildsystem simple: FFmpeg's configure rejects unknown flags, so the
+    # autotools buildsystem's extra standard arguments would fail it.
+    buildsystem: simple
+    build-commands:
+      - ./configure --prefix=/app --enable-gpl --enable-version3
+        --enable-shared --disable-static --disable-programs --disable-doc
+      - make -j ${FLATPAK_BUILDER_N_JOBS}
+      - make install
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n8.0
+
+  - name: rawform
+    buildsystem: cmake-ninja
+    subdir: ui
+    builddir: true
+    # The project defines no CMake install rules (dev builds run in place),
+    # and CMake generates NO install target at all in that case (ninja errors
+    # on the unknown name), so the install step is skipped outright and every
+    # artifact is placed by hand below: the binary, and the desktop/icon/
+    # metainfo trio flatpak-builder exports (the desktop file's Exec is
+    # rewritten by the exporter; the icon theme name matches the app id by
+    # construction). A real install(TARGETS) rule in ui/CMakeLists.txt is the
+    # Flathub-readiness alternative and outside this manifest's scope.
+    no-make-install: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    post-install:
+      # The audio subtree is added EXCLUDE_FROM_ALL, so the default build
+      # only compiles what the GUI links; the CLI must be named explicitly.
+      # Shipping it gives the diagnostics suite inside the exact environment
+      # the app runs in:
+      #   flatpak run --command=rawform_audio_cli com.rawform.app rates
+      - ninja rawform_audio_cli
+      - install -Dm755 rawform /app/bin/rawform
+      - install -Dm755 rawform_audio/rawform_audio_cli
+        /app/bin/rawform_audio_cli
+      - install -Dm644 ../../packaging/com.rawform.app.desktop
+        /app/share/applications/com.rawform.app.desktop
+      - install -Dm644 ../Sources/icons/app/rawform.svg
+        /app/share/icons/hicolor/scalable/apps/com.rawform.app.svg
+      - install -Dm644 ../../packaging/com.rawform.app.metainfo.xml
+        /app/share/metainfo/com.rawform.app.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        # Keep the copy honest: no VCS internals, no in-repo builder debris
+        # from runs predating the scratch-dir instruction, no IDE build
+        # trees. (skip takes literal paths; add entries if new build dirs
+        # appear.)
+        skip:
+          - .git
+          - .flatpak-builder
+          - build-flatpak
+          - audio/cmake-build-debug
+          - audio/cmake-build-release
+          - ui/cmake-build-debug
+          - ui/cmake-build-release

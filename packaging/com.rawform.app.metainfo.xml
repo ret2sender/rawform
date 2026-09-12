@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This file is part of rawform.
+  Copyright (C) 2026 Etienne Fleurant
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  AppStream metainfo. Required for Flathub (outside the manifest's scope) and
+  consumed by software centers; the Flatpak manifest installs it and
+  flatpak-builder's appstream compose validates it on every build.
+  metadata_license covers THIS FILE's content (CC0 so catalogs can embed it);
+  project_license is the app's own GPLv3, forced outbound by the GPL/v3
+  FFmpeg configuration.
+-->
+<component type="desktop-application">
+  <id>com.rawform.app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>rawform</name>
+  <summary>Fast, keyboard-friendly audio player</summary>
+  <description>
+    <p>
+      rawform is a foobar2000-inspired desktop audio player. Native reference
+      decoders (libsndfile, libFLAC, libmpg123) come first, with FFmpeg as the
+      long-tail fallback; audio flows as interleaved 32-bit float, and the
+      output device is switched to the source sample rate by default for
+      bit-perfect playback, with the published outcome always reporting what
+      the hardware is actually doing.
+    </p>
+    <p>
+      Features include gapless playback, tabbed playlists with per-tab
+      persistence, tag editing via TagLib, ReplayGain scanning and playback
+      with clip prevention, a spectrum display, output device selection, and
+      honest bit-perfect reporting down to the driver's realized format on
+      PipeWire.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.rawform.app.desktop</launchable>
+  <url type="homepage">https://github.com/ret2sender/rawform</url>
+  <url type="bugtracker">https://github.com/ret2sender/rawform/issues</url>
+  <developer id="io.github.ret2sender">
+    <name>Etienne Fleurant</name>
+  </developer>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <!--
+    Screenshot URLs must be reachable by catalog builders, so they point at
+    raw.githubusercontent.com rather than the repository tree. The path is
+    pinned to the v1.0.0 tag, not main, so renaming or replacing the image
+    later can never break metadata that catalogs have already ingested; a
+    future release that wants a new screenshot updates the URL and the tag
+    together.
+  -->
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/ret2sender/rawform/v1.0.0/docs/images/rawform_interface_screenshot.png</image>
+      <caption>Main window with tabbed playlists, album art, and metadata panel</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="1.0.0" date="2026-09-02">
+      <description>
+        <p>Initial release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

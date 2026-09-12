@@ -1,0 +1,71 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# ThreadSanitizer suppressions for the rawform UI app.
+#
+# This file is the no-rebuild STAGING area for triage: the proven floor is
+# baked into the binary (ui/Sources/utils/SanitizerSuppressions.cpp), and
+# anything here is ADDED on top of it for the run it is handed to. Deliver it
+# from a terminal, not an IDE run configuration (CLion re-quotes values with
+# '=' or ':' and the runtime then ignores them silently); options are
+# comma-separated:
+#
+#   TSAN_OPTIONS=suppressions=/path/to/rawform/ui/Sources/tools/tsan.supp \
+#       ./rawform &> ~/tsan.txt
+#
+# ADMISSION CRITERIA, strict by design: a pattern lands here only when a
+# report's BOTH racing stacks sit entirely in third-party frames (Qt, system
+# libraries), so it cannot implicate rawform code. Provenance sections
+# (allocation site, thread-creation site) naming rawform frames do NOT count
+# as implication: they say who started the work, not who raced. Anything with
+# a rawform frame in a racing stack must NOT be suppressed; it is ours to fix.
+# Third-party is judged by AUTHORSHIP, not by which binary the frame lives in:
+# code Qt's build tooling generates into the rawform executable (qmlcachegen's
+# module loader) is Qt's, and a pattern anchored on the generated file name
+# cannot reach a hand-written rawform frame.
+#
+# Context: the Qt frameworks in use are the prebuilt Online Installer
+# binaries, which are NOT TSan-instrumented. The runtime therefore cannot see
+# all synchronization Qt establishes internally, and some of Qt's own
+# lifecycle choreography reports as racy regardless (partial-instrumentation
+# blindness; the same mechanism class the sanitizer-profile note in
+# audio/CMakeLists.txt describes).
+
+# QtConcurrent ThreadEngine / IterateKernel self-deletion vs late pool-thread
+# probes (shouldStartThread on a kernel being destroyed in
+# asynchronousFinish). Observed at app exit on macOS/AppleClang with the
+# MetadataReloader's revalidation map in flight; both racing stacks are
+# QtConcurrent-internal. Any rawform-side QtConcurrent misuse would surface
+# with rawform frames in a racing stack and would NOT match this pattern
+# alone; keep it scoped to the QtConcurrent namespace.
+race:QtConcurrent::
+
+# qmlcachegen's generated module loader (rawform_qmlcache_loader.cpp): the
+# Q_GLOBAL_STATIC Registry QHash of compiled QML units, freed by the atexit
+# handler on the main thread, against a read of the same hash by the QML type
+# loader thread (QQmlMetaType::findCachedCompilationUnit, on a QThread the
+# QML engine started). Reported three times per exit, one per heap field the
+# destructor frees. The thread is joined in ~QQmlEngine, long before main()
+# returns; the join is QThread::wait, a futex-based QMutex/QWaitCondition on
+# Linux, invisible to the runtime with the uninstrumented Qt binaries, so the
+# real happens-before never reaches TSan. Both racing stacks are the
+# generated TU plus libQt6Qml; called_from_lib does not cover it because the
+# accesses are issued from the (instrumented) generated code, not from inside
+# the library. Linux/GCC only; the macOS runtime sees the join. Baked into
+# SanitizerSuppressions.cpp once the macOS run confirmed it absent there.
+race:rawform_qmlcache_loader.cpp

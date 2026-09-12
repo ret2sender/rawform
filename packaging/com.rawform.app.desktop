@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=rawform
+GenericName=Audio Player
+Comment=Fast, keyboard-friendly audio player
+Exec=rawform %F
+Icon=com.rawform.app
+Terminal=false
+Categories=AudioVideo;Audio;Player;Qt;
+SingleMainWindow=true

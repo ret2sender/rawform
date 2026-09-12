@@ -1,0 +1,264 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# ---------------------------------------------------------------------------
+# Release: build the two distribution artifacts and attach them to a DRAFT
+# GitHub Release. Triggered by pushing a version tag (v*); nothing else
+# fires it, so the tag push is the deliberate release action.
+#
+# Job design notes:
+#   - The macOS job is the CI macos recipe plus `make BUILD_TYPE=Release
+#     dmg`. This is the one CI exercise of the Makefile path (CI configures
+#     CMake directly): QT_PREFIX resolves through `brew --prefix qt`, gated
+#     on Qt6Config.cmake actually existing there, and macdeploy.sh finds
+#     macdeployqt under the same prefix. macdeploy's final
+#     outside-the-bundle report is the pass criterion for the image, not
+#     any exit code; it prints in the build step's log and must be read
+#     there, because a dylib resolving into /opt/homebrew on the runner
+#     would be missing on a user's machine.
+#   - The Linux job runs plain flatpak-builder on the Ubuntu host rather
+#     than the flatpak-github-actions builder action: fewer third-party
+#     moving parts, and the steps mirror the local BANCHAN recipe exactly,
+#     so the job doubles as documentation. The host distro is irrelevant to
+#     the artifact: everything builds against org.kde.Platform//6.11 inside
+#     the Flatpak sandbox, and the bundle is distro-agnostic by
+#     construction (x86_64 only, matching the runner; the release notes
+#     say so rather than implying otherwise).
+#   - flatpak-builder runs from a scratch directory outside the workspace,
+#     for the same reason the manifest header mandates it locally: the tool
+#     drops state and stray ref-named files into the CWD, and the
+#     manifest's own dir source would sweep repo-root debris into the app
+#     copy. The state directory is pinned with --state-dir so it can be
+#     cached across runs; the FFmpeg module alone makes the cold build tens
+#     of minutes, and the cache (keyed on the manifest hash, since only a
+#     manifest change invalidates module builds) collapses reruns.
+#   - The publish step creates the release as a DRAFT, deliberately: the
+#     assets get inspected by hand, and publishing is a conscious click
+#     rather than an automation side effect. The body comes from the
+#     CHANGELOG's section for the current version, never from
+#     auto-generated commit notes (the changelog is the release narrative;
+#     commit history is not).
+#   - Plain `gh release create` over a marketplace release action: less
+#     third-party surface, and the runner ships gh preinstalled.
+#
+# Dry-run protocol: push a throwaway pre-release tag (e.g. vX.Y.Z-rc1) to
+# exercise the whole workflow end to end, inspect the draft's assets, then
+# delete both the tag and the draft. Artifact names derive from
+# ui/VERSION.txt, not the tag, so a dry run on an rc tag still emits files
+# named after the release version; fine for something being thrown away.
+# `gh release create` fails if a release for the tag already exists, so
+# delete the previous draft before re-running a failed publish on the same
+# tag.
+# ---------------------------------------------------------------------------
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Required to create the release and upload its assets.
+permissions:
+  contents: write
+
+jobs:
+  macos-dmg:
+    name: macOS dmg (arm64)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Same dependency set as the CI macos job. FFmpeg is included on
+      # purpose: the distributed build ships the long-tail fallback.
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja pkg-config qt \
+            libsndfile flac mpg123 libebur128 taglib yaml-cpp ffmpeg
+          cmake --version
+
+      # The Makefile resolves QT_PREFIX from Homebrew and forwards it to
+      # both CMake and macdeploy.sh. macdeploy's outside-the-bundle report
+      # prints at the end of this step's log; READ IT on the first run.
+      - name: Build release dmg
+        run: make -j"$(sysctl -n hw.ncpu)" BUILD_TYPE=Release dmg
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp build/app-release/rawform-*-macos-*.dmg dist/
+          ls -l dist
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  linux-flatpak:
+    name: Linux Flatpak bundle (x86_64)
+    runs-on: ubuntu-latest
+    # Cold builds compile FFmpeg from source inside the sandbox; warm runs
+    # (state cache hit) finish in a fraction of this.
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak-builder --version
+
+      - name: Add Flathub and install runtime
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub \
+            org.kde.Platform//6.11 org.kde.Sdk//6.11
+
+      # Restore and save are split so the state is saved EVEN WHEN THE JOB
+      # FAILS: a plain actions/cache only saves on success, which during
+      # workflow debugging would throw away the committed module stages
+      # (FFmpeg above all) on every failing iteration. The run id in the
+      # key keeps each save unique (cache keys are immutable); restore
+      # matches on the manifest-hash prefix, so the newest state for the
+      # current manifest wins, falling back to any older state (ccache,
+      # downloads) after a manifest edit.
+      - name: Restore flatpak-builder state
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.flatpak-builder-state
+          key: flatpak-state-${{ hashFiles('packaging/flatpak/com.rawform.app.yml') }}-${{ github.run_id }}
+          restore-keys: |
+            flatpak-state-${{ hashFiles('packaging/flatpak/com.rawform.app.yml') }}-
+            flatpak-state-
+
+      # Scratch directory outside the workspace, per the manifest header.
+      # --disable-rofiles-fuse avoids depending on FUSE inside the hosted
+      # runner; it only trades away a commit-time optimization. The build's
+      # own appstream compose validates the metainfo, the CI half of the
+      # local appstreamcli check.
+      - name: Build Flatpak
+        run: |
+          SCRATCH="$RUNNER_TEMP/flatpak-scratch"
+          mkdir -p "$SCRATCH"
+          cd "$SCRATCH"
+          flatpak-builder --user --force-clean --ccache \
+            --disable-rofiles-fuse \
+            --state-dir="$HOME/.flatpak-builder-state" \
+            --repo="$SCRATCH/repo" \
+            build-flatpak \
+            "$GITHUB_WORKSPACE/packaging/flatpak/com.rawform.app.yml"
+
+      # The appdir (/app inside the sandbox) is the build-flatpak directory
+      # in the scratch dir; on failure, inventory it so the log answers
+      # "what did the modules actually install, and where" without a
+      # rerun. The pkgconfig and lib64 listings exist to catch install
+      # destinations drifting off PKG_CONFIG_PATH.
+      - name: Inventory appdir (failure only)
+        if: failure()
+        run: |
+          APPDIR="$RUNNER_TEMP/flatpak-scratch/build-flatpak"
+          if [ ! -d "$APPDIR/files" ]; then
+            echo "no appdir at $APPDIR; failure predates the first module"
+            exit 0
+          fi
+          echo "== top-level layout =="
+          ls -la "$APPDIR/files"
+          echo "== lib and lib64 =="
+          ls -la "$APPDIR/files/lib"   2>/dev/null || echo "(no files/lib)"
+          ls -la "$APPDIR/files/lib64" 2>/dev/null || echo "(no files/lib64)"
+          echo "== every pkgconfig directory =="
+          find "$APPDIR/files" -type d -name pkgconfig -exec ls -la {} +
+          echo "== every .pc file =="
+          find "$APPDIR/files" -name '*.pc' | sort
+          echo "== anything ebur128 =="
+          find "$APPDIR/files" -iname '*ebur128*' | sort
+          echo "== every cmake package config =="
+          find "$APPDIR/files" -type d -name cmake | sort
+
+      - name: Save flatpak-builder state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.flatpak-builder-state
+          key: flatpak-state-${{ hashFiles('packaging/flatpak/com.rawform.app.yml') }}-${{ github.run_id }}
+
+      # --runtime-repo stamps the bundle with where to fetch
+      # org.kde.Platform from, so `flatpak install <bundle>` on a machine
+      # without the runtime offers to pull it automatically.
+      - name: Emit bundle
+        run: |
+          VERSION="$(tr -d '[:space:]' < ui/VERSION.txt)"
+          mkdir -p dist
+          flatpak build-bundle \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            "$RUNNER_TEMP/flatpak-scratch/repo" \
+            "dist/rawform-$VERSION-x86_64.flatpak" \
+            com.rawform.app
+          ls -l dist
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    runs-on: ubuntu-latest
+    needs: [macos-dmg, linux-flatpak]
+    timeout-minutes: 15
+    steps:
+      # Needed for CHANGELOG.md and ui/VERSION.txt, not for building.
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum -- * > sha256sums.txt
+          cat sha256sums.txt
+
+      # The body is the CHANGELOG section for the version in
+      # ui/VERSION.txt (not the tag: a dry-run rc tag still gets the
+      # 1.0.0 section). Empty extraction is a hard failure: it means the
+      # CHANGELOG heading and VERSION.txt disagree.
+      - name: Extract release notes from CHANGELOG
+        run: |
+          VERSION="$(tr -d '[:space:]' < ui/VERSION.txt)"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { on = 1; next }
+            on && /^## \[/            { exit }
+            on                        { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "error: no CHANGELOG section found for version $VERSION" >&2
+            exit 1
+          fi
+          echo "--- release notes ---"
+          cat notes.md
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "rawform $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            dist/*

@@ -1,0 +1,19 @@
+# Normalize line endings in the repository to LF; check out as-is on every
+# platform. Added before the first commit so history never records a
+# platform's CRLF drift as a whole-file rewrite.
+* text=auto
+
+# Text formats git might otherwise misclassify
+*.svg text
+*.qml text
+*.sh text eol=lf
+Makefile text eol=lf
+
+# Binary assets: never diffed, never normalized
+*.ttf binary
+*.otf binary
+*.icns binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.dmg binary

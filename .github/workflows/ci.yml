@@ -1,0 +1,238 @@
+# This file is part of rawform.
+# Copyright (C) 2026 Etienne Fleurant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# ---------------------------------------------------------------------------
+# CI: build both platforms and run the full test set, plus one engine-only
+# TSan job and one sink-less engine CLI build.
+#
+# Job design notes:
+#   - The Linux jobs run in a Fedora container, not on the Ubuntu host:
+#     Fedora is the project's primary deployment target, so CI failures
+#     reproduce on the machine that matters. The container is pinned to a
+#     release tag so a Fedora major bump is a deliberate diff, not a
+#     surprise.
+#   - TagLib is built from source, pinned to the same v2.1 tag the Flatpak
+#     manifest bundles as a module, with the same options and the same
+#     git-not-tarball reason (the utfcpp submodule). The build requires
+#     TagLib 2.x WITH its CMake package config (find_package CONFIG mode),
+#     and no runner distro can be trusted to provide that: Ubuntu images
+#     ship 1.x and the Fedora 42 package provides no config file. One
+#     pinned source build removes the distro from the equation.
+#   - Two build trees per platform, matching the Makefile's own split: the
+#     app tree carries the three UI test binaries (-DRAWFORM_BUILD_TESTS=ON;
+#     Qt-Core-only console apps, no display server needed), while the nine
+#     engine tests need a STANDALONE audio/ build. ui/ pulls the engine in
+#     with EXCLUDE_FROM_ALL, so the engine's test targets are configured but
+#     never built by the app's `all` target; the app-tree ctest is therefore
+#     scoped to the UI tests with an anchored -R, and the engine tree runs
+#     the other nine (this is exactly what `make test` does locally).
+#   - CMake: ui/ requires 4.2, newer than any distro repo, so the Linux app
+#     job installs it from PyPI. audio/ only requires 3.20, which Fedora's
+#     own cmake satisfies.
+#   - The app tree's Debug builds compile with -Werror on GCC/Clang/AppleClang,
+#     so the app build steps double as the warning gate; the engine tree
+#     builds with -Wall -Wextra -Wpedantic and no -Werror, so an engine
+#     warning is visible in the log but does not fail the job.
+#   - Codec coverage is split deliberately: the Linux jobs build native-only
+#     (no FFmpeg dev packages; Fedora's ffmpeg-free would make the fallback
+#     coverage depend on which codecs that build enables), while the macOS
+#     job installs full FFmpeg from Homebrew and exercises the fallback
+#     cascade and the conformance suite's FFmpeg cases. Between the two
+#     platforms both build configurations stay green.
+#   - The qmllint step is non-blocking: it is a log to compare against the
+#     previous run. The wiring files disable the unqualified-access category
+#     for the context properties they reach (see the lint section of
+#     ui/CMakeLists.txt), so the expected count is zero; promoting the step
+#     to blocking needs a run with zero warnings on record.
+#   - App-level GUI-session sanitizer runs stay manual (they need a
+#     compositor and a human driving); the TSan job here covers the engine,
+#     whose concurrency soaks are exactly what the audio CMake profile was
+#     built for and need no display.
+# ---------------------------------------------------------------------------
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (Fedora, native decoders)
+    runs-on: ubuntu-latest
+    container: fedora:42
+    timeout-minutes: 60
+    steps:
+      # Dependencies first: the checkout action itself wants git present.
+      - name: Install toolchain and dependencies
+        run: |
+          dnf install -y \
+            git-core gcc-c++ ninja-build pkgconf python3-pip \
+            qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
+            libsndfile-devel flac-devel mpg123-devel libebur128-devel \
+            yaml-cpp-devel pipewire-devel zlib-devel
+          python3 -m pip install --break-system-packages "cmake>=4.2"
+          cmake --version
+
+      # Pinned source build, mirroring the Flatpak manifest's taglib module
+      # (same tag, same options; see the header note). Built in /tmp because
+      # the checkout step cleans the workspace directory.
+      - name: Build TagLib 2.x from source
+        run: |
+          git clone --depth 1 --branch v2.1 \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/taglib/taglib.git /tmp/taglib-src
+          cmake -S /tmp/taglib-src -B /tmp/taglib-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_EXAMPLES=OFF
+          cmake --build /tmp/taglib-build
+          cmake --install /tmp/taglib-build
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure app
+        run: >
+          cmake -S ui -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DRAWFORM_BUILD_TESTS=ON
+
+      - name: Build app
+        run: cmake --build build
+
+      # The engine tests are registered in this tree too but their binaries
+      # are not built here (EXCLUDE_FROM_ALL); they run from the standalone
+      # engine tree below. Scope this run to the three UI tests.
+      - name: UI tests
+        run: >
+          ctest --test-dir build --output-on-failure
+          -R '^(pattern_evaluator|rename_sanitizer|playlist_file)$'
+
+      - name: Configure engine (standalone)
+        run: cmake -S audio -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build engine
+        run: cmake --build build-core
+
+      - name: Engine tests
+        run: ctest --test-dir build-core --output-on-failure
+
+      # Non-blocking: read the log for warnings; any warning is a regression
+      # (see the lint section of ui/CMakeLists.txt and the header note).
+      - name: QML lint (non-blocking)
+        continue-on-error: true
+        run: cmake --build build --target all_qmllint
+
+  macos:
+    name: macOS (FFmpeg fallback enabled)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja pkg-config qt \
+            libsndfile flac mpg123 libebur128 taglib yaml-cpp ffmpeg
+          cmake --version
+
+      - name: Configure app
+        run: >
+          cmake -S ui -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          -DRAWFORM_BUILD_TESTS=ON
+
+      - name: Build app
+        run: cmake --build build
+
+      - name: UI tests
+        run: >
+          ctest --test-dir build --output-on-failure
+          -R '^(pattern_evaluator|rename_sanitizer|playlist_file)$'
+
+      - name: Configure engine (standalone)
+        run: cmake -S audio -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build engine
+        run: cmake --build build-core
+
+      - name: Engine tests
+        run: ctest --test-dir build-core --output-on-failure
+
+  cli-sinkless:
+    name: Engine CLI without a platform sink (Linux)
+    runs-on: ubuntu-latest
+    container: fedora:42
+    timeout-minutes: 30
+    steps:
+      # The engine dependency set WITHOUT pipewire-devel, on purpose: this
+      # job exists to keep the sink-less configuration compiling (the #else
+      # stubs that mirror the real transport functions). There is no CMake
+      # option for it; audio/CMakeLists.txt defines RAWFORM_HAVE_PIPEWIRE=0
+      # whenever pkg-config cannot find libpipewire-0.3, so the absent
+      # package IS the configuration under test.
+      - name: Install toolchain and dependencies
+        run: |
+          dnf install -y \
+            git-core gcc-c++ cmake ninja-build pkgconf \
+            libsndfile-devel flac-devel mpg123-devel libebur128-devel
+          cmake --version
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Fail loudly if a future image ships the PipeWire headers by default:
+      # the configure log must carry the "not found" warning, or this job is
+      # no longer testing what it claims.
+      - name: Configure engine (no PipeWire)
+        run: |
+          cmake -S audio -B build-cli -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure.log
+          grep -q 'libpipewire-0.3 not found' configure.log \
+            || { echo "expected the libpipewire-0.3 not-found warning; is pipewire-devel installed?"; exit 1; }
+
+      - name: Build CLI
+        run: cmake --build build-cli --target rawform_audio_cli
+
+  tsan-engine:
+    name: Engine under TSan (Linux)
+    runs-on: ubuntu-latest
+    container: fedora:42
+    timeout-minutes: 60
+    steps:
+      # Engine-only dependency set; audio/ needs no Qt, TagLib, or yaml-cpp.
+      # pipewire-devel is included so the PipeWire sink compiles under TSan
+      # even though the tests drive injected sinks. Fedora's cmake satisfies
+      # the engine's 3.20 minimum, keeping this job PyPI-free.
+      - name: Install toolchain and dependencies
+        run: |
+          dnf install -y \
+            git-core gcc-c++ cmake ninja-build pkgconf libtsan \
+            libsndfile-devel flac-devel mpg123-devel libebur128-devel \
+            pipewire-devel
+          cmake --version
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure
+        run: >
+          cmake -S audio -B build-tsan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DRAWFORM_SANITIZE=thread
+
+      - name: Build
+        run: cmake --build build-tsan
+
+      - name: Test
+        run: ctest --test-dir build-tsan --output-on-failure

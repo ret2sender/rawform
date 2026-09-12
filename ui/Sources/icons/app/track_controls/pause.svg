@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Transport glyph: pause. Two rounded bars as one two-subpath
+     path, canonicalized to exact mirror symmetry about x=12 after
+     flattening the export's scale matrix (1.007632): y snapped to
+     [1,23], corner radius snapped to 1, stroke normalized to exactly
+     2 (flattened scale made it 2.0153). Subpaths are disjoint, so no
+     fill-rule is needed (multi-ring rule does not apply). -->
+<svg width="24" height="24" version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+ <path d="M 3.9313 1 L 7.9772 1 C 8.5295 1 8.9772 1.4477 8.9772 2 L 8.9772 22 C 8.9772 22.5523 8.5295 23 7.9772 23 L 3.9313 23 C 3.379 23 2.9313 22.5523 2.9313 22 L 2.9313 2 C 2.9313 1.4477 3.379 1 3.9313 1 Z M 20.0687 1 L 16.0228 1 C 15.4705 1 15.0228 1.4477 15.0228 2 L 15.0228 22 C 15.0228 22.5523 15.4705 23 16.0228 23 L 20.0687 23 C 20.621 23 21.0687 22.5523 21.0687 22 L 21.0687 2 C 21.0687 1.4477 20.621 1 20.0687 1 Z" fill="#d9d9d9" stroke="#e2e2e2" stroke-width="2"/>
+</svg>

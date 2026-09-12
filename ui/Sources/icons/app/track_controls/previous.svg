@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Transport glyph: previous. Left-pointing rounded triangle with a
+     stop bar on the leading edge. Flattened from the Inkscape export's
+     nested translate (net +1,+1); bar endpoint snapped 21.9999 to 22.
+     next.svg is generated as this file's exact horizontal mirror about
+     x=12; regenerate BOTH via the mirror rule when editing either. -->
+<svg width="24" height="24" version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+ <path d="M 9.4337 10.6255 C 8.5888 11.3504 8.5888 12.6495 9.4337 13.3745 L 18.9664 21.5532 C 20.1541 22.5722 22 21.7359 22 20.1787 L 22 3.8213 C 22 2.2642 20.1541 1.4278 18.9664 2.4468 Z" fill="#d9d9d9" stroke="#e2e2e2" stroke-width="2"/>
+ <path d="M 2 2 L 2 22" fill="none" stroke="#e2e2e2" stroke-width="2" stroke-linecap="round"/>
+</svg>
