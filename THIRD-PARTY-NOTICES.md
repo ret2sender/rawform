@@ -1,9 +1,9 @@
 # Third-Party Notices
 
 Rawform is distributed as a whole under the **GNU General Public License
-v3.0 or later** (see `LICENSE`). This applies to both components of the
-repository: the Qt / QML application (`ui/`) and the standalone audio engine
-(`audio/`).
+v3.0 or later** (see [`LICENSE`](LICENSE)). This applies to both components
+of the repository: the Qt / QML application (`ui/`) and the standalone audio
+engine (`audio/`).
 
 This file lists the third-party components bundled with or linked by the
 project, grouped by which component depends on them, followed by a section
@@ -297,4 +297,4 @@ Notes:
 - MPL-1.1 - https://www.mozilla.org/en-US/MPL/1.1/
 - OFL-1.1 - https://openfontlicense.org
 - GPL-2.0-or-later - https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
-- GPL-3.0 - see `LICENSE`
+- GPL-3.0 - see [`LICENSE`](LICENSE)

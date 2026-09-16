@@ -364,7 +364,6 @@ correct name and icon for the running app; `--uninstall` removes them.
 ## Licensing
 
 rawform is licensed under the **GNU General Public License v3.0 or later**
-(`LICENSE`). Third-party components bundled with or linked by the project,
-including the FFmpeg libraries and their codec dependencies that ship inside
-packaged builds, are listed in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+[`LICENSE`](LICENSE). Third-party components bundled with or linked by the
+project, including the FFmpeg libraries and their codec dependencies that
+ship inside packaged builds, are listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
