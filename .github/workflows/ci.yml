@@ -15,10 +15,12 @@
 #   - TagLib is built from source, pinned to the same v2.1 tag the Flatpak
 #     manifest bundles as a module, with the same options and the same
 #     git-not-tarball reason (the utfcpp submodule). The build requires
-#     TagLib 2.x WITH its CMake package config (find_package CONFIG mode),
-#     and no runner distro can be trusted to provide that: Ubuntu images
-#     ship 1.x and the Fedora 42 package provides no config file. One
-#     pinned source build removes the distro from the equation.
+#     TagLib 2.x WITH its CMake package config (find_package CONFIG mode).
+#     Neither runner distro provides that: Ubuntu images and the Fedora 42
+#     container both package TagLib 1.13, which has no config file at all.
+#     Fedora 44 ships 2.x, but the pinned source build stays regardless:
+#     it removes the distro from the equation and keeps CI on the exact
+#     version the Flatpak ships.
 #   - Two build trees per platform, matching the Makefile's own split: the
 #     app tree carries the three UI test binaries (-DRAWFORM_BUILD_TESTS=ON;
 #     Qt-Core-only console apps, no display server needed), while the nine

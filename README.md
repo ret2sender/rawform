@@ -140,11 +140,12 @@ sudo dnf install cmake gcc-c++ pkgconf libsndfile-devel flac-devel \
     mpg123-devel libebur128-devel yaml-cpp-devel pipewire-devel zlib-devel
 ```
 
-TagLib needs care: the build requires 2.x together with its CMake package
-config files (`find_package(TagLib 2.0 CONFIG)`), and distro packages do
-not reliably provide that combination; Fedora 42's `taglib-devel` does
-not. The reliable path is a pinned source build, the same module the
-Flatpak bundles:
+TagLib must be 2.x, found through its CMake package config
+(`find_package(TagLib 2.0 CONFIG)`). Fedora 44 and later ship a 2.x
+`taglib-devel` that satisfies this; add it to the `dnf install` line
+above and skip the rest of this section. Fedora 43 and earlier package
+TagLib 1.13, which does not qualify, so build 2.x from source there,
+pinned to the same tag the Flatpak bundles:
 
 ```sh
 git clone --depth 1 --branch v2.1 --recurse-submodules \
