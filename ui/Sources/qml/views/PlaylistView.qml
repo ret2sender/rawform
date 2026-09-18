@@ -242,6 +242,67 @@ Item {
         }
     }
 
+    // Viewport re-anchoring across a ROW REMOVAL batch. TableView's own
+    // rowsRemoved rebuild keeps the top row's pixel position and only clamps
+    // its index to the new count, so when rows ABOVE the viewport vanish the
+    // loaded rows stay drawn where the old rows were, with a phantom gap above
+    // them, and contentHeight (the bottom of the loaded table plus the rows
+    // still below it) stays at the old extent: the scrollbar keeps its 5k-row
+    // size after 4k deletions until a page-sized scroll makes the view
+    // recompute its top-left. positionViewAtRow is the one public call that
+    // forces that recomputation (row * rowHeight, exact for fixed-height
+    // rows), so the anchor is the top visible row carried through the batch:
+    //   - a run entirely above it shifts it up by the run length,
+    //   - a run covering it lands it on the row that took its place (first),
+    //   - a run below it leaves it alone.
+    // The runs arrive bottom-up in current coordinates, so the mapping
+    // composes run by run. Applied ONCE, synchronously, on the batch-end
+    // signal, before the deferred rebuild: per-run positioning would take
+    // the adjacent-row synchronous edge-load path for every one-row run
+    // (thousands of delegate loads on a sparse selection), and a Qt.callLater
+    // can land AFTER the rebuild, where the anchor may coincide with the
+    // clamped top row and positionViewAtRow becomes a no-op on the stale
+    // geometry. The sub-row pixel offset makes the reposition exact rather
+    // than row-snapped. An unmoved anchor (all runs at or below the viewport)
+    // is left to Qt: that rebuild is correct, and Flickable clamps contentY
+    // when the content shrinks under the viewport.
+    property int _removalAnchorRow: -1
+    property real _removalAnchorOffset: 0
+    Connections {
+        target: root.model
+        function onBulkRemovalStarted() {
+            var top = tableView.topRow
+            if (top < 0) {
+                root._removalAnchorRow = -1
+                return
+            }
+            root._removalAnchorRow = top
+            root._removalAnchorOffset =
+                tableView.contentY - top * root._rowHeight
+        }
+        function onRowsRemoved(parent, first, last) {
+            var a = root._removalAnchorRow
+            if (a < 0)
+                return
+            if (last < a)
+                root._removalAnchorRow = a - (last - first + 1)
+            else if (first <= a)
+                root._removalAnchorRow = first
+        }
+        function onBulkRemovalFinished() {
+            var a = root._removalAnchorRow
+            root._removalAnchorRow = -1
+            if (a < 0 || !root.model)
+                return
+            var n = root.model.rowCount()
+            if (n <= 0 || a === tableView.topRow)
+                return
+            centerAnim.stop()
+            tableView.positionViewAtRow(Math.min(a, n - 1), TableView.AlignTop,
+                                        root._removalAnchorOffset)
+        }
+    }
+
     // Resolve a pending activation (see _pendingActivateRow) against the
     // controller's verdict. trackChanged with the cursor on the attempted row is
     // the CONFIRMED start (the optimistic cursor set in playAt emits playingChanged

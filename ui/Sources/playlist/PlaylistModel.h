@@ -196,15 +196,17 @@ public:
     /// Remove the tracks at the given row indices (any order; out-of-range and
     /// duplicates ignored). Deletes in contiguous runs bottom-up via
     /// begin/endRemoveRows, so the selection model remaps; a removal, never a
-    /// reset.
+    /// reset. The whole run sequence is bracketed by bulkRemovalStarted /
+    /// bulkRemovalFinished (see the signals).
     ///
     /// Not named removeRows(): clashes with QAbstractItemModel's invokable
     /// removeRows(int,int,QModelIndex) (same trap as moveVisualColumn).
     Q_INVOKABLE void removeTracks(const QVariantList& rows);
 
     /// Remove every row flagged unavailable (the "remove missing tracks"
-    /// cleanup). Deletes in contiguous runs like removeTracks(). Returns the
-    /// number removed (0 if none).
+    /// cleanup). Deletes in contiguous runs like removeTracks(), with the same
+    /// bulkRemovalStarted / bulkRemovalFinished bracket. Returns the number
+    /// removed (0 if none).
     Q_INVOKABLE int removeUnavailableTracks();
 
     /// Move the contiguous run of @p count tracks starting at @p first to the
@@ -476,6 +478,17 @@ signals:
     /// its _layoutRevision so columnAlignment() is re-read. The interactive
     /// reorder path bumps _layoutRevision itself and does not rely on this.
     void columnLayoutChanged();
+
+    /// Bracket around a bulk row removal (removeTracks, removeUnavailableTracks).
+    /// A removal is a sequence of begin/endRemoveRows runs, so per-run
+    /// rowsRemoved cannot tell a view where the batch ends; a view that has to
+    /// re-anchor its viewport once, synchronously, after the LAST run (before
+    /// TableView's deferred rebuild, which keeps the top row's pixel position
+    /// and only clamps its index when rows above the viewport vanish) listens
+    /// here. Emitted only when at least one run executes; finished is emitted
+    /// after the final endRemoveRows.
+    void bulkRemovalStarted();
+    void bulkRemovalFinished();
 
 private:
     /// A cache-busting tag for @p row's album art (mtime + size, the staleness

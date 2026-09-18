@@ -534,7 +534,9 @@ void PlaylistModel::removeTracks(const QVariantList& rows) {
     idx.erase(dup.begin(), dup.end());
 
     // Delete contiguous runs from the bottom up so lower indices (including
-    // those still queued in idx) stay valid as we go.
+    // those still queued in idx) stay valid as we go. The bracket lets the
+    // view re-anchor once for the whole batch (see the signal's note).
+    emit bulkRemovalStarted();
     int i = static_cast<int>(idx.size()) - 1;
     while (i >= 0) {
         const int last = idx.at(i);
@@ -548,6 +550,7 @@ void PlaylistModel::removeTracks(const QVariantList& rows) {
         endRemoveRows();
         --i;
     }
+    emit bulkRemovalFinished();
 }
 
 int PlaylistModel::removeUnavailableTracks() {
@@ -563,8 +566,9 @@ int PlaylistModel::removeUnavailableTracks() {
         return 0;
 
     const int removed = static_cast<int>(idx.size());
-    // Same bottom-up contiguous-run deletion as removeTracks(), so the bound
-    // selection model remaps rather than resets.
+    // Same bottom-up contiguous-run deletion (and bracket) as removeTracks(),
+    // so the bound selection model remaps rather than resets.
+    emit bulkRemovalStarted();
     int i = removed - 1;
     while (i >= 0) {
         const int last = idx.at(i);
@@ -578,6 +582,7 @@ int PlaylistModel::removeUnavailableTracks() {
         endRemoveRows();
         --i;
     }
+    emit bulkRemovalFinished();
     return removed;
 }
 
