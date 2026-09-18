@@ -72,15 +72,14 @@ MenuItem {
         text: root.text
     }
 
-    arrow: Image {
-        // Anchored, not fixed-coordinate: the svg keeps its intrinsic 12 px
-        // size under Image.Pad, and the anchors hold it centered at any item
-        // height and flush at any popup width.
+    arrow: AppIcon {
+        // Anchored, not fixed-coordinate: AppIcon pins the glyph to 12
+        // logical px on every screen, and the anchors hold it centered at
+        // any item height and flush at any popup width.
         anchors.right: parent.right
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        asynchronous: true
-        fillMode: Image.Pad
+        iconSize: 12
         source: "../../icons/app/dialogs/menu_arrow.svg"
         visible: root.subMenu
     }

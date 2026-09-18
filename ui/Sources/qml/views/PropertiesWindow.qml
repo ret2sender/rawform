@@ -765,6 +765,7 @@ Window {
                     enabled: !propertiesWindow._applying
                     implicitHeight: 22
                     implicitWidth: 22
+                    padding: 1  // 20 x 20 content area (Basic/Fusion default is 6)
 
                     onClicked: propertiesWindow._cancel()
 
@@ -774,10 +775,9 @@ Window {
                         radius: 4
                     }
 
-                    contentItem: Image {
+                    contentItem: AppIcon {
                         id: svgCloseButtonX
-                        asynchronous: true
-                        fillMode: Image.Pad
+                        iconSize: 20
                         source: "../../icons/app/dialogs/tool_dialog_close_x.svg"
                     }
 

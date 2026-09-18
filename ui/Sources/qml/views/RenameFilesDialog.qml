@@ -331,31 +331,35 @@ Window {
                     font.weight: Font.Bold
                 }
                 Button {
-                    id: closeX
+                    id: closeButtonX
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
+                    enabled: !renameDialog._applying
                     implicitHeight: 22
                     implicitWidth: 22
-                    enabled: !renameDialog._applying
+                    padding: 1  // 20 x 20 content area (Basic/Fusion default is 6)
+
                     onClicked: renameDialog.close()
+
                     background: Rectangle {
-                        color: closeX.enabled && closeX.hovered
+                        color: closeButtonX.enabled && closeButtonX.hovered
                             ? Theme.dangerSurface : "transparent"
                         radius: 4
                     }
-                    contentItem: Image {
-                        id: closeXIcon
-                        asynchronous: true
-                        fillMode: Image.Pad
+
+                    contentItem: AppIcon {
+                        id: svgCloseButtonX
+                        iconSize: 20
                         source: "../../icons/app/dialogs/tool_dialog_close_x.svg"
                     }
+
                     MultiEffect {
-                        anchors.fill: closeXIcon
-                        source: closeXIcon
+                        anchors.fill: svgCloseButtonX
+                        source: svgCloseButtonX
                         colorization: 1.0
-                        colorizationColor: !closeX.enabled ? Theme.textDisabled
-                            : closeX.hovered ? Theme.danger : Theme.textInactive
+                        colorizationColor: !closeButtonX.enabled ? Theme.textDisabled
+                            : closeButtonX.hovered ? Theme.danger : Theme.textInactive
                     }
                 }
             }
