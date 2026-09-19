@@ -755,39 +755,13 @@ Window {
                     font.pixelSize: 13
                     font.weight: Font.Bold
                 }
-                Button {
-                    id: closeButtonX
+
+                ToolDialogCloseButton {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
-                    // Same gate as the footer Cancel: closing destroys the
-                    // instance (and its editors), so it must not fire mid-write.
                     enabled: !propertiesWindow._applying
-                    implicitHeight: 22
-                    implicitWidth: 22
-                    padding: 1  // 20 x 20 content area (Basic/Fusion default is 6)
-
                     onClicked: propertiesWindow._cancel()
-
-                    background: Rectangle {
-                        color: closeButtonX.enabled && closeButtonX.hovered
-                            ? Theme.dangerSurface : "transparent"
-                        radius: 4
-                    }
-
-                    contentItem: AppIcon {
-                        id: svgCloseButtonX
-                        iconSize: 20
-                        source: "../../icons/app/dialogs/tool_dialog_close_x.svg"
-                    }
-
-                    MultiEffect {
-                        anchors.fill: svgCloseButtonX
-                        source: svgCloseButtonX
-                        colorization: 1.0
-                        colorizationColor: !closeButtonX.enabled ? Theme.textDisabled
-                            : closeButtonX.hovered ? Theme.danger : Theme.textInactive
-                    }
                 }
             }
 

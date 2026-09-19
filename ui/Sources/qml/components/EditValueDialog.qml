@@ -18,11 +18,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
+// Bound component behavior: nested components (delegates, handles, effects)
+// resolve outer document ids statically, so qmllint checks them and the
+// compiler can bind them ahead of time. The trade-off is that views cannot
+// inject model data by context, so every delegate declares what it consumes
+// as `required property`.
 pragma ComponentBehavior: Bound
 
 import QtQuick
@@ -301,34 +301,10 @@ Item {
                 width: parent.width - 24
             }
 
-            Button {
-                id: closeButtonX
+            ToolDialogCloseButton {
                 anchors.right: parent.right
-                anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
-                implicitHeight: 22
-                implicitWidth: 22
-                padding: 1  // 20 x 20 content area (Basic/Fusion default is 6)
-
                 onClicked: dlg.canceled()
-
-                background: Rectangle {
-                    color: "transparent"
-                }
-
-                contentItem: AppIcon {
-                    id: svgCloseButtonX
-                    iconSize: 20
-                    source: "../../icons/app/dialogs/tool_dialog_close_x.svg"
-                }
-
-                MultiEffect {
-                    anchors.fill: svgCloseButtonX
-                    source: svgCloseButtonX
-                    colorization: 1.0
-                    colorizationColor: !closeButtonX.enabled ? Theme.textDisabled
-                        : closeButtonX.hovered ? Theme.danger : Theme.textInactive
-                }
             }
         }
 

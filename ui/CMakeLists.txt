@@ -391,6 +391,7 @@ qt_add_qml_module(rawform
         Sources/qml/components/ThemedMenuItem.qml
         Sources/qml/components/ThemedSplitView.qml
         Sources/qml/components/TitleBar.qml
+        Sources/qml/components/ToolDialogCloseButton.qml
         Sources/qml/components/VolumeSlider.qml
         Sources/qml/components/WindowResizeGrips.qml
         Sources/qml/components/TitleBarControls.qml
