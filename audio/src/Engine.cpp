@@ -156,8 +156,8 @@ constexpr int           kPollIntervalMs  = 5;  // << ring latency; bounds top-up
 // at most this often while Playing, gated on a steady_clock timestamp checked
 // each loop iteration. Because the loop wakes at least every kPollIntervalMs
 // while Playing, the gate lands within a few ms of target, well inside one tick.
-// 10 Hz is the foobar-ish default for a smooth progress bar; change this one
-// constant to retune.
+// 10 Hz is the default for a smooth progress bar; change this one constant
+// to retune.
 constexpr int kPositionIntervalMs = 100;
 
 // Ring capacity in frames from a target latency, with a floor so a full decode
@@ -413,17 +413,17 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
 
     // ----- gapless policy -------------------------------------------------
     // Read once at construction from RAWFORM_NO_GAPLESS. When false the engine
-    // behaves exactly as if gapless never existed (every natural advance drains then reconfigures).
-    // Engine-thread-only after construction.
+    // behaves exactly as if gapless never existed (every natural advance drains
+    // then reconfigures). Engine-thread-only after construction.
     bool gaplessEnabled = true;
 
     // ----- engine-thread-private playback state -------------------------------
     std::unique_ptr<IDecoder> decoder;       // the producer-logical current; live while Playing/Paused
     std::string               currentPath;   // REMEMBERED across stop (rewind); "" == none
-    std::deque<std::string>   pending;        // the play queue
-    AudioFormat               format{};       // the current track's format (== a stitched track's, by the gate)
-    std::size_t               channels = 0;   // = format.channels, for indexing
-    std::vector<float>        staging;         // producer scratch, one decode block
+    std::deque<std::string>   pending;       // the play queue
+    AudioFormat               format{};      // the current track's format (== a stitched track's, by the gate)
+    std::size_t               channels = 0;  // = format.channels, for indexing
+    std::vector<float>        staging;       // producer scratch, one decode block
 
     // The seam-marker queue. Front is the next audible boundary. Touched
     // only by the engine thread (producer push, run-loop pop).

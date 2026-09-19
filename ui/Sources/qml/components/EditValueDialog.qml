@@ -18,26 +18,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components (delegates, handles, effects)
-// resolve outer document ids statically, so qmllint checks them and the
-// compiler can bind them ahead of time. The trade-off is that views cannot
-// inject model data by context, so every delegate declares what it consumes
-// as `required property`.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Effects
-import com.rawform.app
-
-// =============================================================================
 // EditValueDialog.qml
 //
-// The Edit Value panel for metadata editing,
-// modeled on foobar2000's dialog. It is NOT an OS window: the Properties window
-// hosts it as an in-window overlay (a dim layer plus this centered panel), which
-// keeps it off the backing-store / modal machinery, so a non-modal,
-// multi-instance Properties window never has a modal dialog in its way.
+// The Edit Value panel for metadata editing. It is NOT an OS window: the Properties
+// window hosts it as an in-window overlay (a dim layer plus this centered panel), which
+// keeps it off the backing-store / modal machinery, so a non-modal, multi-instance
+// Properties window never has a modal dialog in its way.
 //
 // It serves BOTH selection sizes: a multi-track selection edits here
 // always, and a single-track selection reaches it through the pane's "Edit"
@@ -46,7 +32,7 @@ import com.rawform.app
 // cleanly: the field is trivially uniform, so the dialog opens on Single Value,
 // and Individual Values is just a one-row grid.
 //
-// Two modes for the field named in @ref fieldKey:
+// Two modes for the field named in `fieldKey`:
 //   - Single Value: one editor, broadcast to every selected track on commit.
 //     Free-text fields (the text scalars, every list field, and all customs;
 //     recognized by the unrestricted validator pattern) get a MULTILINE
@@ -65,7 +51,7 @@ import com.rawform.app
 //     commit back byte-identical (the ListModel stores strings verbatim), and
 //     the pane-level escaped Copy / Paste is the lossless channel.
 // The dialog opens on Single Value when the field is uniform across the selection
-// and on Individual Values when it disagrees (@ref startUniform).
+// and on Individual Values when it disagrees (`startUniform`).
 //
 // On OK the active tab is turned into a per-track value list and emitted via
 // committed(); the host stages it through PropertiesMetadataModel.stageFieldValues
@@ -75,7 +61,13 @@ import com.rawform.app
 //
 // The host sets the data properties, then calls reopen() to (re)seed the internal
 // editable state, then makes the overlay visible.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import com.rawform.app
+
 Item {
     id: dlg
 
@@ -202,7 +194,7 @@ Item {
             cellModel.setProperty(index, "value", value)
     }
 
-    // --- selection helpers ---------------------------------------------------
+    // --- selection helpers -------------------------------------------------
     function _selectedIndices() {
         var out = []
         for (var k in dlg._sel)
@@ -236,7 +228,7 @@ Item {
         dlg._pasteError = ""
     }
 
-    // --- clipboard -----------------------------------------------------------
+    // --- clipboard ---------------------------------------------------------
     function _copy() {
         var idx = dlg._selectedIndices()
         if (idx.length === 0) return
@@ -274,7 +266,7 @@ Item {
     implicitWidth: 560
     implicitHeight: 480
 
-    // ----- panel -------------------------------------------------------------
+    // ----- panel -----------------------------------------------------------
     Rectangle {
         id: panel
         anchors.fill: parent
@@ -437,7 +429,7 @@ Item {
             anchors.bottom: footer.top; anchors.bottomMargin: 10
             anchors.leftMargin: 14; anchors.rightMargin: 14
 
-            // --- Single Value -----------------------------------------------
+            // --- Single Value ----------------------------------------------
             Rectangle {
                 id: singleBox
                 visible: dlg._tab === 0
@@ -530,7 +522,7 @@ Item {
                 font.family: dlg.uiFont; font.pixelSize: 11
             }
 
-            // --- Individual Values ------------------------------------------
+            // --- Individual Values -----------------------------------------
             Item {
                 id: individualBox
                 visible: dlg._tab === 1
@@ -728,7 +720,8 @@ Item {
                                         regularExpression: new RegExp(dlg.validatorPattern)
                                     }
                                     onEditingFinished: {
-                                        // Fires on Enter and on focus-loss (clicking away).
+                                        // Fires on Enter and on focus-loss (clicking
+                                        // away).
                                         if (cell.editing) {
                                             cell.editing = false
                                             dlg._setCell(cell.index, text)

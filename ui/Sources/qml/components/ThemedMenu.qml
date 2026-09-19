@@ -18,6 +18,27 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ThemedMenu.qml
+//
+// The app's popup menu: a QtQuick.Controls Menu restyled to the rawform look
+// and shared by the menu bar, the playlist header and row context menus, and
+// the tool-window footer menus. The background is a frosted slice of the host
+// window: a ShaderEffectSource grabs the pixels of `blurSource` behind the
+// popup, a MultiEffect blurs them and clips them to the rounded rect, and a
+// translucent Theme.surfacePage tint with a 2 px border is drawn sharp on top.
+// The grab region follows the popup on open and on every move or resize.
+//
+// Width is fit-to-content: Qt's Menu never derives a width from its items (its
+// contentItem is a ListView with no implicit width), so `_fitWidth` sums the
+// widest visible item's fitWidth (see ThemedMenuItem) and the menu padding,
+// floored at `menuWidth`. The binding is deliberately blind to `visible` so
+// the popup never resizes across open/close; see the comment on `_fitWidth`.
+//
+// Items default to ThemedMenuItem through `delegate`, so call sites can use
+// plain Action / MenuItem declarations and still get the themed rows.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Effects

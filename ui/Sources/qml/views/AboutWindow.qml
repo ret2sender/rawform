@@ -18,14 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import QtQuick.Window
-import com.rawform.app
-
-
-// =============================================================================
 // AboutWindow.qml
 //
 // The About window, opened from Help > About rawform. A non-modal, frameless
@@ -43,7 +35,14 @@ import com.rawform.app
 // Purely informational: no staged state, no Apply/OK footer. The close
 // button and Escape both simply hide the window, so reopening is cheap and
 // the instance shares MainWindow's lifetime.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Window
+import com.rawform.app
+
 Window {
     id: aboutWindow
 
@@ -78,24 +77,21 @@ Window {
         requestActivate()
     }
 
-    // Escape closes. Window-context (the default), but context alone is NOT
-    // exclusivity: this is a hide()-reused instance, so the Shortcut object
-    // lives forever, and a still-enabled shortcut in a HIDDEN window keeps
-    // participating in Qt's shortcut map. Two enabled matches on one press
-    // are ambiguous, and Qt then fires neither's onActivated (it rotates
-    // activatedAmbiguously across the candidates), which surfaced as dead or
-    // double-press Escape in OTHER windows after this one had been shown and
-    // hidden. The gate ungrabs the shortcut outside this
-    // window's turn. NOT Window.active: that is QWindow::isActive(), a
-    // transient-GROUP activation every visible secondary window reports
-    // together, which kept two-open-window presses ambiguous. The strict
-    // WindowFocus.focusWindow identity is singular by definition, so at most
-    // one secondary-window Escape shortcut is grabbed at any instant, and a
-    // window that can receive the Escape key IS the focus window, so the
-    // gate never starves a legitimate press.
-    // The plural `sequences` form: StandardKey.Cancel expands to several
-    // platform bindings, and the singular `sequence` property binds only
-    // the first of them (and warns about the rest at load).
+    // Escape closes. Window-context (the default), but context alone is NOT exclusivity:
+    // this is a hide()-reused instance, so the Shortcut object lives forever, and a
+    // still-enabled shortcut in a HIDDEN window keeps participating in Qt's shortcut map.
+    // Two enabled matches on one press are ambiguous, and Qt then fires neither's
+    // onActivated (it rotates activatedAmbiguously across the candidates), which surfaced
+    // as dead or double-press Escape in OTHER windows after this one had been shown and
+    // hidden. The gate ungrabs the shortcut outside this window's turn. NOT
+    // Window.active: that is QWindow::isActive(), a transient-GROUP activation every
+    // visible secondary window reports together, which kept two-open-window presses
+    // ambiguous. The strict WindowFocus.focusWindow identity is singular by definition,
+    // so at most one secondary-window Escape shortcut is grabbed at any instant, and a
+    // window that can receive the Escape key IS the focus window, so the gate never
+    // starves a legitimate press. The plural `sequences` form: StandardKey.Cancel expands
+    // to several platform bindings, and the singular `sequence` property binds only the
+    // first of them (and warns about the rest at load).
     Shortcut {
         sequences: [StandardKey.Cancel]
         enabled: aboutWindow.visible
@@ -107,9 +103,9 @@ Window {
     // direct clipboard API of its own.
     Clipboard { id: clip }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Body: rounded frame matching the main window.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: windowBody
         anchors.fill: parent
@@ -123,7 +119,7 @@ Window {
             anchors.margins: 1   // sit inside the 1 px border
             spacing: 0
 
-            // ----- title bar: drag + close -----------------------------------
+            // ----- title bar: drag + close ---------------------------------
             Item {
                 id: titleBar
                 Layout.fillWidth: true
@@ -155,7 +151,7 @@ Window {
                 }
             }
 
-            // ----- content ---------------------------------------------------
+            // ----- content -------------------------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true

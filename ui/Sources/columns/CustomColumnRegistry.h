@@ -18,6 +18,25 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// CustomColumnRegistry.h
+//
+// The app-global registry of user-defined custom columns: the single source of truth for
+// their definitions.
+//
+// One shared instance is injected by pointer into each PlaylistModel via
+// setCustomColumns() and exposed to QML for the manager window. A single shared
+// registry (rather than a copy per model) means every tab sees the same
+// definitions and a manager edit reflects everywhere at once; models only read
+// it and react to its signals, never mutate it.
+//
+// Persistence is wholesale write-through to playlist_custom_columns.yaml under
+// userConfigDir(), through the shared YAML idiom (utils/YamlFile.h: atomic
+// write). Reads are tolerant: a missing or malformed file yields zero columns
+// and never throws, so a hand-edit typo can't wedge startup.
+//
+// Rendering lives elsewhere (PatternEvaluator, driven by the model); this class
+// is pure definition management plus I/O.
+
 #pragma once
 
 #include "columns/ColumnSchema.h" // CustomColumn
@@ -29,24 +48,6 @@
 
 namespace rawform {
 
-/**
- * @brief The app-global registry of user-defined custom columns: the single
- *        source of truth for their definitions.
- *
- * One shared instance is injected by pointer into each PlaylistModel via
- * setCustomColumns() and exposed to QML for the manager window. A single shared
- * registry (rather than a copy per model) means every tab sees the same
- * definitions and a manager edit reflects everywhere at once; models only read
- * it and react to its signals, never mutate it.
- *
- * Persistence is wholesale write-through to playlist_custom_columns.yaml under
- * userConfigDir(), through the shared YAML idiom (utils/YamlFile.h: atomic
- * write). Reads are tolerant: a missing or malformed file yields zero columns
- * and never throws, so a hand-edit typo can't wedge startup.
- *
- * Rendering lives elsewhere (PatternEvaluator, driven by the model); this class
- * is pure definition management plus I/O.
- */
 class CustomColumnRegistry : public QObject {
     Q_OBJECT
 
@@ -60,7 +61,7 @@ public:
     /// nothing is observing yet.
     void load();
 
-    // --- Lookup (used by the model) --------------------------------------
+    // --- Lookup (used by the model) ----------------------------------------
 
     /// A snapshot copy of every record, in user order (the order shown in the
     /// manager and written to the file).
@@ -74,7 +75,7 @@ public:
     /// Whether a record with @p id exists.
     [[nodiscard]] bool contains(const QString& id) const;
 
-    // --- Management (used by the manager window in QML) ------------------
+    // --- Management (used by the manager window in QML) --------------------
     // Every mutator persists immediately and emits so the model(s) and the
     // manager refresh. add() returns the new id so the manager can select it.
 

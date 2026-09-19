@@ -18,51 +18,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer: it deliberately reaches the C++
-// context properties (audioController, playlistTabs), which qmllint cannot
-// see, so the unqualified-access category is disabled file-wide. Under the
-// Bound pragma this directive covers context properties ONLY; the tab
-// delegate declares its injected names and every other capture is
-// statically checked under the pragma.
-// Components stay fully linted; keep global wiring HERE so they can.
-// Cost: a typo'd global name in this file surfaces at runtime, not lint.
-
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// tab-strip delegate already declares `index` and `modelData` (typed
-// string: the model is a plain string array) and self-qualifies through
-// its `tab` id; the captures of `propertiesWindow` there and inside
-// FooterButton are exactly what the pragma makes statically valid.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic  // MenuSeparator in the Tools menu
-import QtQuick.Effects
-import QtQuick.Layouts
-import QtQuick.Window
-
-
-// =============================================================================
 // PropertiesWindow.qml
 //
 // The track Properties window. Frameless, NON-MODAL,
 // our chrome, MULTIPLE INSTANCES: PlaylistView instantiates a fresh window per
-// "Properties" invocation (foobar2000 style) and each instance destroys itself
+// "Properties" invocation and each instance destroys itself
 // on close. There is no hide/reuse and therefore no stale-backing-store reopen
 // flash to fight: a new instance has never painted anything. All close paths
 // (Cancel, the titlebar X, OK on success) funnel through Window.close(); the
 // onClosing handler destroys the instance, taking its per-window editors,
 // models, and scan controller with it.
 //
-// The window snapshots the selection on open and stages edits in the panes;
-// Apply/OK commit through MetadataEditor and ReplayGainEditor (off-thread
-// TagLib writes), then the
-// OWNING TAB's MetadataReloader (captured at creation, deliberately not a live
-// binding: the active tab can change under a non-modal window) force-reloads
-// the written files so the model, metadata pane, and (via the controller's
-// dataRevision subscription) the playing track's RG factor all refresh, and the
-// pane re-pulls fresh values.
+// The window snapshots the selection on open and stages edits in the panes; Apply/OK
+// commit through MetadataEditor and ReplayGainEditor (off-thread TagLib writes), then the
+// OWNING TAB's MetadataReloader (captured at creation, deliberately not a live binding:
+// the active tab can change under a non-modal window) force-reloads the written files so
+// the model, metadata pane, and (via the controller's dataRevision subscription) the
+// playing track's RG factor all refresh, and the pane re-pulls fresh values.
 //
 // Track identity is PATH-BASED throughout (plus subsong for the re-pull keys):
 // every write and scan targets the file captured at open, and the re-pull remaps
@@ -82,7 +54,7 @@ import QtQuick.Window
 //
 // Cross-window semantics (multiple windows over the same tracks): each window
 // snapshots at open and there is no cross-window sync; last write wins,
-// matching foobar2000. collectEdits diffs against the open-time baseline, so a
+// by design. collectEdits diffs against the open-time baseline, so a
 // stale window only rewrites fields it actually staged; two windows clobber
 // each other only when both staged the same field.
 //
@@ -108,17 +80,15 @@ import QtQuick.Window
 // edit, so the user reviews them and commits through the same Apply / OK path. The
 // scan never writes on its own. A canceled scan stages nothing.
 //
-// Tools menu (footer left, foobar's bottom-left Tools button): window-scoped
-// ReplayGain and file actions. The scan / clear entries reuse the pane's
-// staging machinery but act over EVERY row (requestScanAll / clearAllReplayGain),
-// ignoring the pane's row sub-selection; the pane's own right-click menu stays
-// selection-scoped. "Reload info" force-re-reads the selection's files from
-// disk through the owning tab's reloader and re-pulls all three tabs,
-// DISCARDING staged edits by design (it is the take-disk-truth action). It
-// runs under the same _applying gate as Apply but with its own token
-// (_infoReloadToken), so the apply and reload sequencers can never complete
-// each other through the shared pathsReloaded handler. Menu hover hints
-// surface in the footer's left text slot while the menu is open.
+// Tools menu (footer left): window-scoped ReplayGain and file actions. The scan / clear
+// entries reuse the pane's staging machinery but act over EVERY row (requestScanAll /
+// clearAllReplayGain), ignoring the pane's row sub-selection; the pane's own right-click
+// menu stays selection-scoped. "Reload info" force-re-reads the selection's files from
+// disk through the owning tab's reloader and re-pulls all three tabs, DISCARDING staged
+// edits by design (it is the take-disk-truth action). It runs under the same _applying
+// gate as Apply but with its own token (_infoReloadToken), so the apply and reload
+// sequencers can never complete each other through the shared pathsReloaded handler. Menu
+// hover hints surface in the footer's left text slot while the menu is open.
 //
 // Menu layout: metadata actions first (Add new field, Auto track number,
 // Remove tags), then a ReplayGain submenu holding all five RG entries, then
@@ -131,7 +101,21 @@ import QtQuick.Window
 // and complex properties (embedded pictures included). The flag clears when
 // the pass that carried it finishes, success or not (re-invoke Remove tags to
 // retry a failure), and on Reload info, the discard-staging action.
-// =============================================================================
+
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// playlistTabs, windowGeometry), which qmllint cannot see, so the
+// unqualified-access category is disabled file-wide. Components stay fully
+// linted; keep global wiring in the views so they can. Cost: a typo'd global
+// name here surfaces at runtime, not at lint.
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic  // MenuSeparator in the Tools menu
+import QtQuick.Layouts
+import QtQuick.Window
+
 Window {
     id: propertiesWindow
 
@@ -197,23 +181,22 @@ Window {
     color: "transparent"
     // Qt.Tool, not Qt.Window: a tool window floats above its transient parent
     // (the main window, resolved automatically from the QML visual parent), so
-    // clicking the playlist never buries an open Properties window; foobar2000
-    // on Windows behaves this way via owned windows, and macOS does not give
-    // plain sibling windows that relationship. The standard utility-window
+    // clicking the playlist never buries an open Properties window; owned
+    // windows behave this way on Windows, and macOS does not give plain
+    // sibling windows that relationship. The standard utility-window
     // trade-off applies: on macOS the tool windows hide while the app is
     // deactivated and reappear with it (arguably the desired citizenship), and
     // they do not appear in the Dock / cmd-tab (moot: frameless anyway).
     flags: Qt.Tool | Qt.FramelessWindowHint
     modality: Qt.NonModal
 
-    // Fresh instance per open: closing IS destruction, so there is no deferred
-    // hide, no transparent close paint, and no reopen-flash dance to manage: a
-    // window that is never re-shown has no stale backing store to flash.
-    // destroy() defers actual deletion to the
-    // event loop, so finishing this handler (and anything else on the current
-    // stack) is safe. The per-window editors' C++ destructors wait out an
-    // in-flight write pass, so even an OS-initiated close mid-apply cannot
-    // strand a pool worker (it just blocks the GUI for the tail of the write).
+    // Fresh instance per open: closing IS destruction, so there is no deferred hide, no
+    // transparent close paint, and no reopen-flash dance to manage: a window that is
+    // never re-shown has no stale backing store to flash. destroy() defers actual
+    // deletion to the event loop, so finishing this handler (and anything else on the
+    // current stack) is safe. The per-window editors' C++ destructors wait out an
+    // in-flight write pass, so even an OS-initiated close mid-apply cannot strand a pool
+    // worker (it just blocks the GUI for the tail of the write).
     onClosing: {
         // Persist the size for the next instance, windowed frames only
         // (the visibility guard, same as the main window). Several instances closing
@@ -308,40 +291,35 @@ Window {
         propertiesWindow._focusCurrentTab() // Seed keyboard focus
     }
 
-    // Escape clears the visible pane's row selection, through the Shortcut
-    // phase because Keys-based Escape delivery was observed dead on macOS (the
-    // panes' Keys branches remain as fallback; shortcuts match first where they
-    // do fire, so the action never runs twice). The enabled gate hands Escape
-    // back to everything that owns it more locally: the Edit Value / Add Field
-    // overlay (its root cancels on Escape), the metadata inline editor
-    // (editingRow), a ReplayGain cell editor (keysFocused is false while one
-    // holds focus), and the apply pass. Window context (the default), so each
-    // Properties instance carries its own map. Context alone does NOT prevent
-    // ambiguity, though: a still-enabled
-    // shortcut in a hidden or unfocused window keeps participating in Qt's
-    // shortcut map, and two enabled matches on one press fire NEITHER
-    // onActivated (Qt rotates activatedAmbiguously instead). Hence the
-    // strict-focus terms below. NOT Window.active: that is
-    // QWindow::isActive(), a transient-GROUP activation, so every visible
-    // secondary window reports active together and that gate left
-    // two-open-window presses ambiguous (app-wide dead Escape).
-    // WindowFocus.focusWindow is QGuiApplication::focusWindow(), singular by
-    // definition: at most one secondary-window Escape shortcut is grabbed at
-    // any instant, so several open Properties instances can never go
-    // ambiguous with each other, with the reused Settings / About / Custom
-    // Columns instances, or with the main window. A window that can receive
-    // the Escape key IS the focus window, so the gate never starves a
-    // legitimate press.
+    // Escape clears the visible pane's row selection, through the Shortcut phase because
+    // Keys-based Escape delivery was observed dead on macOS (the panes' Keys branches
+    // remain as fallback; shortcuts match first where they do fire, so the action never
+    // runs twice). The enabled gate hands Escape back to everything that owns it more
+    // locally: the Edit Value / Add Field overlay (its root cancels on Escape), the
+    // metadata inline editor (editingRow), a ReplayGain cell editor (keysFocused is false
+    // while one holds focus), and the apply pass. Window context (the default), so each
+    // Properties instance carries its own map. Context alone does NOT prevent ambiguity,
+    // though: a still-enabled shortcut in a hidden or unfocused window keeps
+    // participating in Qt's shortcut map, and two enabled matches on one press fire
+    // NEITHER onActivated (Qt rotates activatedAmbiguously instead). Hence the
+    // strict-focus terms below. NOT Window.active: that is QWindow::isActive(), a
+    // transient-GROUP activation, so every visible secondary window reports active
+    // together and that gate left two-open-window presses ambiguous (app-wide dead
+    // Escape). WindowFocus.focusWindow is QGuiApplication::focusWindow(), singular by
+    // definition: at most one secondary-window Escape shortcut is grabbed at any instant,
+    // so several open Properties instances can never go ambiguous with each other, with
+    // the reused Settings / About / Custom Columns instances, or with the main window. A
+    // window that can receive the Escape key IS the focus window, so the gate never
+    // starves a legitimate press.
     //
-    // The action is two-stage. A visible selection is cleared first; with
-    // nothing to clear, Escape CLOSES the
-    // window through _cancel(), byte-identical to the Cancel button (staged
-    // edits die with the instance). The probes are the exact complements of
-    // the clear actions: hasRowSelection() is true iff clearRowSelection()
-    // would change something, hasSelection likewise for clearSelection(), so
-    // the two stages can never both fire on one press and the second press
-    // always closes. The gate includes the Details tab (currentTab 1), which
-    // has no selection concept: it closes on the first press.
+    // The action is two-stage. A visible selection is cleared first; with nothing to
+    // clear, Escape CLOSES the window through _cancel(), byte-identical to the Cancel
+    // button (staged edits die with the instance). The probes are the exact complements
+    // of the clear actions: hasRowSelection() is true iff clearRowSelection() would
+    // change something, hasSelection likewise for clearSelection(), so the two stages can
+    // never both fire on one press and the second press always closes. The gate includes
+    // the Details tab (currentTab 1), which has no selection concept: it closes on the
+    // first press.
     Shortcut {
         sequences: [StandardKey.Cancel]
         enabled: propertiesWindow.visible
@@ -732,7 +710,7 @@ Window {
             anchors.margins: 1
             spacing: 0
 
-            // ----- title bar -------------------------------------------------
+            // ----- title bar -----------------------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
@@ -765,7 +743,7 @@ Window {
                 }
             }
 
-            // ----- tab strip -------------------------------------------------
+            // ----- tab strip -----------------------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 30
@@ -809,7 +787,7 @@ Window {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.separatorStrong }
 
-            // ----- tab content -----------------------------------------------
+            // ----- tab content ---------------------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -866,7 +844,7 @@ Window {
                 }
             }
 
-            // ----- footer: status + Apply / OK / Cancel ----------------------
+            // ----- footer: status + Apply / OK / Cancel --------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 52
@@ -881,8 +859,8 @@ Window {
                     enabled: !propertiesWindow._applying && !scanController.busy
                     onClicked: toolsMenu.open()
 
-                    // The window-scoped Tools menu (foobar's bottom-left Tools
-                    // button). Parented to the button and opened UPWARD via the
+                    // The window-scoped Tools menu (footer left). Parented to
+                    // the button and opened UPWARD via the
                     // y: -height binding, which settles once the popup sizes
                     // itself. Menu layout: metadata actions first, then the
                     // ReplayGain submenu (all five RG entries), then Reload

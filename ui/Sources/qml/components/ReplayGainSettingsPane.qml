@@ -18,20 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import com.rawform.app
-
-
-// =============================================================================
 // ReplayGainSettingsPane.qml
 //
 // The ReplayGain page inside the Settings window. Reads and writes the window's
@@ -51,7 +37,14 @@ import com.rawform.app
 // The right-click reset MouseArea is the LOWEST child of each row and accepts only
 // the right button, so the control above handles its own left interaction and
 // right clicks fall through to reset.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import com.rawform.app
+
 Item {
     id: pane
 
@@ -100,7 +93,7 @@ Item {
             color: Theme.separatorStrong
         }
 
-        // ----- Mode ----------------------------------------------------------
+        // ----- Mode --------------------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -129,7 +122,7 @@ Item {
             }
         }
 
-        // ----- Pre-amp for tagged tracks -------------------------------------
+        // ----- Pre-amp for tagged tracks -----------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -159,7 +152,7 @@ Item {
             }
         }
 
-        // ----- Pre-amp for untagged tracks -----------------------------------
+        // ----- Pre-amp for untagged tracks ---------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -189,7 +182,7 @@ Item {
             }
         }
 
-        // ----- Clip prevention -----------------------------------------------
+        // ----- Clip prevention ---------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -218,7 +211,7 @@ Item {
             }
         }
 
-        // ----- Skip files with existing info (scan-time) ---------------------
+        // ----- Skip files with existing info (scan-time) -------------------
         // Unlike the rows above this one does not affect playback: it tells a
         // ReplayGain scan to leave tracks (or whole albums) that already carry RG
         // info untouched. The scan path reads it before measuring.
@@ -253,9 +246,9 @@ Item {
         Item { Layout.fillHeight: true }  // push rows to the top
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // The label plus modified-from-default dot, left-aligned in a row.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component RowLabel: Row {
         property string text: ""
         property bool modified: false
@@ -280,9 +273,9 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Segmented Off / Track / Album selector.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component ModeSelect: Row {
         id: ms
         property int value: 0
@@ -316,10 +309,10 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A small square stepper button used by the dB field. Hoisted to the pane
     // level because QML does not allow an inline component nested inside another.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component StepButton: Rectangle {
         id: sb
         property string glyph: ""
@@ -342,10 +335,10 @@ Item {
         TapHandler { onTapped: sb.bumped() }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A dB stepper: minus, an editable value, plus. Emits moved(value). Typing
     // commits on Return or focus-out, then re-binds the text to the live value.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component DbField: Row {
         id: dbf
         property real value: 0
@@ -415,9 +408,9 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A pill toggle.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component Toggle: Rectangle {
         id: tg
         property bool checked: false

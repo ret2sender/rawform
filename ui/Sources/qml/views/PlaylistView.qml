@@ -18,54 +18,43 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer: it deliberately reaches the C++
-// context property (audioController), which qmllint cannot see, so the
-// unqualified-access category is disabled file-wide. Under the Bound
-// pragma this directive covers context properties ONLY; all four
-// delegate surfaces declare their injected names and every outer-id capture
-// is statically checked under the pragma.
-// Components stay fully linted; keep global wiring HERE so they can.
-// Cost: a typo'd global name in this file surfaces at runtime, not lint.
+// PlaylistView.qml
+//
+// Playlist view: a HorizontalHeaderView above a TableView in a rounded,
+// hover-reactive frame. Both bind to the same PlaylistModel, but the header is
+// independent (no syncView): it renders its own cells from the model's
+// columnCount/headerData. That independence is the point:
+//
+//  - Column widths live in ONE place, the header's explicit column widths.
+//    Because the header always has realized cells, its built-in resizableColumns
+//    and setColumnWidth work even when the playlist is empty (the case a
+//    body-synced header cannot handle without a separate width mirror).
+//    The body's columnWidthProvider just reads header.explicitColumnWidth, and a
+//    Connections follow-trigger relayouts the body when the header width changes.
+//  - Horizontal scroll is driven by the body; the header mirrors its contentX
+//    (interactive:false) so the two stay aligned.
+//  - Reorder is a custom edge-inset MouseArea on the header delegate driving
+//    moveVisualColumn; the edge band is left free for the built-in resize.
+//  - Titles come straight from headerData and update live via headerDataChanged.
+//
+// Persistence surface (currentColumnOrder/currentColumnWidths on save,
+// applyColumnLayout on load) reads/writes the header; `columnWidths` is only the
+// default seed when nothing is saved.
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// delegate inventory: header (headerCell: column, display), body row (cell:
-// row, column, display, rowAvailable), and the two column-menu Instantiator
-// delegates (modelData). Instantiator delegates are backed by the same delegate
-// model machinery, so their required properties are filled the same way and
-// fail loudly at creation if not. Child items inside a delegate qualify
-// injected reads through the delegate root id; the root's own bindings may
-// read them bare.
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController),
+// which qmllint cannot see, so the unqualified-access category is disabled
+// file-wide. Components stay fully linted; keep global wiring in the views so
+// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
+
 pragma ComponentBehavior: Bound
+
 import QtQml.Models
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
 import com.rawform.app
 
-/*
- * Playlist view: a HorizontalHeaderView above a TableView in a rounded,
- * hover-reactive frame. Both bind to the same PlaylistModel, but the header is
- * independent (no syncView): it renders its own cells from the model's
- * columnCount/headerData. That independence is the point:
- *
- *  - Column widths live in ONE place, the header's explicit column widths.
- *    Because the header always has realized cells, its built-in resizableColumns
- *    and setColumnWidth work even when the playlist is empty (the case a
- *    body-synced header cannot handle without a separate width mirror).
- *    The body's columnWidthProvider just reads header.explicitColumnWidth, and a
- *    Connections follow-trigger relayouts the body when the header width changes.
- *  - Horizontal scroll is driven by the body; the header mirrors its contentX
- *    (interactive:false) so the two stay aligned.
- *  - Reorder is a custom edge-inset MouseArea on the header delegate driving
- *    moveVisualColumn; the edge band is left free for the built-in resize.
- *  - Titles come straight from headerData and update live via headerDataChanged.
- *
- * Persistence surface (currentColumnOrder/currentColumnWidths on save,
- * applyColumnLayout on load) reads/writes the header; `columnWidths` is only the
- * default seed when nothing is saved.
- */
 Item {
     id: root
 
@@ -76,7 +65,7 @@ Item {
     // click handler in the cell delegate.
     property ItemSelectionModel selectionModel
 
-    // The CURRENT (focus) row, for the delegate's foobar-style focus outline
+    // The CURRENT (focus) row, for the delegate's focus outline
     //. Driven by the DATA (the root's selection model, which stays bound
     // to the active tab regardless of the TableView's detach window), so
     // the outline is correct even while the view's attachment is mid-swap.
@@ -111,7 +100,7 @@ Item {
     // __lastClickedIndex. Updated on every click.
     property int _anchorRow: -1
 
-    // --- Column reorder drag state ---------------------------------------
+    // --- Column reorder drag state -----------------------------------------
     // The model owns the authoritative column order (a permutation over the
     // schema); these are purely the transient gesture state for the header
     // drag. _dragColumn is the column being dragged. _dropBoundary is the GAP
@@ -134,7 +123,7 @@ Item {
     readonly property int _dragThreshold: 6
     readonly property int _resizeGrip: 8
 
-    // --- Row reorder drag state ------------------------------------------
+    // --- Row reorder drag state --------------------------------------------
     // Vertical analog of the column drag, but it shares the body's click
     // overlay, so press handling interleaves selection and drag-arming.
     // _dragRowFirst/_dragRowLast are the contiguous block being dragged;
@@ -209,18 +198,16 @@ Item {
         function onColumnLayoutChanged() { root._layoutRevision++ }
     }
 
-    // Centralized width fix-up for COLUMN REMOVALS, wherever they originate.
-    // Header explicit widths are stored BY INDEX and never shift when the model
-    // removes a column, so every column right of the removal would wear its old
-    // neighbor's width. Centralized here rather than in the QML toggle
-    // (hideColumn) because C++-initiated removals never pass through the
-    // toggle: deleting a shown custom column's DEFINITION in the manager goes
-    // registry -> onCustomColumnRemoved -> begin/endRemoveColumns with no view
-    // involvement, which is exactly the "each column takes its neighbor's
-    // width" scenario this prevents.
-    // Snapshot on aboutToBe (columnCount is still the OLD count there, so the
-    // positions are pre-removal and include the doomed span), splice, re-assert
-    // after. _toggleColumn's hide branch does NOT touch widths anymore; both
+    // Centralized width fix-up for COLUMN REMOVALS, wherever they originate. Header
+    // explicit widths are stored BY INDEX and never shift when the model removes a
+    // column, so every column right of the removal would wear its old neighbor's width.
+    // Centralized here rather than in the QML toggle (hideColumn) because C++-initiated
+    // removals never pass through the toggle: deleting a shown custom column's DEFINITION
+    // in the manager goes registry -> onCustomColumnRemoved -> begin/endRemoveColumns
+    // with no view involvement, which is exactly the "each column takes its neighbor's
+    // width" scenario this prevents. Snapshot on aboutToBe (columnCount is still the OLD
+    // count there, so the positions are pre-removal and include the doomed span), splice,
+    // re-assert after. _toggleColumn's hide branch does NOT touch widths anymore; both
     // paths fixing up would splice twice.
     property var _widthsAcrossColumnRemoval: null
     Connections {
@@ -614,7 +601,7 @@ Item {
 
     // The in-tab half of the Ctrl+P reveal: plant the focus row on
     // the playing track (NoUpdate: the outline only, the selection is never
-    // touched, foobar's focus semantics) and center it. Reads the LIVE
+    // touched, the focus-only semantics) and center it. Reads the LIVE
     // playing row so the deferred cross-tab path lands on the track playing
     // NOW, not the one playing when the switch was requested. Note: smooth is
     // true only for the direct in-tab keypress; the cross-tab consumption
@@ -747,7 +734,7 @@ Item {
         _anchorRow = row
     }
 
-    // --- Row drag-reorder helpers ----------------------------------------
+    // --- Row drag-reorder helpers ------------------------------------------
 
     // Establish the block to drag: the maximal contiguous run of SELECTED rows
     // containing pressRow (so a contiguous multi-selection drags as one), or
@@ -842,7 +829,7 @@ Item {
     // whenever the header's total width changes (see the Connections below).
     // There is no second width store to keep in step with.
 
-    // --- Column-layout persistence surface -------------------------------
+    // --- Column-layout persistence surface ---------------------------------
     // Three functions, read and written by the hosts: PlaylistDialogs
     // snapshots currentColumnOrder() + currentColumnWidths() into a saved
     // .rwfpl / preset, the tab bar and this file stash currentColumnWidths()
@@ -958,7 +945,7 @@ Item {
         // launch parker (persisted position first, focus-row centering as the
         // fallback), and let the gated, verified apply land it as the rows
         // and content size settle. Also fires for a file opened into the
-        // active tab, which thereby restores ITS saved position, foobar-like.
+        // active tab, which thereby restores ITS saved position.
         function onActiveTabLoadCompleted() {
             if (!root.model)
                 return
@@ -1177,10 +1164,10 @@ Item {
                         // atomically per cell.
                         required property int columnAlignment
 
-                        // Shared header-cell visual: the Theme.headerBand band, bold elided
-                        // title, and right-edge divider, identical to what it drew
-                        // inline before (and to the metadata header). showDivider is
-                        // on for the playlist's inter-column boundaries.
+                        // Shared header-cell visual: the Theme.headerBand band, bold
+                        // elided title, and right-edge divider, identical to what it drew
+                        // inline before (and to the metadata header). showDivider is on
+                        // for the playlist's inter-column boundaries.
                         HeaderCell {
                             anchors.fill: parent
                             display: headerCell.display
@@ -1435,21 +1422,19 @@ Item {
                     columnSpacing: 0
                     rowSpacing: 0
                     boundsBehavior: Flickable.StopAtBounds
-                    // TableView.animate defaults to TRUE, so every
-                    // positionViewAtRow in this file was an animated contentY
-                    // flight toward the target, and Qt cancels that flight on
-                    // any relayout, rebuild, or competing viewport work,
-                    // stranding the view wherever the animation was. Around
-                    // launch and tab switches such work is routine (header
-                    // width seeding, selection-model reattach, first-build polish), so the
-                    // launch restore and the first switch-in restores were
-                    // canceled a frame after takeoff and every tab "opened at
-                    // the top" despite a correctly persisted and parked
-                    // position. False makes every programmatic positioning a
-                    // synchronous jump with no flight to cancel, which is also
-                    // the foobar-correct instant feel for the arrows, Ctrl+F,
-                    // Ctrl+P, and the restores. User flicking is unaffected
-                    // (animate only governs positionViewAt* calls).
+                    // TableView.animate defaults to TRUE, so every positionViewAtRow in
+                    // this file was an animated contentY flight toward the target, and Qt
+                    // cancels that flight on any relayout, rebuild, or competing viewport
+                    // work, stranding the view wherever the animation was. Around launch
+                    // and tab switches such work is routine (header width seeding,
+                    // selection-model reattach, first-build polish), so the launch
+                    // restore and the first switch-in restores were canceled a frame
+                    // after takeoff and every tab "opened at the top" despite a correctly
+                    // persisted and parked position. False makes every programmatic
+                    // positioning a synchronous jump with no flight to cancel, which is
+                    // also the intended instant feel for the arrows, Ctrl+F, Ctrl+P, and
+                    // the restores. User flicking is unaffected (animate only governs
+                    // positionViewAt* calls).
                     animate: false
 
                     // Keyboard navigation + selection, owned here so it shares
@@ -1474,7 +1459,7 @@ Item {
                                     || event.key === Qt.Key_Enter)
                                    && (event.modifiers & Qt.AltModifier)) {
                             // Alt+Enter opens the Properties window for
-                            // the selection (foobar's binding), the keyboard
+                            // the selection, the keyboard
                             // twin of the context menu's Properties entry.
                             // Checked BEFORE the plain Enter branch below.
                             root._openPropertiesWindow()
@@ -1686,10 +1671,10 @@ Item {
                             color: Theme.success
                         }
 
-                        // foobar-style focus outline on the CURRENT row (the
+                        // Focus outline on the CURRENT row (the
                         // remembered last-selected track; also the live focus row
                         // during normal use). An outline, never a fill, matching
-                        // foobar: current is focus, selection is the tint. The
+                        // the rule that current is focus and selection is the tint. The
                         // strokeOverlay pattern, drawn last; per-cell delegates
                         // can't draw one row-wide rectangle, so each cell of the
                         // row draws the top+bottom runs and only the outermost
@@ -2613,7 +2598,7 @@ Item {
 
     // The track Properties window factory (right-click "Properties"). Hosted here
     // because this view owns the model and the selection it operates on. Windows
-    // are NON-MODAL and MULTI-INSTANCE (foobar2000 style): every invocation
+    // are NON-MODAL and MULTI-INSTANCE: every invocation
     // creates a fresh instance that snapshots the selection on open and destroys
     // itself on close.
     //

@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // MetadataEditor.h
 //
 // Writes arbitrary tag fields to disk off the GUI thread, the general-purpose
@@ -72,7 +69,8 @@
 // semantics: list-vs-scalar per field, the TRACKNUMBER/TOTALTRACKS and
 // DISCNUMBER/TOTALDISCS coupling, alias clearing (TRACKTOTAL/DISCTOTAL/YEAR), and
 // one edit per affected track. This class just executes the value lists.
-// =============================================================================
+
+#pragma once
 
 #include <QFutureWatcher>
 #include <QObject>

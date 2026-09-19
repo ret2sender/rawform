@@ -18,20 +18,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// LogConsole.qml
+//
+// Expanded log console. Pops upward from the StatusLogBar over the bottom of the
+// playlist pane: non-modal and overlaid, so the track list does not reflow when
+// it opens. Renders the session log as a scrollable, read-only, selectable text
+// block in JetBrains Mono, one colored line per event, newest at the bottom.
+//
+// It is a text log, not a ListView: it binds a RichText TextEdit straight to
+// LogStore.logText (HTML with a colored span per line). The caller owns
+// placement (anchors) and the toggle; this component owns the open animation,
+// the auto-scroll, and Escape-to-close.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 
-/*
- * Expanded log console. Pops upward from the StatusLogBar over the bottom of the
- * playlist pane: non-modal and overlaid, so the track list does not reflow when
- * it opens. Renders the session log as a scrollable, read-only, selectable text
- * block in JetBrains Mono, one colored line per event, newest at the bottom.
- *
- * It is a text log, not a ListView: it binds a RichText TextEdit straight to
- * LogStore.logText (HTML with a colored span per line). The caller owns
- * placement (anchors) and the toggle; this component owns the open animation,
- * the auto-scroll, and Escape-to-close.
- */
 Rectangle {
     id: consolePanel
 

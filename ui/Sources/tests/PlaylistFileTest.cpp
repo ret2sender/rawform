@@ -18,8 +18,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// ---------------------------------------------------------------------------
-// rawform: standalone unit test for the .rwfpl playlist file format.
+// PlaylistFileTest.cpp
+//
+// Standalone unit test for the .rwfpl playlist file format.
 //
 // Same harness shape as PatternEvaluatorTest / RenameSanitizerTest (plain
 // main, counted checks, non-zero exit on failure), but this one DOES touch
@@ -60,7 +61,6 @@
 //     cmake -B build -DRAWFORM_BUILD_TESTS=ON
 //     cmake --build build --target rawform_playlist_test
 //     ctest --test-dir build            # or run ./build/rawform_playlist_test
-// ---------------------------------------------------------------------------
 
 #include "playlist/PlaylistFile.h"
 #include "media/TrackData.h"
@@ -241,7 +241,7 @@ int main() {
     const QString dir = tmp.path();
     const auto at = [&dir](const char* name) { return dir + QLatin1Char('/') + QLatin1String(name); };
 
-    // --- 1. round-trip -------------------------------------------------------
+    // --- 1. round-trip -----------------------------------------------------
     {
         const PlaylistDocument doc = sampleDocument();
         const QString path = at("roundtrip.rwfpl");
@@ -267,7 +267,7 @@ int main() {
         check(r.doc.scrollRow == doc.scrollRow, "roundtrip_scroll_row");
     }
 
-    // --- empty playlist round-trips -----------------------------------------
+    // --- empty playlist round-trips ----------------------------------------
     {
         PlaylistDocument doc;
         doc.title = QStringLiteral("Empty");
@@ -279,7 +279,7 @@ int main() {
         check(r.doc.currentRow == -1 && r.doc.scrollRow == -1, "empty_rows_default");
     }
 
-    // --- 2. writer guarantees ------------------------------------------------
+    // --- 2. writer guarantees ----------------------------------------------
     {
         const QString path = at("overwrite.rwfpl");
         PlaylistDocument a; a.tracks.push_back(sampleTrack(1));
@@ -296,7 +296,7 @@ int main() {
         check(!QFile::exists(badPath), "write_missing_dir_creates_nothing");
     }
 
-    // --- 3. error taxonomy ---------------------------------------------------
+    // --- 3. error taxonomy -------------------------------------------------
     checkError(readPlaylist(at("does-not-exist.rwfpl")),
                PlaylistIoError::Open, "err_open");
 
@@ -408,7 +408,7 @@ int main() {
         checkError(readPlaylist(path), PlaylistIoError::Corrupt, "err_no_track_chunk");
     }
 
-    // --- 4. tolerance --------------------------------------------------------
+    // --- 4. tolerance ------------------------------------------------------
     {
         // Unknown chunk BETWEEN known ones: skipped wholesale, parsing
         // continues, and the CURR chunk after it still lands.
@@ -461,7 +461,7 @@ int main() {
         check(r.doc.currentRow == 0, "short_optional_real_curr_wins");
     }
 
-    // --- 5. truncation sweep -------------------------------------------------
+    // --- 5. truncation sweep -----------------------------------------------
     {
         const PlaylistDocument doc = sampleDocument();
         const QString ref = at("sweep-ref.rwfpl");
@@ -486,7 +486,7 @@ int main() {
                     static_cast<int>(full.size()), okPrefixes);
     }
 
-    // --- 6. bit-flip sweep ---------------------------------------------------
+    // --- 6. bit-flip sweep -------------------------------------------------
     {
         const PlaylistDocument doc = sampleDocument();
         const QString ref = at("flip-ref.rwfpl");

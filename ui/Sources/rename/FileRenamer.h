@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // FileRenamer.h
 //
 // Renames audio files on disk off the GUI thread: the third sibling of
@@ -58,7 +55,8 @@
 // The applied() payload carries the old->new ABSOLUTE path map of the
 // successes so the caller can hand it straight to applyPathRenames; failures
 // come back as source paths for the dialog's per-row error marks.
-// =============================================================================
+
+#pragma once
 
 #include <QFutureWatcher>
 #include <QObject>

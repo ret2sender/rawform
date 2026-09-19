@@ -18,6 +18,36 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistStore.h
+//
+// Saves a playlist to a .rwfpl / .m3u / .m3u8 file off the GUI thread, and persists the
+// column-layout preset.
+//
+// The seam analog of TrackScanner: it owns no policy about which playlist is
+// active beyond the model handed to it, and file I/O runs on the global thread
+// pool so a big save never blocks the UI.
+//
+// SAVE pulls the track list from the model (a snapshot copy, safe to hand a
+// worker) and takes the column order + widths as arguments, because widths live
+// on the QML TableView (explicitColumnWidth), not the model. The QML save action
+// passes playlistView.currentColumnOrder() + currentColumnWidths().
+//
+// FORMAT is resolved here, not in QML (see PlaylistFormat.h for the precedence
+// rule): the chosen path's suffix decides when it is one we recognize, otherwise
+// the dialog's filter hint does and the extension is appended. .rwfpl goes to
+// writePlaylist (the full document); .m3u/.m3u8 go to writeM3u, which carries
+// tracks only. The saved() message says so for an M3U target, since a column
+// layout that silently failed to travel is exactly the kind of loss that should
+// be stated once rather than discovered later.
+//
+// The column-layout PRESET (saveColumnPreset / loadColumnPreset) is a
+// layout-only .rwftp under userConfigDir(), loaded at startup so a user's
+// chosen columns/order/widths survive restarts. It reuses the .rwfpl writer with
+// an empty track list.
+//
+// One operation at a time: a save requested while busy is rejected with a failure
+// signal rather than queued.
+
 #pragma once
 
 #include "playlist/PlaylistFormat.h"
@@ -35,35 +65,6 @@ namespace rawform {
 
 class PlaylistModel;
 
-/**
- * @brief Saves a playlist to a .rwfpl / .m3u / .m3u8 file off the GUI thread,
- *        and persists the column-layout preset.
- *
- * The seam analog of TrackScanner: it owns no policy about which playlist is
- * active beyond the model handed to it, and file I/O runs on the global thread
- * pool so a big save never blocks the UI.
- *
- * SAVE pulls the track list from the model (a snapshot copy, safe to hand a
- * worker) and takes the column order + widths as arguments, because widths live
- * on the QML TableView (explicitColumnWidth), not the model. The QML save action
- * passes playlistView.currentColumnOrder() + currentColumnWidths().
- *
- * FORMAT is resolved here, not in QML (see PlaylistFormat.h for the precedence
- * rule): the chosen path's suffix decides when it is one we recognize, otherwise
- * the dialog's filter hint does and the extension is appended. .rwfpl goes to
- * writePlaylist (the full document); .m3u/.m3u8 go to writeM3u, which carries
- * tracks only. The saved() message says so for an M3U target, since a column
- * layout that silently failed to travel is exactly the kind of loss that should
- * be stated once rather than discovered later.
- *
- * The column-layout PRESET (saveColumnPreset / loadColumnPreset) is a
- * layout-only .rwftp under userConfigDir(), loaded at startup so a user's
- * chosen columns/order/widths survive restarts. It reuses the .rwfpl writer with
- * an empty track list.
- *
- * One operation at a time: a save requested while busy is rejected with a failure
- * signal rather than queued.
- */
 class PlaylistStore : public QObject {
     Q_OBJECT
 

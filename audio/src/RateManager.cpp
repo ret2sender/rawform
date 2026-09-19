@@ -26,8 +26,8 @@
 // through IAudioSink::capabilities(); the result is handed here as
 // SinkCapabilities, so this file never knows whether it is reasoning about a
 // CoreAudio device, a PipeWire node, or a NullSink fake. That is the whole point
-// of the policy/mechanism split, and it is what lets RateManagerTest assert the full truth
-// table with no audio hardware in sight.
+// of the policy/mechanism split, and it is what lets RateManagerTest assert the
+// full truth table with no audio hardware in sight.
 //
 // The decision is two questions answered in order:
 //   1. What rate should the device run at, and does reaching it require a switch?

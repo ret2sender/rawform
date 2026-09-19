@@ -18,8 +18,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// ---------------------------------------------------------------------------
-// rawform: standalone unit test for the rename-name pipeline.
+// RenameSanitizerTest.cpp
+//
+// Standalone unit test for the rename-name pipeline.
 //
 // Same shape and constraints as PatternEvaluatorTest.cpp: Qt-Quick-FREE,
 // linking Qt6::Core + yaml-cpp (transitively via ColumnSchema.cpp) plus the
@@ -33,7 +34,6 @@
 //     ctest --test-dir build            # or run ./build/rawform_rename_test
 //
 // Exits non-zero if any check fails (so it doubles as a CI gate).
-// ---------------------------------------------------------------------------
 
 #include "rename/RenameSanitizer.h"
 #include "media/TrackData.h"
@@ -75,7 +75,7 @@ TrackData sampleTrack() {
 } // namespace
 
 int main() {
-    // --- sceneSanitizeValue: the per-value normalizer ------------------------
+    // --- sceneSanitizeValue: the per-value normalizer ----------------------
     check(sceneSanitizeValue(QStringLiteral("My Super & Duper Song")),
           QStringLiteral("my_super_and_duper_song"), "value_spec_example");
     check(sceneSanitizeValue(QStringLiteral("AC&DC")),
@@ -110,7 +110,7 @@ int main() {
 
     const TrackData t = sampleTrack();
 
-    // --- buildRenameStem: the contract's worked example -----------------------
+    // --- buildRenameStem: the contract's worked example --------------------
     check(buildRenameStem(t, QStringLiteral("%track_no%-%artist%-%title%")),
           QStringLiteral("01-great_artist-my_super_and_duper_song"), "stem_spec_example");
 
@@ -161,7 +161,7 @@ int main() {
               QString(), "stem_all_empty");
     }
 
-    // --- composeRenameFileName ----------------------------------------------
+    // --- composeRenameFileName ---------------------------------------------
     check(composeRenameFileName(QStringLiteral("01-a-b"), QStringLiteral("01 A b.FLAC")),
           QStringLiteral("01-a-b.flac"), "compose_ext_lowercase");
     check(composeRenameFileName(QStringLiteral("x"), QStringLiteral("noext")),
@@ -173,7 +173,7 @@ int main() {
     check(composeRenameFileName(QString(), QStringLiteral("a.flac")),
           QString(), "compose_empty_stem");
 
-    // --- renameFileNameProblem ----------------------------------------------
+    // --- renameFileNameProblem ---------------------------------------------
     check(renameFileNameProblem(QStringLiteral("01-a-b.flac")), QString(), "problem_ok");
     check(renameFileNameProblem(QString()).isEmpty() ? QString() : QStringLiteral("flagged"),
           QStringLiteral("flagged"), "problem_empty_flagged");

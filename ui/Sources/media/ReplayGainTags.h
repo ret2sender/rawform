@@ -18,15 +18,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // ReplayGainTags.h
 //
 // One source of truth for reading and presenting the REPLAYGAIN_* tags that ride
 // verbatim in TrackData::extraTags. The playback path (AudioController, which
 // turns gain + peak into a linear factor) and the Properties view (the
-// PlaylistModel accessor that feeds the foobar-style table) parse through here,
+// PlaylistModel accessor that feeds the per-track table) parse through here,
 // so a quirk like a comma decimal or a missing dB unit is handled once; the two
 // producers of new values (ReplayGainEditor on write, ReplayGainScanController
 // on scan) format through here, so a staged and a written gain agree to the
@@ -37,11 +34,12 @@
 //
 // Two presentation styles live here on purpose:
 //   - formatGainDisplay keeps the tag's own precision (so a "-4" tag shows "-4 dB"
-//     next to a "-6.00 dB" tag, exactly as foobar renders the per-track cells) and
+//     next to a "-6.00 dB" tag in the per-track cells) and
 //     only normalizes the unit.
 //   - formatGainValue is for COMPUTED summary numbers (lowest/highest/common gain),
 //     always signed and two-decimal.
-// =============================================================================
+
+#pragma once
 
 #include <QMap>
 #include <QRegularExpression>

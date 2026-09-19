@@ -18,6 +18,48 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// MetadataReloader.h
+//
+// Keeps the in-memory TrackData fresh against on-disk changes, off the GUI thread, and
+// validates a freshly loaded .rwfpl cache against disk.
+//
+// Tracks are read from disk once (when added, or from the .rwfpl cache) and live
+// in the model thereafter, so editing a file in another app or a file going
+// missing between sessions leaves our copy stale. This detects that via the
+// mtime + fileSize key stored in TrackData (a stat() compare, no content read)
+// and re-parses only what changed.
+//
+// All disk work runs on the global thread pool (QtConcurrent::mapped over
+// readTrack, the scanner's parser), so no pass blocks the UI. The GUI thread
+// only snapshots the work (rows + cached keys) and applies results via
+// PlaylistModel::refreshTrack (a dataChanged emit, never a reset, so selection,
+// columns, metadata pane and art all refresh in place).
+//
+// Each row is classified into one of three verdicts and availability reconciled:
+// a present+unchanged row clears any stale "missing" flag, a changed row gets
+// fresh tags, and a gone/unreadable row is flagged unavailable
+// (TrackData::available = false) so the view grays it. This is uniform across the
+// four entry points:
+//
+//  - AUTOMATIC, on selection (conditional, debounced so a held arrow key settles
+//    into one pass; capped at kAutoRevalidateCap).
+//  - EXPLICIT, "Reload info from file(s)": a selection forces a re-read of those
+//    rows; an empty selection conditionally sweeps the whole playlist.
+//  - LOAD-TIME, `validateAll()`: one conditional whole-playlist sweep right
+//    after a .rwfpl loads (trust the cache, skip the read for unchanged files,
+//    re-read only what changed, gray what is gone).
+//  - PATH-DIRECTED, `reloadPaths()`: the Properties window's post-write
+//    refresh. Forces a re-read of the rows currently holding the given paths
+//    and reports completion per request via a token (see the method doc).
+//
+// Re-entrancy: one pass at a time. A conditional/selected request arriving
+// mid-pass is held pending (latest wins), except a pending FORCE request is
+// never clobbered by a later conditional one. Path-directed requests are the
+// exception to latest-wins: they queue FIFO and are never dropped, because each
+// has a caller waiting on its token. Results apply in input order, guarded
+// against row drift: a result applies only if its row still holds the same file
+// path, so a concurrent insert/remove/move never writes onto the wrong row.
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -37,7 +79,7 @@ class PlaylistModel;
 
 /// One row's reload job, snapshotted on the GUI thread and handed to a pool
 /// worker. Carries the cached mtime/size so the worker can do the stat-compare
-/// itself (off-thread); @ref force bypasses that check and forces a re-read.
+/// itself (off-thread); `force` bypasses that check and forces a re-read.
 struct ReloadItem {
     int       row = -1;
     QString   path;
@@ -46,9 +88,9 @@ struct ReloadItem {
     bool      force = false;
 };
 
-/// A worker's verdict for one row. Exactly one state per row. @ref path is the
+/// A worker's verdict for one row. Exactly one state per row. `path` is the
 /// file the verdict is about (used to guard against row drift before applying).
-/// @ref data carries fresh tags only for the Changed verdict.
+/// `data` carries fresh tags only for the Changed verdict.
 enum class ReloadVerdict {
     UnchangedPresent, ///< present, mtime+size match: re-reads nothing, clears any stale "missing" flag
     Changed,          ///< re-read produced fresh, valid data
@@ -62,47 +104,6 @@ struct ReloadResult {
     TrackData     data;
 };
 
-/**
- * @brief Keeps the in-memory TrackData fresh against on-disk changes, off the
- *        GUI thread, and validates a freshly loaded .rwfpl cache against disk.
- *
- * Tracks are read from disk once (when added, or from the .rwfpl cache) and live
- * in the model thereafter, so editing a file in another app or a file going
- * missing between sessions leaves our copy stale. This detects that via the
- * mtime + fileSize key stored in TrackData (a stat() compare, no content read)
- * and re-parses only what changed.
- *
- * All disk work runs on the global thread pool (QtConcurrent::mapped over
- * readTrack, the scanner's parser), so no pass blocks the UI. The GUI thread
- * only snapshots the work (rows + cached keys) and applies results via
- * PlaylistModel::refreshTrack (a dataChanged emit, never a reset, so selection,
- * columns, metadata pane and art all refresh in place).
- *
- * Each row is classified into one of three verdicts and availability reconciled:
- * a present+unchanged row clears any stale "missing" flag, a changed row gets
- * fresh tags, and a gone/unreadable row is flagged unavailable
- * (TrackData::available = false) so the view grays it. This is uniform across the
- * four entry points:
- *
- *  - AUTOMATIC, on selection (conditional, debounced so a held arrow key settles
- *    into one pass; capped at kAutoRevalidateCap).
- *  - EXPLICIT, "Reload info from file(s)": a selection forces a re-read of those
- *    rows; an empty selection conditionally sweeps the whole playlist.
- *  - LOAD-TIME, @ref validateAll(): one conditional whole-playlist sweep right
- *    after a .rwfpl loads (trust the cache, skip the read for unchanged files,
- *    re-read only what changed, gray what is gone).
- *  - PATH-DIRECTED, @ref reloadPaths(): the Properties window's post-write
- *    refresh. Forces a re-read of the rows currently holding the given paths
- *    and reports completion per request via a token (see the method doc).
- *
- * Re-entrancy: one pass at a time. A conditional/selected request arriving
- * mid-pass is held pending (latest wins), except a pending FORCE request is
- * never clobbered by a later conditional one. Path-directed requests are the
- * exception to latest-wins: they queue FIFO and are never dropped, because each
- * has a caller waiting on its token. Results apply in input order, guarded
- * against row drift: a result applies only if its row still holds the same file
- * path, so a concurrent insert/remove/move never writes onto the wrong row.
- */
 class MetadataReloader : public QObject {
     Q_OBJECT
 

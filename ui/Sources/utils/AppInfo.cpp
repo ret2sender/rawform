@@ -18,30 +18,30 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/// @file AppInfo.cpp
-/// @brief Implementation of the AppInfo QML singleton.
+// AppInfo.cpp
+//
+// Implementation of the AppInfo QML singleton.
 
 #include "AppInfo.h"
 
 #include <QtGlobal>
 #include <QIcon>
 
-
 AppInfo::AppInfo(QObject* parent)
     : QObject(parent) {
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ accessor
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ
 QString AppInfo::version() const {
     return QStringLiteral(RAWFORM_VERSION_STR);
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ accessor
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ
 QString AppInfo::qtVersion() const {
     return QString::fromLatin1(qVersion());
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ accessor
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): Q_PROPERTY READ
 QString AppInfo::systemIconTheme() const {
     return QIcon::themeName();
 }

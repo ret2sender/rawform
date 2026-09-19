@@ -18,6 +18,21 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ColumnSchema.h
+//
+// The vocabulary of values a playlist column can display: the id a schema entry resolves
+// to, and the key PlaylistModel dispatches on when rendering a cell.
+//
+// Most enumerators are 1:1 reads of a TrackData member. The two trailing
+// COMPOSITE values are fixed built-in renderers (a switch in PatternEvaluator,
+// not a format-string parser):
+//
+//   - TrackIndex -> "disc.track", e.g. "1.01"
+//   - AlbumGroup -> "AlbumArtist - Album"
+//
+// The string spellings (fieldFromString) match MetadataModel::FieldId where they
+// overlap; this enum is a superset (it adds the two composites).
+
 #pragma once
 
 #include <QHash>
@@ -29,21 +44,6 @@
 
 namespace rawform {
 
-/**
- * @brief The vocabulary of values a playlist column can display: the id a
- *        schema entry resolves to, and the key PlaylistModel dispatches on when
- *        rendering a cell.
- *
- * Most enumerators are 1:1 reads of a TrackData member. The two trailing
- * COMPOSITE values are fixed built-in renderers (a switch in PatternEvaluator,
- * not a format-string parser):
- *
- *   - TrackIndex -> "disc.track", e.g. "1.01"
- *   - AlbumGroup -> "AlbumArtist - Album"
- *
- * The string spellings (fieldFromString) match MetadataModel::FieldId where they
- * overlap; this enum is a superset (it adds the two composites).
- */
 enum class ColumnField {
     // Direct tag fields.
     Artist,
@@ -78,20 +78,18 @@ enum class ColumnField {
     AlbumGroup, ///< "AlbumArtist - Album"
 };
 
-/**
- * @brief The catalog of playlist columns, built in code.
- *
- * Pure data: a list of entries, each naming one field. It carries no rendering
- * logic; PlaylistModel turns (entry.field + a track) into a display string.
- *
- * Built entirely from code (see load()): one entry per field. A field's title
- * and alignment are derived on demand from humanTitleFor() / defaultAlignmentFor()
- * (the single sources of truth), never stored on the entry. There is no config
- * file and no per-user override tier; to show a column under a different name (or
- * built from several fields), use a CUSTOM column (CustomColumnRegistry). Which
- * columns show by default, in what order and at what width, is
- * defaultColumnArrangement().
- */
+/// The catalog of playlist columns, built in code.
+///
+/// Pure data: a list of entries, each naming one field. It carries no rendering
+/// logic; PlaylistModel turns (entry.field + a track) into a display string.
+///
+/// Built entirely from code (see load()): one entry per field. A field's title
+/// and alignment are derived on demand from humanTitleFor() / defaultAlignmentFor()
+/// (the single sources of truth), never stored on the entry. There is no config
+/// file and no per-user override tier; to show a column under a different name (or
+/// built from several fields), use a CUSTOM column (CustomColumnRegistry). Which
+/// columns show by default, in what order and at what width, is
+/// defaultColumnArrangement().
 struct ColumnSchema {
     /// One catalog column: just a field. (Title/alignment are derived, not
     /// stored; width and order are arrangement concerns.)
@@ -159,7 +157,7 @@ struct DefaultColumn {
 // ===========================================================================
 //
 // A custom column is a user-defined record (not a catalog Entry, not a
-// ColumnField): a label, an alignment, and a foobar-style %token% pattern
+// ColumnField): a label, an alignment, and a %token% pattern
 // evaluated by PatternEvaluator. The records are owned by CustomColumnRegistry
 // and persisted to playlist_custom_columns.yaml; this header declares only the
 // plain record type plus the identity/encoding helpers the model and registry

@@ -18,11 +18,24 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TitleBar.qml
+//
+// The main window's custom title bar: the rawform logo pinned at a
+// platform-dependent left inset, a fill-width spacer, and the caption buttons
+// (TitleBarControls) at the right. A full-bleed MouseArea emits moveRequested
+// on press so the host can start a system move.
+//
+// On macOS the native traffic lights (see applyMacOSStyling) replace the
+// themed controls, which are hidden and disabled there, and the logo inset
+// animates toward the window edge in fullscreen, where the native title bar
+// and the lights slide away. Linux hugs the edge unconditionally; Windows
+// keeps the 80 px inset for cross-platform parity.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
-
 import com.rawform.app
-
 
 Item {
     id: root
@@ -55,12 +68,11 @@ Item {
             readonly property bool macFullScreen: Qt.platform.os === "osx"
                 && root.Window.visibility === Window.FullScreen
 
-            // Linux has no traffic lights to clear, so the logo hugs the
-            // window edge there unconditionally; macOS gets the same
-            // treatment only in fullscreen, where the native title bar
-            // (and the lights) slide away.
-            // macOS windowed and Windows keep the 80px inset that clears the
-            // traffic lights / preserves cross-platform parity.
+            // Linux has no traffic lights to clear, so the logo hugs the window edge
+            // there unconditionally; macOS gets the same treatment only in fullscreen,
+            // where the native title bar (and the lights) slide away. macOS windowed and
+            // Windows keep the 80px inset that clears the traffic lights / preserves
+            // cross-platform parity.
             property real logoInset: macFullScreen
                 || Qt.platform.os === "linux" ? 16 : 80
 

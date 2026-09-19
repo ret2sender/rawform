@@ -20,11 +20,10 @@
 
 // AudioController.h
 //
-// The Qt face of the standalone rawform_audio
-// Engine. The engine is a zero-Qt, forward-queue transport with no cursor model;
-// this QObject wraps it so QML can drive playback and bind to its state, and it
-// adds the one thing the engine deliberately does NOT own, the cursor that makes
-// playback follow a playlist the way foobar2000 does.
+// The Qt face of the standalone rawform_audio Engine. The engine is a zero-Qt,
+// forward-queue transport with no cursor model; this QObject wraps it so QML can drive
+// playback and bind to its state, and it adds the one thing the engine deliberately does
+// NOT own, the cursor that makes playback follow a playlist.
 //
 // THREE THREADS, as the engine header spells out. The engine's Listener fires on
 // the engine thread, never the GUI thread. We marshal every callback to the GUI
@@ -46,7 +45,7 @@
 // AFTER the cursor in the playing model. We re-derive and re-push it (setQueue,
 // which by the engine's contract never disturbs the current track) whenever the
 // cursor moves by an explicit gesture or the playing playlist changes
-// structurally. That is what makes the foobar behaviors fall out: reordering
+// structurally. That is what makes the expected behaviors fall out: reordering
 // follows, clearing the playing playlist stops it after the current track, and
 // closing the playing tab never interrupts the current track. The current track
 // is untouchable through any of this; only what-plays-next changes.
@@ -207,17 +206,15 @@ class AudioController : public QObject {
     Q_PROPERTY(bool  replayGainClipPreventionDefault READ replayGainClipPreventionDefault CONSTANT)
     Q_PROPERTY(bool  replayGainScanSkipExistingDefault READ replayGainScanSkipExistingDefault CONSTANT)
 
-    /// Output rate policy: the Settings > Playback boolean.
-    /// Checked (true, the default) maps to the engine's BitPerfectWhenAvailable,
-    /// switching the device to the track's rate when the hardware can clock it
-    /// and taking the nearest-best advertised fallback when it cannot; unchecked
-    /// maps to AlwaysResample, never touching the device rate. ForceDeviceRate,
-    /// the third engine mode, is a CLI-only diagnostic and deliberately has no UI
-    /// surface. Persisted in playback.yaml; takes effect at the next track
-    /// boundary, because the engine reads its rate mode there (a natural
-    /// advance or a manual cut) and Apply never reopens a playing sink. The
-    /// *Default CONSTANT
-    /// drives the pane's modified-from-default marker and right-click reset,
+    /// Output rate policy: the Settings > Playback boolean. Checked (true, the default)
+    /// maps to the engine's BitPerfectWhenAvailable, switching the device to the track's
+    /// rate when the hardware can clock it and taking the nearest-best advertised
+    /// fallback when it cannot; unchecked maps to AlwaysResample, never touching the
+    /// device rate. ForceDeviceRate, the third engine mode, is a CLI-only diagnostic and
+    /// deliberately has no UI surface. Persisted in playback.yaml; takes effect at the
+    /// next track boundary, because the engine reads its rate mode there (a natural
+    /// advance or a manual cut) and Apply never reopens a playing sink. The *Default
+    /// CONSTANT drives the pane's modified-from-default marker and right-click reset,
     /// exactly like the RG defaults above.
     Q_PROPERTY(bool bitPerfect READ bitPerfect WRITE setBitPerfect NOTIFY bitPerfectChanged)
     Q_PROPERTY(bool bitPerfectDefault READ bitPerfectDefault CONSTANT)
@@ -267,7 +264,7 @@ public:
     /// from Stopped with nothing ever played (start the active tab). Non-owning.
     void setPlaylistTabs(PlaylistTabs* tabs);
 
-    // --- property reads --------------------------------------------------
+    // --- property reads ----------------------------------------------------
     [[nodiscard]] int     state() const { return m_state; }
     [[nodiscard]] bool    isPlaying() const { return m_state == Playing; }
     [[nodiscard]] bool    isPaused() const { return m_state == Paused; }
@@ -334,7 +331,7 @@ public:
     Q_INVOKABLE void           refreshOutputDevices();
     Q_INVOKABLE void           setOutputDeviceId(const QString& id);
 
-    // --- visualization tap (for SpectrumProvider) ------------------------
+    // --- visualization tap (for SpectrumProvider) --------------------------
     /// Two thin forwarders to the engine's spectrum tap, used by the standalone
     /// SpectrumProvider rather than QML, so they are plain C++ methods, not
     /// Q_PROPERTY or slots. copyScopeMono hands through the engine's lock-free
@@ -346,7 +343,7 @@ public:
     void                      setScopeSource(int source);
 
 public slots:
-    // --- transport (invokable from QML) ----------------------------------
+    // --- transport (invokable from QML) ------------------------------------
 
     /// Make @p model the playing playlist and @p row its current track, and play
     /// that track immediately (the double-click / Enter gesture). Seeds the engine
@@ -480,7 +477,7 @@ private:
         bool     bitPerfect     = false;
     };
 
-    // --- GUI-thread appliers (invoked queued from the bridge) ------------
+    // --- GUI-thread appliers (invoked queued from the bridge) --------------
     void applyState(int state);
     void applyTrack(const EngineTrackFacts& facts);
     void applyPosition(double seconds, int liveBitrateKbps);
@@ -491,25 +488,23 @@ private:
     void applyRateDebt(const QString& deviceId, quint32 originalRateHz,
                        quint32 borrowedRateHz); ///< Persist/clear the ledger
 
-    // --- cursor / organic advance ----------------------------------------
+    // --- cursor / organic advance ------------------------------------------
     void setPlayingModel(rawform::PlaylistModel* model);  ///< swap source + rewire signals
     void setCursorRow(int row);                           ///< set cursor + refresh highlight/meta
     void resolveCursorForPath(const QString& path);       ///< predict-then-verify on advance
     void recomputeLookahead();                            ///< setQueue(organic tail after cursor)
     void refreshNowPlayingMeta();                         ///< title/artist from the cursor row
 
-    // --- master volume + ReplayGain / persistence ------------------------
-    /// Resolve the effective LINEAR gain and push it to the engine: the power-law
-    /// taper of m_volume (kVolumeTaperExponent in the .cpp, the one definition
-    /// of the curve), forced to 0 while muted, multiplied by the cached
-    /// ReplayGain factor
-    /// m_replayGainLinear. The single point that talks to Engine::setVolumeGain;
-    /// called on every volume/mute/RG change and once at construction after the
-    /// saved values load. Also the single point that CLASSIFIES the pushed
-    /// gain: it derives m_engineGainState from the composed value and
-    /// its components and fires formatSummaryChanged when the classification
-    /// changes while a device outcome is on display, so the suffix follows the
-    /// slider and the RG settings live.
+    // --- master volume + ReplayGain / persistence --------------------------
+    /// Resolve the effective LINEAR gain and push it to the engine: the power-law taper
+    /// of m_volume (kVolumeTaperExponent in the .cpp, the one definition of the curve),
+    /// forced to 0 while muted, multiplied by the cached ReplayGain factor
+    /// m_replayGainLinear. The single point that talks to Engine::setVolumeGain; called
+    /// on every volume/mute/RG change and once at construction after the saved values
+    /// load. Also the single point that CLASSIFIES the pushed gain: it derives
+    /// m_engineGainState from the composed value and its components and fires
+    /// formatSummaryChanged when the classification changes while a device outcome is on
+    /// display, so the suffix follows the slider and the RG settings live.
     void pushGainToEngine();
 
     /// The single point that maps m_bitPerfect onto rawform::audio::RateMode and
@@ -613,14 +608,12 @@ private:
     QString m_nowPlayingTitle;
     QString m_nowPlayingArtist;
 
-    /// The device outcome for the current open: the rate the
-    /// output device is actually running at and whether that equals the source
-    /// rate, refreshed from EngineTrackFacts on every track change and cleared
-    /// on entering Stopped (device released). outputSuffix() renders them as the
-    /// "(Bit Perfect)" / "(Resampled to N Hz)" suffix (with the bit-perfect leg
-    /// further gated on the gain classification; see
-    /// m_engineGainState below);
-    /// deviceRateHz 0 means no suffix.
+    /// The device outcome for the current open: the rate the output device is actually
+    /// running at and whether that equals the source rate, refreshed from
+    /// EngineTrackFacts on every track change and cleared on entering Stopped (device
+    /// released). outputSuffix() renders them as the "(Bit Perfect)" / "(Resampled to N
+    /// Hz)" suffix (with the bit-perfect leg further gated on the gain classification;
+    /// see m_engineGainState below); deviceRateHz 0 means no suffix.
     int  m_deviceRateHz     = 0;
     bool m_outputBitPerfect = false;
 

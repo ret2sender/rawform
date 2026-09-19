@@ -18,59 +18,55 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
+// PlaylistTabBar.qml
+//
+// Playlist tab strip. Sits above the playlist header and is bound to the
+// PlaylistTabs list model. Flat tabs: the active one is lighter
+// with bright text, inactive ones dim; a muted close glyph at each tab's right
+// closes it. The strip spans the full playlist-pane width (the status line is
+// below the playlist pane; see StatusLogBar).
+//
+// Overflow / scrolling:
+//   The tabs live in a CLIPPED viewport. When their total width exceeds the
+//   room the strip can give them, a clustered pair of scroll arrows (chevrons)
+//   appears just left of the status panel, and the off-screen tabs tuck behind
+//   that cluster. The viewport itself is NOT an interactive Flickable: the tab
+//   drag-reorder is a horizontal drag on each tab's MouseArea, and an
+//   interactive Flickable would steal that gesture. Instead the Row is shifted
+//   by `x: -scrollOffset`, and ALL scrolling (arrows + wheel) drives that one
+//   property. Resize shrinks/grows the viewport, so tabs hide and re-appear as
+//   the window (or the splitter) is dragged, with scrollOffset re-clamped each
+//   time so a shrink never leaves a blank gutter.
+//
+//   - arrows           -> snap-to-tab step (reveal the next clipped tab fully),
+//                         each dimmed and inert at its travel limit
+//   - mouse wheel      -> one snap-to-tab step per notch (matches the arrows)
+//   - trackpad swipe   -> continuous free scroll (pixelDelta), no snapping
+//   The active tab is auto-revealed when it changes (so creating a playlist
+//   while overflowing scrolls the new tab into view).
+//
+// Interaction (all pointer handling for a tab lives in ONE MouseArea, so the
+// click / middle-close / close-hit / drag-reorder paths can't fight each other):
+//   - left click           -> switch to the tab (stashing the outgoing tab's
+//                             column widths first, so the switch can re-seed)
+//   - left click on close   -> close the tab
+//   - middle click on a tab -> close the tab
+//   - left drag a tab       -> reorder; the model is moved once, on release
+//   - middle click on empty -> new playlist
+//   - File drag over the strip:
+//       * dropped < 2 s      -> a new tab, smart-named (single .m3u / a folder's
+//                               inner .m3u or its name), content scanned in
+//       * hover >= 2 s        -> an empty "New Playlist" pops and becomes active;
+//                               the drop then lands in it (generic name)
+//       * a .rwfpl            -> opened in its own new tab (as a fresh live copy)
+//
+// `tabs` is the PlaylistTabs (the list model + the session API); `view` is the
+// PlaylistView, read only to snapshot the active column widths before a switch.
+
 pragma ComponentBehavior: Bound
 
 import QtQuick
 
-/*
- * Playlist tab strip. Sits above the playlist header and is bound to the
- * PlaylistTabs list model. Flat foobar-style tabs: the active one is lighter
- * with bright text, inactive ones dim; a muted close glyph at each tab's right
- * closes it. The strip spans the full playlist-pane width (the status line is
- * below the playlist pane; see StatusLogBar).
- *
- * Overflow / scrolling:
- *   The tabs live in a CLIPPED viewport. When their total width exceeds the
- *   room the strip can give them, a clustered pair of scroll arrows (chevrons)
- *   appears just left of the status panel, and the off-screen tabs tuck behind
- *   that cluster. The viewport itself is NOT an interactive Flickable: the tab
- *   drag-reorder is a horizontal drag on each tab's MouseArea, and an
- *   interactive Flickable would steal that gesture. Instead the Row is shifted
- *   by `x: -scrollOffset`, and ALL scrolling (arrows + wheel) drives that one
- *   property. Resize shrinks/grows the viewport, so tabs hide and re-appear as
- *   the window (or the splitter) is dragged, with scrollOffset re-clamped each
- *   time so a shrink never leaves a blank gutter.
- *
- *   - arrows           -> snap-to-tab step (reveal the next clipped tab fully),
- *                         each dimmed and inert at its travel limit
- *   - mouse wheel      -> one snap-to-tab step per notch (matches the arrows)
- *   - trackpad swipe   -> continuous free scroll (pixelDelta), no snapping
- *   The active tab is auto-revealed when it changes (so creating a playlist
- *   while overflowing scrolls the new tab into view).
- *
- * Interaction (all pointer handling for a tab lives in ONE MouseArea, so the
- * click / middle-close / close-hit / drag-reorder paths can't fight each other):
- *   - left click           -> switch to the tab (stashing the outgoing tab's
- *                             column widths first, so the switch can re-seed)
- *   - left click on close   -> close the tab
- *   - middle click on a tab -> close the tab
- *   - left drag a tab       -> reorder; the model is moved once, on release
- *   - middle click on empty -> new playlist
- *   - File drag over the strip:
- *       * dropped < 2 s      -> a new tab, smart-named (single .m3u / a folder's
- *                               inner .m3u or its name), content scanned in
- *       * hover >= 2 s        -> an empty "New Playlist" pops and becomes active;
- *                               the drop then lands in it (generic name)
- *       * a .rwfpl            -> opened in its own new tab (as a fresh live copy)
- *
- * `tabs` is the PlaylistTabs (the list model + the session API); `view` is the
- * PlaylistView, read only to snapshot the active column widths before a switch.
- */
 Rectangle {
     id: strip
     color: Theme.surfacePage
@@ -111,7 +107,7 @@ Rectangle {
     // it (generic name) rather than creating a second, smart-named tab.
     property bool _proactive: false
 
-    // --- Scroll / overflow geometry -------------------------------------
+    // --- Scroll / overflow geometry ----------------------------------------
     //
     // Tunables (safe to nudge): the per-arrow width and a small right inset so
     // the last tab (or the arrow cluster) never butts flush against the pane's
@@ -384,7 +380,7 @@ Rectangle {
         function onCurrentIndexChanged() { Qt.callLater(strip._revealActive) }
     }
 
-    // --- Tabs viewport (clipped) -----------------------------------------
+    // --- Tabs viewport (clipped) -------------------------------------------
     //
     // Fills from the strip's left to the arrow cluster's left. When the cluster
     // collapses (no overflow) its left edge sits at the status panel's left, so
@@ -516,7 +512,7 @@ Rectangle {
                         anchors.rightMargin: 6
                         anchors.verticalCenter: parent.verticalCenter
                         visible: !tabItem.editing
-                        text: "\u00D7" // ×
+                        text: "\u00D7" // multiplication sign
                         color: closeHover.hovered ? Theme.textPrimary : Theme.textFaint
                         font.family: Theme.uiFont
                         font.pixelSize: 14
@@ -593,8 +589,8 @@ Rectangle {
                             edgeScroll.stop() // clear any stale edge-scroll
                             pressX = mapToItem(strip, mouse.x, mouse.y).x
                             moved = false
-                            // Did the press land on the close glyph? (mouse.x is tab-local
-                            // since this fills the tab.)
+                            // Did the press land on the close glyph? (mouse.x is
+                            // tab-local since this fills the tab.)
                             pressOnClose = mouse.x >= (tabItem.width - closeBtn.width - 12)
                             strip._dragFrom = tabItem.index
                             strip._dragging = false
@@ -668,7 +664,7 @@ Rectangle {
         }
     }
 
-    // --- Scroll arrow cluster (left / right chevrons), just left of the status --
+    // --- Scroll arrow cluster (left / right chevrons), by the status -------
     //
     // Both arrows appear together while overflowing and collapse to zero width
     // otherwise (so the viewport reclaims the space). Each dims to inert at its
@@ -693,7 +689,7 @@ Rectangle {
 
             Text {
                 anchors.centerIn: parent
-                text: "\u2039" // ‹
+                text: "\u2039" // single left angle quote
                 font.family: Theme.uiFont
                 font.pixelSize: 16
                 color: !strip.canScrollLeft ? "#4A4A4A"
@@ -720,7 +716,7 @@ Rectangle {
 
             Text {
                 anchors.centerIn: parent
-                text: "\u203A" // ›
+                text: "\u203A" // single right angle quote
                 font.family: Theme.uiFont
                 font.pixelSize: 16
                 color: !strip.canScrollRight ? "#4A4A4A"
@@ -737,14 +733,13 @@ Rectangle {
         }
     }
 
-    // --- Wheel scrolling -------------------------------------------------
+    // --- Wheel scrolling ---------------------------------------------------
     //
     // Handled on the MouseAreas under the cursor (the tabs' tabMouse and the
     // emptyArea), forwarding to strip._onWheel above. See that function's note
     // for why a strip-level WheelHandler does not work in this layout.
 
-
-    // --- File drag-and-drop onto the strip -------------------------------
+    // --- File drag-and-drop onto the strip ---------------------------------
     DropArea {
         anchors.fill: parent
         onEntered: function (drag) {

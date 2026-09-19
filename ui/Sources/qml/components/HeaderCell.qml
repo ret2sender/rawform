@@ -18,27 +18,30 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// HeaderCell.qml
+//
+// Shared header cell for HorizontalHeaderView delegates (the metadata pane and the
+// playlist header). It carries the shared header look: a flat #181818 band with a bold,
+// elided title.
+//
+// Deliberately small and host-agnostic so the reuse is real, not a copy:
+//  - It reads `display` as a required delegate property (the view injects it),
+//    never an ancestor id, so it is not tied to one host's scope.
+//  - `alignment`, `showDivider`, and `dividerColor` cover the per-column
+//    differences between the two headers (the playlist right-aligns some
+//    columns and draws a divider; the metadata pane wants neither by default).
+//  - It owns NO interaction. A host that needs a draggable/reorderable header
+//    composes this cell with its own MouseArea as a sibling in the delegate,
+//    rather than this component growing a content slot it cannot test in
+//    isolation. That keeps the load-bearing reorder logic out of here.
+//
+// Font: the Theme singleton's UI family, resolvable in any window; this
+// component has no reliance on ids in the surrounding scope.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
-/*
- * Shared header cell for HorizontalHeaderView delegates (the metadata pane
- * and the playlist header). It carries the
- * foobar-style header look: a flat #181818 band with a bold, elided title.
- *
- * Deliberately small and host-agnostic so the reuse is real, not a copy:
- *  - It reads `display` as a required delegate property (the view injects it),
- *    never an ancestor id, so it is not tied to one host's scope.
- *  - `alignment`, `showDivider`, and `dividerColor` cover the per-column
- *    differences between the two headers (the playlist right-aligns some
- *    columns and draws a divider; the metadata pane wants neither by default).
- *  - It owns NO interaction. A host that needs a draggable/reorderable header
- *    composes this cell with its own MouseArea as a sibling in the delegate,
- *    rather than this component growing a content slot it cannot test in
- *    isolation. That keeps the load-bearing reorder logic out of here.
- *
- * Font: the Theme singleton's UI family, resolvable in any window; this
- * component has no reliance on ids in the surrounding scope.
- */
 Rectangle {
     id: cell
 

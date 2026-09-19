@@ -18,6 +18,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TrackScanner.cpp
+//
+// Implementation of the off-thread scanner: the audio-extension allowlist, M3U
+// expansion, the recursive enumeration phase, the parallel readTrack phase, and
+// the ordered, coalesced marshal of results back to the GUI thread.
+
 #include "media/TrackScanner.h"
 
 #include "media/TrackReader.h"
@@ -39,7 +45,7 @@
 namespace rawform {
 namespace {
 
-// --- Format gating -------------------------------------------------------
+// --- Format gating ---------------------------------------------------------
 
 /// Audio extensions we add to a playlist: everything TagLib reads, plus ac3/dts,
 /// which TagLib cannot parse but the engine reads through its FFmpeg metadata
@@ -62,7 +68,7 @@ bool isM3uSuffix(const QString& suffixLower) {
     return suffixLower == QLatin1String("m3u") || suffixLower == QLatin1String("m3u8");
 }
 
-// --- M3U expansion -------------------------------------------------------
+// --- M3U expansion ---------------------------------------------------------
 
 /// Expand one .m3u/.m3u8 to the EXISTING audio files it references, in order.
 /// Relative paths resolve against the playlist's own directory. We do NOT trust
@@ -97,7 +103,7 @@ QStringList expandM3u(const QString& m3uPath) {
     return out;
 }
 
-// --- Phase 1: enumeration (runs off-thread) ------------------------------
+// --- Phase 1: enumeration (runs off-thread) --------------------------------
 
 /// Expand the raw inputs into an ordered, deduped list of audio file paths.
 ///   - a folder       -> recursive walk, audio natural-sorted, then any .m3u in
@@ -107,7 +113,7 @@ QStringList expandM3u(const QString& m3uPath) {
 ///   - anything else   -> ignored.
 /// Dedup is by canonical path across the WHOLE request (overlapping drops),
 /// preserving first-seen order. Duplicates across SEPARATE requests are allowed
-/// (foobar lets you queue the same track twice).
+/// (a playlist may queue the same track twice).
 QStringList enumerateFiles(const QStringList& inputs) {
     QStringList ordered;
     QSet<QString> seen;

@@ -18,10 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import QtQuick
-
-
-// =============================================================================
 // ReplayGainScanProgress.qml
 //
 // The scan progress overlay, shown inside the Properties window while a
@@ -34,7 +30,11 @@ import QtQuick
 // It is purely a view over the controller: currentName / doneTracks / totalTracks
 // / overallProgress drive the readout, and Cancel calls controller.cancel(). It
 // holds no state of its own.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+
 Item {
     id: root
 

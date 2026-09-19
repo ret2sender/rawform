@@ -18,8 +18,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// ---------------------------------------------------------------------------
-// rawform: standalone unit test for the custom-column pattern evaluator.
+// PatternEvaluatorTest.cpp
+//
+// Standalone unit test for the custom-column pattern evaluator.
 //
 // Deliberately Qt-Quick-FREE: it links only Qt6::Core + yaml-cpp (the latter is
 // pulled in transitively by ColumnSchema.cpp, whose fieldFromString the
@@ -42,7 +43,6 @@
 //         -o pattern_test && ./pattern_test
 //
 // Exits non-zero if any check fails (so it doubles as a CI gate).
-// ---------------------------------------------------------------------------
 
 #include "columns/PatternEvaluator.h"
 #include "media/TrackData.h"
@@ -100,52 +100,52 @@ TrackData sampleTrack() {
 int main() {
     const TrackData t = sampleTrack();
 
-    // --- literals & empties --------------------------------------------------
+    // --- literals & empties ------------------------------------------------
     expect(t, QStringLiteral("hello world"), QStringLiteral("hello world"), "literal");
     expect(t, QString(),                     QString(),                     "empty_pattern");
 
-    // --- native field tokens (strict lowercase ids) --------------------------
+    // --- native field tokens (strict lowercase ids) ------------------------
     expect(t, QStringLiteral("%artist%"), QStringLiteral("Kool & The Gang"), "field_artist");
     expect(t, QStringLiteral("%title%"),  QStringLiteral("Celebration"),     "field_title");
     expect(t, QStringLiteral("%year%"),   QStringLiteral("1980"),            "field_year");
 
-    // --- composites go through renderFieldValue too --------------------------
+    // --- composites go through renderFieldValue too ------------------------
     expect(t, QStringLiteral("%track_index%"),
            QStringLiteral("1.01"), "composite_track_index");
     expect(t, QStringLiteral("%album_group%"),
            QStringLiteral("Kool & The Gang - Celebrate!"), "composite_album_group");
 
-    // --- custom tags from extraTags (token upper-cased for the lookup) -------
+    // --- custom tags from extraTags (token upper-cased for the lookup) -----
     expect(t, QStringLiteral("%barcode%"), QStringLiteral("042282656328"), "tag_barcode_lower");
     expect(t, QStringLiteral("%BARCODE%"), QStringLiteral("042282656328"), "tag_barcode_upper");
     expect(t, QStringLiteral("%composer%"),
            QStringLiteral("R. Bell; Kool & The Gang"), "tag_multi_join");
 
-    // --- STRICT lowercase: an upper-case native id is NOT the field ----------
+    // --- STRICT lowercase: an upper-case native id is NOT the field --------
     // "%ARTIST%" does not match the Artist field; it falls through to
     // extraTags["ARTIST"], which is absent (ARTIST was promoted out) -> empty.
     expect(t, QStringLiteral("%ARTIST%"), QString(), "strict_lowercase_artist");
 
-    // --- literal + token mixing (the YAML banner's example tokens) ------------
+    // --- literal + token mixing (the YAML banner's example tokens) ---------
     expect(t, QStringLiteral("%artist% - %barcode%"),
            QStringLiteral("Kool & The Gang - 042282656328"), "mixed_literal");
 
-    // --- adjacency: %a%%b% concatenates, no phantom percent ------------------
+    // --- adjacency: %a%%b% concatenates, no phantom percent ----------------
     expect(t, QStringLiteral("%artist%%title%"),
            QStringLiteral("Kool & The GangCelebration"), "adjacent_tokens");
 
-    // --- %% escape -> a single literal percent -------------------------------
+    // --- %% escape -> a single literal percent -----------------------------
     expect(t, QStringLiteral("100%% off"), QStringLiteral("100% off"), "escape_percent");
     expect(t, QStringLiteral("%%"),        QStringLiteral("%"),        "escape_only");
 
-    // --- unterminated '%' is lenient (literal tail) --------------------------
+    // --- unterminated '%' is lenient (literal tail) ------------------------
     expect(t, QStringLiteral("%artist"), QStringLiteral("%artist"), "unterminated_head");
     expect(t, QStringLiteral("a %b"),    QStringLiteral("a %b"),     "unterminated_tail");
 
-    // --- unknown token -> empty ----------------------------------------------
+    // --- unknown token -> empty --------------------------------------------
     expect(t, QStringLiteral("%nope%"), QString(), "unknown_token");
 
-    // --- unset native field -> empty (no "0") --------------------------------
+    // --- unset native field -> empty (no "0") ------------------------------
     {
         const TrackData blank;
         expect(blank, QStringLiteral("%year%"),        QString(), "unset_year_empty");

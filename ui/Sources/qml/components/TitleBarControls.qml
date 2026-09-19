@@ -18,29 +18,29 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TitleBarControls.qml
+//
+// Caption buttons for the frameless title bar.
+//
+// Minimize, maximize/restore, and close, in that visual order. The maximize button is
+// profile-gated (TitleBarStyle.showMaximize): present on the Linux profiles, absent on
+// the Windows profile (its icon set carries no maximize artwork). macOS is not handled
+// here, as the parent supplies the native traffic lights instead.
+//
+// This is a Control so the whole caption chunk can be padded with the
+// stock leftPadding/rightPadding/topPadding/bottomPadding contract: the
+// Control derives its implicit size from contentItem plus padding, and
+// the parent layout sees one box that already includes the gap.
+//
+// All per-platform values come from TitleBarStyle.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-
 import com.rawform.app
 
-
-/*!
-    Caption buttons for the frameless title bar.
-
-    Minimize, maximize/restore, and close, in that visual order. The
-    maximize button is profile-gated (TitleBarStyle.showMaximize): present
-    on the Linux profiles, absent on the Windows profile (its icon set
-    carries no maximize artwork). macOS is not handled here, as the parent supplies the native
-    traffic lights instead.
-
-    This is a Control so the whole caption chunk can be padded with the
-    stock leftPadding/rightPadding/topPadding/bottomPadding contract: the
-    Control derives its implicit size from contentItem plus padding, and
-    the parent layout sees one box that already includes the gap.
-
-    All per-platform values come from TitleBarStyle.
-*/
 Control {
     id: root
 

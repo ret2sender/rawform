@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ColumnSchema.cpp
+//
+// Implementation of the column vocabulary declared in ColumnSchema.h: the
+// ColumnField <-> string spellings (the canonical field ids that round-trip
+// through .rwfpl headers and the column preset), the built-in catalog the
+// schema is seeded from, the custom-column identity encoding ("custom:<id>"),
+// and the alignment keyword mapping.
+
 #include "columns/ColumnSchema.h"
 
 #include <QHash>
@@ -243,7 +251,7 @@ ColumnSchema ColumnSchema::load() {
     return schema;
 }
 
-// --- Custom-column identity / encoding --------------------------------------
+// --- Custom-column identity / encoding -------------------------------------
 
 bool isCustomFieldId(const QString& fieldId) {
     return fieldId.startsWith(QLatin1String(kCustomFieldPrefix));
@@ -262,7 +270,7 @@ QString customFieldId(const QString& id) {
     return QLatin1String(kCustomFieldPrefix) + id;
 }
 
-// --- Alignment <-> keyword ---------------------------------------------------
+// --- Alignment <-> keyword -------------------------------------------------
 
 Qt::Alignment alignmentFromString(const QString& keyword) {
     const QString k = keyword.trimmed().toLower();

@@ -18,11 +18,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components (delegates, handles, effects)
-// resolve outer document ids statically, so qmllint checks them and the
-// compiler can bind them ahead of time. The trade-off is that views cannot
-// inject model data by context, so every delegate declares what it consumes
-// as `required property`.
+// ToolDialogCloseButton.qml
+//
+// Close "x" for the frameless tool dialogs.
+//
+// One fixed look shared by every dialog that carries a slim custom title
+// bar (Settings, About, Properties, Custom Columns, Rename Files, Edit
+// Value): a 22 x 22 cell, a 20 x 20 AppIcon glyph, a danger plate on
+// hover, and a colorization chain that tracks the enabled/hovered state
+// through Theme. The glyph goes through AppIcon so its logical size is
+// pinned on every screen; a plain Image rasterizes the svg at 20 device
+// pixels and shrinks on high-DPI displays.
+//
+// The instantiation site owns only what varies: anchors (kept out of
+// here so the button also works inside a layout), `enabled` for dialogs
+// that must not close mid-write, and `onClicked`.
+
 pragma ComponentBehavior: Bound
 
 import QtQuick
@@ -30,24 +41,6 @@ import QtQuick.Controls.Basic
 import QtQuick.Effects
 import com.rawform.app
 
-
-// =============================================================================
-// ToolDialogCloseButton.qml
-//
-/// Close "x" for the frameless tool dialogs.
-///
-/// One fixed look shared by every dialog that carries a slim custom title
-/// bar (Settings, About, Properties, Custom Columns, Rename Files, Edit
-/// Value): a 22 x 22 cell, a 20 x 20 AppIcon glyph, a danger plate on
-/// hover, and a colorization chain that tracks the enabled/hovered state
-/// through Theme. The glyph goes through AppIcon so its logical size is
-/// pinned on every screen; a plain Image rasterizes the svg at 20 device
-/// pixels and shrinks on high-DPI displays.
-///
-/// The instantiation site owns only what varies: anchors (kept out of
-/// here so the button also works inside a layout), `enabled` for dialogs
-/// that must not close mid-write, and `onClicked`.
-// =============================================================================
 Button {
     id: root
 

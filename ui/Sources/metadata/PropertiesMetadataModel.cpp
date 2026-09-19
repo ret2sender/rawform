@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PropertiesMetadataModel.cpp
+//
+// Implementation of the editable Metadata tab model: the fixed schema, the
+// per-field list/scalar policy, the capped multi-value display join, the
+// per-track staging and edit helpers the pane and the Edit Value dialog drive,
+// and collectEdits, which turns staged values into the write list MetadataEditor
+// consumes.
+
 #include "metadata/PropertiesMetadataModel.h"
 
 #include <QChar>
@@ -35,7 +43,7 @@ namespace rawform {
 
 namespace {
 
-// The fixed, always-shown editable schema, in foobar's order. Each entry is a
+// The fixed, always-shown editable schema, in display order. Each entry is a
 // {display label, canonical tag key} pair. Composer / Performer / Comment are not
 // promoted to TrackData fields, so they read from extraTags by these keys.
 struct SchemaField {
@@ -58,7 +66,7 @@ const SchemaField kSchema[] = {
     { "Comment",      "COMMENT" },
 };
 
-// The guillemet marker foobar prefixes onto a value that disagrees across the
+// The guillemet marker prefixed onto a value that disagrees across the
 // selection. Built from QChars so this source file stays pure ASCII (the only
 // place the glyphs exist is at runtime). Reads "<<multiple values>> " with proper
 // guillemets and a trailing space before the per-track list.
@@ -69,7 +77,7 @@ QString multipleMarker() {
     return kMarker;
 }
 
-// --- display cap -------------------------------------------------------
+// --- display cap -----------------------------------------------------------
 // Hard ceiling on any VALUE-CELL display string this model produces. The cell is
 // one elided line; no window width can show more than a few hundred characters.
 // The scenario this prevents: joining EVERY per-track value of a 15k-track
@@ -98,13 +106,13 @@ QString capDisplay(const QString& s) {
     return out;
 }
 
-// --- per-field value policy --------------------------------------------
+// --- per-field value policy ------------------------------------------------
 // List-type keys hold an ordered set of distinct values (multiple Vorbis fields);
 // every other key is scalar (exactly one value, written verbatim and never split,
 // so a comment or a date that happens to contain a semicolon stays intact). The
 // schema's text fields and the number pairs are scalar; ARTIST / ALBUMARTIST /
-// GENRE / COMPOSER / PERFORMER are lists; any custom "<KEY>" row defaults to list,
-// matching foobar.
+// GENRE / COMPOSER / PERFORMER are lists; any custom "<KEY>" row defaults to
+// list.
 bool isListKey(const QString& key) {
     static const QSet<QString> kList = {
         QStringLiteral("ARTIST"), QStringLiteral("ALBUMARTIST"),
@@ -754,7 +762,7 @@ void PropertiesMetadataModel::removeFieldAt(int row) {
     stageList(key, QStringList(static_cast<qsizetype>(m_selection.size())));
 }
 
-// =============================================================================
+// ===========================================================================
 // Clipboard: Copy / Cut / Paste in a per-track block text format.
 //
 // One block per selected track, in selection order; each block is a run of
@@ -781,7 +789,7 @@ void PropertiesMetadataModel::removeFieldAt(int row) {
 // fragile. The one other known lossiness: a value containing a literal "; " in
 // a LIST field, which the list editing already treats as a separator
 // everywhere else.
-// =============================================================================
+// ===========================================================================
 
 namespace {
 
@@ -954,23 +962,21 @@ QString PropertiesMetadataModel::pasteFields(const QString& text) {
         }
     }
 
-    // Stage each key across the current track selection: broadcast a single source
-    // block to all tracks, else map block t to track t. Absence preserves:
-    // for a known key, a track whose block does not CONTAIN the key keeps its
-    // current effective value, so only an explicit "KEY=" empty line removes.
-    // (contains(), deliberately not an empty-value test, is what separates the
-    // two.) rawform's own serialize emits a uniform key set, so round trips
-    // never exercise it; the case it decides is a hand-crafted or foreign
-    // clipboard with heterogeneous blocks, where clearing fields the source
-    // simply never mentioned would be a surprise. A fully-preserving paste
-    // stages values equal to the on-disk originals, which stageList drops, so
-    // no dirty noise appears either. An existing field is staged (overwritten);
-    // an unknown key goes
-    // through the add path, which skips reserved and all-empty new keys itself,
-    // so its return is intentionally ignored here (an unknown key also has no
-    // current values, so absence-preservation cannot apply to it). Note the
-    // broadcast case never exercises the preserve branch: with one block, every
-    // unioned key is by construction contained in it.
+    // Stage each key across the current track selection: broadcast a single source block
+    // to all tracks, else map block t to track t. Absence preserves: for a known key, a
+    // track whose block does not CONTAIN the key keeps its current effective value, so
+    // only an explicit "KEY=" empty line removes. (contains(), deliberately not an
+    // empty-value test, is what separates the two.) rawform's own serialize emits a
+    // uniform key set, so round trips never exercise it; the case it decides is a
+    // hand-crafted or foreign clipboard with heterogeneous blocks, where clearing fields
+    // the source simply never mentioned would be a surprise. A fully-preserving paste
+    // stages values equal to the on-disk originals, which stageList drops, so no dirty
+    // noise appears either. An existing field is staged (overwritten); an unknown key
+    // goes through the add path, which skips reserved and all-empty new keys itself, so
+    // its return is intentionally ignored here (an unknown key also has no current
+    // values, so absence-preservation cannot apply to it). Note the broadcast case never
+    // exercises the preserve branch: with one block, every unioned key is by construction
+    // contained in it.
     for (const QString& key : keys) {
         const bool known = rowForKey(key) >= 0;
         const QStringList current = known ? effectivePerTrack(key) : QStringList{};
@@ -991,11 +997,11 @@ QString PropertiesMetadataModel::pasteFields(const QString& text) {
     return {};
 }
 
-// =============================================================================
+// ===========================================================================
 // Transforms: value transforms (Capitalize, Clean up), Crop, and Auto
 // track number. All stage through the normal edit machinery, so they are shown
 // with a dirty marker, reverted by Cancel, and written on Apply.
-// =============================================================================
+// ===========================================================================
 
 void PropertiesMetadataModel::transformSelectedValues(const QList<int>& rows,
                                                       QString (*fn)(const QString&)) {

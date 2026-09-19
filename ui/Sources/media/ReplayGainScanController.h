@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // ReplayGainScanController.h
 //
 // The thin Qt driver that runs the zero-Qt ReplayGainScanner off the GUI thread
@@ -53,7 +50,8 @@
 // worker never touches a GUI-thread QObject. Progress is pushed back with a
 // queued invokeMethod, and a std::atomic cancel flag is polled between tracks
 // and, through the scanner's progress callback, between decode chunks.
-// =============================================================================
+
+#pragma once
 
 #include <QFutureWatcher>
 #include <QObject>
@@ -89,8 +87,8 @@ public:
     /// additionally combines every scanned row into one shared album gain and peak
     /// written onto all of them (the selection is treated as one album).
     /// ScanAlbumsByTags partitions the batch into albums by each item's albumKey
-    /// (built by the pane from the album artist / date / album tags, foobar's
-    /// default grouping) and runs the ScanAlbum combine per group, one shared
+    /// (built by the pane from the album artist / date / album tags, the
+    /// conventional grouping) and runs the ScanAlbum combine per group, one shared
     /// album value per album instead of one for the whole selection. Exposed to
     /// QML so the menu can pass it as a plain int.
     enum ScanMode { ScanTrack = 0, ScanAlbum = 1, ScanAlbumsByTags = 2 };

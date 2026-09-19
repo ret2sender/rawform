@@ -18,6 +18,28 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistFormat.h
+//
+// Which on-disk playlist format a path denotes, and the suffix rules that decide it.
+//
+// Header-only and pure (no QObject, no I/O): both the GUI thread (PlaylistStore
+// deciding what to write, PlaylistTabs deciding what to read) and pool workers
+// use it, so it must be free of shared state.
+//
+// WHY THE POLICY LIVES HERE, NOT IN QML. A save dialog gives two independent
+// signals about the intended format: the suffix the user actually typed, and the
+// name filter they had selected. Qt's FileDialog::defaultSuffix can only append
+// ONE fixed extension, so it cannot follow a filter change; and the native
+// macOS panel and the portal dialog on Wayland differ in whether they rewrite
+// the extension for you. Resolving both signals in one C++ place is the only way
+// the two platforms can be made to agree.
+//
+// PRECEDENCE: an explicit, recognized suffix on the path always wins
+// over the filter hint. Typing "mix.m3u" while the M3U8 filter is selected
+// yields M3U, because the typed extension is the more deliberate act. Only when
+// the path carries no recognized suffix does the hint decide, and the matching
+// extension is then appended.
+
 #pragma once
 
 #include <QChar>      // QLatin1Char (the dot ensurePlaylistSuffix appends)
@@ -27,28 +49,6 @@
 
 namespace rawform {
 
-/**
- * @brief Which on-disk playlist format a path denotes, and the suffix rules
- *        that decide it.
- *
- * Header-only and pure (no QObject, no I/O): both the GUI thread (PlaylistStore
- * deciding what to write, PlaylistTabs deciding what to read) and pool workers
- * use it, so it must be free of shared state.
- *
- * WHY THE POLICY LIVES HERE, NOT IN QML. A save dialog gives two independent
- * signals about the intended format: the suffix the user actually typed, and the
- * name filter they had selected. Qt's FileDialog::defaultSuffix can only append
- * ONE fixed extension, so it cannot follow a filter change; and the native
- * macOS panel and the portal dialog on Wayland differ in whether they rewrite
- * the extension for you. Resolving both signals in one C++ place is the only way
- * the two platforms can be made to agree.
- *
- * PRECEDENCE: an explicit, recognized suffix on the path always wins
- * over the filter hint. Typing "mix.m3u" while the M3U8 filter is selected
- * yields M3U, because the typed extension is the more deliberate act. Only when
- * the path carries no recognized suffix does the hint decide, and the matching
- * extension is then appended.
- */
 enum class PlaylistFormat {
     Rwfpl, ///< rawform's own binary RFW1 document (tracks + column layout + title)
     M3u,   ///< extended M3U, UTF-8 (see M3uFile.h)

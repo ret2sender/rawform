@@ -18,10 +18,24 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ThemedMenuBar.qml
+//
+// The main window's menu bar: File, Edit, View and Help labels in a Row, each
+// with a themed drop-down (ThemedMenu) opened through the host window's
+// openMenu so the popup is positioned under its label, and an Alt+letter
+// shortcut that toggles it.
+//
+// Everything the bar can DO is a signal (addFilesRequested, settingsRequested,
+// aboutRequested, ...); the host owns the doing. The bar holds no reference
+// to dialogs, stores, views or windows, so it instantiates anywhere and the
+// wiring reads in one place at the host. The only host member it touches is
+// openMenu, resolved through the Window attached property rather than an
+// ancestor id.
+
+pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-
 
 Rectangle {
     id: root

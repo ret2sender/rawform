@@ -18,29 +18,44 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer: it deliberately reaches the C++
-// context properties (audioController, playlistTabs, ...), which qmllint
-// cannot see, so the unqualified-access category is disabled file-wide.
-// Under the Bound pragma this directive covers context properties ONLY;
-// id resolution into nested components is statically checked under the
-// pragma below.
-// Components stay fully linted; keep global wiring HERE so they can.
-// Cost: a typo'd global name in this file surfaces at runtime, not lint.
+// MainWindow.qml
+//
+// The application window and the app's wiring layer. Frameless on Linux and
+// Windows (rounded, self-outlined windowBackground, custom TitleBar, resize
+// grips); titled on macOS, where applyMacOSStyling makes the native title bar
+// transparent and full-size-content so the QML title bar row sits under the
+// traffic lights (titleBarOffset pulls the content up by the measured native
+// height).
+//
+// Layout: TitleBar over a ThemedSplitView. The left pane stacks the
+// ThemedMenuBar, the album art and the MetadataView; the right pane stacks
+// the PlaylistTabBar, the PlaylistView and the StatusLogBar, with the
+// LogConsole popping up over the playlist. The PlayerBar spans the bottom.
+//
+// Wiring: this file binds the C++ context properties (audioController,
+// playlistTabs, trackScanner, playlistStore, windowGeometry, metadataModel)
+// to the components, which declare what they consume and reach no global
+// themselves. It forwards ThemedMenuBar's request signals to PlaylistDialogs
+// and the tool windows, feeds the status line (live activity while busy,
+// otherwise the latest LogStore entry), logs activity edges and playback
+// errors, and persists the windowed geometry on quit. Settings and About are
+// declared here so they share this window's lifetime; Properties, Custom
+// Columns and Rename Files are created by PlaylistView.
 
-// Bound component behavior: nested components resolve outer document ids
-// statically instead of through dynamic context lookup. The one capture in
-// this file is the album-art layer.effect reading `artMask`; the pragma is
-// exactly what makes that reference statically valid. No delegates
-// exist here; any added later must declare what they consume as
-// `required property`.
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// metadataModel, playlistStore, playlistTabs, trackScanner, windowGeometry),
+// which qmllint cannot see, so the unqualified-access category is disabled
+// file-wide. Components stay fully linted; keep global wiring in the views so
+// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
+
 pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Window
-
 
 ApplicationWindow {
     id: applicationWindow
@@ -374,7 +389,7 @@ ApplicationWindow {
                             // selection. When NOTHING is selected in the active tab
                             // (a fresh tab, a dropped m3u, nothing clicked yet), the
                             // pane falls back to the PLAYING track's cover instead of
-                            // clearing (foobar's "prefer selection, fall back to now
+                            // clearing ("prefer selection, fall back to now
                             // playing"). A non-empty selection always wins: clicking
                             // a row shows that row's album, cross-album selections
                             // still clear the pane (deliberately no fallback there:
@@ -435,8 +450,9 @@ ApplicationWindow {
                             // straight to the resolved source: an empty source (nothing
                             // selected, or a missing/unreadable file) clears to the
                             // placeholder, and a real cover fades in once it has decoded.
-                            // No manual double-buffering; correctness over a cover-to-cover
-                            // crossfade (switching covers briefly shows the placeholder).
+                            // No manual double-buffering; correctness over a
+                            // cover-to-cover crossfade (switching covers briefly shows
+                            // the placeholder).
                             Image {
                                 id: artImage
                                 anchors.fill: parent

@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// RenameSanitizer.cpp
+//
+// Implementation of the rename-name pipeline declared in RenameSanitizer.h: the
+// per-value scene sanitization (Unicode folding, charset mapping, separator
+// collapsing), the stem build over the pattern evaluator, and the final name
+// composition and validation.
+
 #include "rename/RenameSanitizer.h"
 
 #include "columns/PatternEvaluator.h" // evaluatePattern, TokenValueTransform
@@ -127,13 +134,12 @@ QString expandAmpersands(const QString& in) {
     return out;
 }
 
-/// Apostrophes DELETE rather than fold to '_': "Don't Stop" must read
-/// "dont_stop", not "don_t_stop"; no scene name ever underscored an elision.
-/// The set covers the straight
-/// ASCII apostrophe and the typographic ones tag editors produce (right and
-/// left single quotes, modifier letter apostrophe). Applied in BOTH the
-/// value sanitizer and the finalize pass's literal handling, so a pattern-
-/// literal apostrophe behaves identically to one inside a title.
+/// Apostrophes DELETE rather than fold to '_': "Don't Stop" must read "dont_stop", not
+/// "don_t_stop"; no scene name ever underscored an elision. The set covers the straight
+/// ASCII apostrophe and the typographic ones tag editors produce (right and left single
+/// quotes, modifier letter apostrophe). Applied in BOTH the value sanitizer and the
+/// finalize pass's literal handling, so a pattern- literal apostrophe behaves identically
+/// to one inside a title.
 QString removeApostrophes(const QString& in) {
     QString out = in;
     out.remove(QChar(0x0027)); // '

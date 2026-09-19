@@ -18,10 +18,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
+// AppInfo.h
+//
+// Read-only application metadata exposed to QML.
 
-/// @file AppInfo.h
-/// @brief Read-only application metadata exposed to QML.
+#pragma once
 
 #include <QObject>
 #include <QString>
@@ -35,7 +36,7 @@
 #define RAWFORM_VERSION_STR "0.0.0-unversioned"
 #endif
 
-/// @brief Exposes application metadata to QML as the @c AppInfo singleton.
+/// Exposes application metadata to QML as the `AppInfo` singleton.
 ///
 /// The version string has one source of truth, ui/VERSION.txt:
 /// ui/CMakeLists.txt reads that file into project()'s VERSION and bakes the
@@ -49,7 +50,7 @@
 /// deliberate: the constructor-mode trap only bites classes whose create()
 /// factory would inject configuration; there is none here.
 ///
-/// @note Deliberately not @c final: constructor-mode QML singletons are
+/// Note: Deliberately not `final`: constructor-mode QML singletons are
 /// instantiated by the engine through QQmlPrivate::QQmlElement<T>, which
 /// derives from T. Marking the class final makes registration ill-formed
 /// (MSVC diagnoses this as C3246; clang happens not to instantiate the
@@ -70,19 +71,17 @@ class AppInfo : public QObject {
     Q_PROPERTY(QString systemIconTheme READ systemIconTheme CONSTANT)
 
 public:
-    /// @brief Constructs an AppInfo.
-    /// @param parent Optional QObject parent for ownership.
+    /// Constructs an AppInfo; the optional QObject parent is for ownership only.
     explicit AppInfo(QObject* parent = nullptr);
 
-    /// @brief Application version from the build system.
-    /// @return Semantic version string, e.g. "1.0.0".
+    /// Application version from the build system: the semantic version string,
+    /// e.g. "1.0.0".
     [[nodiscard]] QString version() const;
 
-    /// @brief Qt library version loaded at runtime.
-    /// @return Version string as reported by qVersion().
+    /// Qt library version loaded at runtime, as reported by qVersion().
     [[nodiscard]] QString qtVersion() const;
 
-    /// @brief Name of the icon theme the user has configured.
+    /// Name of the icon theme the user has configured.
     ///
     /// Read from QIcon::themeName(), which the QPA platform theme
     /// populates during QGuiApplication construction, so it is available
@@ -94,7 +93,7 @@ public:
     /// tiling compositors, on desktops this build has never heard of, and
     /// on a Plasma session running a third-party theme such as Papirus.
     ///
-    /// @return Theme name, e.g. "breeze"; empty on Windows and macOS, and
+    /// Returns the theme name, e.g. "breeze"; empty on Windows and macOS, and
     /// on Linux sessions that expose no icon theme setting. An empty
     /// result is the expected fallback path, not an error - callers
     /// resolve it to their default styling.

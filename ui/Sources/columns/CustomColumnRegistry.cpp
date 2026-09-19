@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// CustomColumnRegistry.cpp
+//
+// Implementation of the custom-column registry: load and write-through of
+// playlist_custom_columns.yaml through the shared YAML idiom (utils/YamlFile.h),
+// id generation, and the mutation API the manager window drives. Every mutation
+// persists wholesale and emits the change signal the playlist models react to.
+
 #include "columns/CustomColumnRegistry.h"
 
 #include "utils/YamlFile.h"

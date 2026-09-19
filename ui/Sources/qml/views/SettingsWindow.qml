@@ -18,47 +18,20 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer: it deliberately reaches the C++
-// context properties (audioController, spectrumProvider, settingsStore),
-// which qmllint cannot see, so the unqualified-access category is disabled
-// file-wide. Under the Bound pragma this directive covers context
-// properties ONLY; the nav delegate declares its injected names and the
-// remaining outer-id captures are statically checked under the pragma.
-// Components stay fully linted; keep global wiring HERE so they can.
-// Cost: a typo'd global name in this file surfaces at runtime, not lint.
-
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// nav Repeater's delegate declares `index` and `modelData` as required
-// properties (the contract and the qmllint proof); child items inside it
-// qualify those reads through the delegate root id. The captures of
-// `navPane` and `settingsWindow` (also from FooterButton) are exactly what
-// the pragma makes statically valid.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Effects
-import QtQuick.Layouts
-import QtQuick.Window
-
-
-// =============================================================================
 // SettingsWindow.qml
 //
-// The application Settings window, opened from Edit > Settings. A non-modal,
-// frameless window that reuses the main window's chrome: transparent Window,
-// rounded Theme.surfacePage body at radius 8, a slim custom title bar with window-drag
-// and a close button. Text Theme.textPrimary, accent Theme.accentSoft, panels Theme.surfaceSunken.
+// The application Settings window, opened from Edit > Settings. A non-modal, frameless
+// window that reuses the main window's chrome: transparent Window, rounded
+// Theme.surfacePage body at radius 8, a slim custom title bar with window-drag and a
+// close button. Text Theme.textPrimary, accent Theme.accentSoft, panels
+// Theme.surfaceSunken.
 //
-// STRUCTURE: a left navigation pane and a right content area, over an Apply /
-// OK / Cancel footer. The nav is a list of { label, depth } entries:
-// depth 0 rows are top-level pages, depth 1 rows are indented sub-sections of
-// the page above them ("Playback" > "ReplayGain", "Tagging" > "MP3"). Every
-// row, parent or child, is
-// selectable and index-maps to one pane in the content switch; more panes drop
-// in by extending navModel and the switch.
+// STRUCTURE: a left navigation pane and a right content area, over an Apply / OK / Cancel
+// footer. The nav is a list of { label, depth } entries: depth 0 rows are top-level
+// pages, depth 1 rows are indented sub-sections of the page above them ("Playback" >
+// "ReplayGain", "Tagging" > "MP3"). Every row, parent or child, is selectable and
+// index-maps to one pane in the content switch; more panes drop in by extending navModel
+// and the switch.
 //
 // STAGING (no live apply): edits are held in a local `staged` object and pushed to
 // the controller only on Apply or OK. Apply commits and stays open; OK commits and
@@ -70,7 +43,20 @@ import QtQuick.Window
 // Fonts resolve through the Theme singleton, which is scope-independent, so
 // this being a separate top-level Window (outside MainWindow's id scope) is
 // irrelevant to font resolution.
-// =============================================================================
+
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// settingsStore, spectrumProvider), which qmllint cannot see, so the
+// unqualified-access category is disabled file-wide. Components stay fully
+// linted; keep global wiring in the views so they can. Cost: a typo'd global
+// name here surfaces at runtime, not at lint.
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Window
+
 Window {
     id: settingsWindow
 
@@ -125,10 +111,10 @@ Window {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Staged edits. Seeded from the controller's APPLIED values on open; the pane
     // reads and writes these, and Apply/OK copy them back to the controller.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A named type (see StagedSettings.qml) so the panes can declare a typed
     // `settings` property and qmllint verifies every staged member access.
     StagedSettings {
@@ -202,9 +188,9 @@ Window {
         requestActivate()
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Body: rounded frame matching the main window.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: windowBody
         anchors.fill: parent
@@ -218,7 +204,7 @@ Window {
             anchors.margins: 1   // sit inside the 1 px border
             spacing: 0
 
-            // ----- title bar: drag + close -----------------------------------
+            // ----- title bar: drag + close ---------------------------------
             Item {
                 id: titleBar
                 Layout.fillWidth: true
@@ -250,7 +236,7 @@ Window {
                 }
             }
 
-            // ----- nav + content ---------------------------------------------
+            // ----- nav + content -------------------------------------------
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -366,7 +352,7 @@ Window {
                 }
             }
 
-            // ----- footer: Apply / OK / Cancel -------------------------------
+            // ----- footer: Apply / OK / Cancel -----------------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56
@@ -397,9 +383,9 @@ Window {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A small themed footer button. accent paints the primary (OK) variant.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component FooterButton: Rectangle {
         id: fbtn
         property string label: ""

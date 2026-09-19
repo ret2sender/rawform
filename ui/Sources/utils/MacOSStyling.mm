@@ -18,40 +18,41 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/// @file MacOSStyling.mm
-/// @brief Objective-C++ implementation of native macOS window styling.
-///
-/// This file is compiled as Objective-C++ (.mm) so it can call AppKit APIs
-/// directly. It bridges from Qt's QQuickWindow to the underlying NSWindow to
-/// configure the title bar appearance for rawform.
-///
-/// The styling performs four operations:
-///   1. Adds @c NSWindowStyleMaskFullSizeContentView so the Qt content area
-///      extends behind the native title bar.
-///   2. Sets the title bar to transparent and hides the window title text, so
-///      only the traffic-light buttons remain visible over rawform's own QML
-///      title bar.
-///   3. Disables AppKit's default window dragging. rawform's QML TitleBar
-///      MouseArea moves the window via @c startSystemMove(); leaving AppKit
-///      dragging enabled as well would double-drive it.
-///   4. Measures the native title bar height (from the traffic-light buttons'
-///      superview) and passes it to QML as the @c nativeTitleBarHeight property,
-///      so the layout can offset its content by exactly that amount.
-///
-/// The styling is NOT one-shot. Entering and exiting native fullscreen (the
-/// green traffic light on a resizable window), and miniaturize/deminiaturize,
-/// make AppKit re-assert Qt's own style mask, which wipes our customization.
-/// Left unhandled, exiting fullscreen restores an opaque native title bar over
-/// the QML content, with no drag. To keep the look sticky we install a small
-/// observer (RawformWindowStyler) that re-applies on those transitions.
-///
-/// One subtlety the observer also handles: Qt runs its own geometry update on
-/// the fullscreen-exit notification, and re-toggling the style mask inline
-/// races that pass and loses height (the scenario this prevents: the window
-/// coming back one title bar shorter on every fullscreen round trip). So the
-/// observer captures the true windowed frame just before entering fullscreen,
-/// and on exit defers one runloop pass (past Qt's update) before re-applying
-/// the styling and stamping that exact frame back.
+// MacOSStyling.mm
+//
+// Objective-C++ implementation of native macOS window styling.
+//
+// This file is compiled as Objective-C++ (.mm) so it can call AppKit APIs
+// directly. It bridges from Qt's QQuickWindow to the underlying NSWindow to
+// configure the title bar appearance for rawform.
+//
+// The styling performs four operations:
+//   1. Adds `NSWindowStyleMaskFullSizeContentView` so the Qt content area
+//      extends behind the native title bar.
+//   2. Sets the title bar to transparent and hides the window title text, so
+//      only the traffic-light buttons remain visible over rawform's own QML
+//      title bar.
+//   3. Disables AppKit's default window dragging. rawform's QML TitleBar
+//      MouseArea moves the window via `startSystemMove()`; leaving AppKit
+//      dragging enabled as well would double-drive it.
+//   4. Measures the native title bar height (from the traffic-light buttons'
+//      superview) and passes it to QML as the `nativeTitleBarHeight` property,
+//      so the layout can offset its content by exactly that amount.
+//
+// The styling is NOT one-shot. Entering and exiting native fullscreen (the
+// green traffic light on a resizable window), and miniaturize/deminiaturize,
+// make AppKit re-assert Qt's own style mask, which wipes our customization.
+// Left unhandled, exiting fullscreen restores an opaque native title bar over
+// the QML content, with no drag. To keep the look sticky we install a small
+// observer (RawformWindowStyler) that re-applies on those transitions.
+//
+// One subtlety the observer also handles: Qt runs its own geometry update on
+// the fullscreen-exit notification, and re-toggling the style mask inline
+// races that pass and loses height (the scenario this prevents: the window
+// coming back one title bar shorter on every fullscreen round trip). So the
+// observer captures the true windowed frame just before entering fullscreen,
+// and on exit defers one runloop pass (past Qt's update) before re-applying
+// the styling and stamping that exact frame back.
 
 #include "utils/MacOSStyling.h"
 
@@ -245,7 +246,7 @@ void applyMacOSStyling(QQmlApplicationEngine* engine) {
 
 #else
 
-/// @brief No-op fallback for non-macOS platforms.
+/// No-op fallback for non-macOS platforms.
 ///
 /// The build normally excludes this translation unit off macOS (see
 /// CMakeLists.txt), and main.cpp only calls applyMacOSStyling under Q_OS_MAC, so

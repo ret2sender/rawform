@@ -18,6 +18,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// Paths.cpp
+//
+// Implementation of the config-directory rule declared in Paths.h.
+
 #include "paths/Paths.h"
 
 #include <QDir>

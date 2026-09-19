@@ -115,8 +115,8 @@ bool NullSink::open(const AudioFormat& sourceFormat, const RateDecision& decisio
     m_scratch.assign(
         m_blockFrames * static_cast<std::size_t>(sourceFormat.channels), 0.0f);
 
-    // Record the decision for the rate test. One open() per track without gapless, so this
-    // log has one entry per track played. Also move the simulated device's
+    // Record the decision for the rate test. One open() per track without gapless,
+    // so this log has one entry per track played. Also move the simulated device's
     // current rate to the executed device rate, so the engine's NEXT
     // capabilities() read reflects the rate we are now running at, exactly as a
     // real device would after a nominal-rate change. This is what lets a
@@ -134,12 +134,12 @@ bool NullSink::open(const AudioFormat& sourceFormat, const RateDecision& decisio
     return true;
 }
 
-// In-place reconfigure. Accept only when the test opted in AND the device is genuinely open
-// (the engine's contract says it only calls in that state, but a fake that
-// enforces the contract catches an engine that breaks it). The engine parked
-// the RT thread before calling (stop() joined the pump), so touching the
-// format and scratch is race-free; the source stays attached, exactly the
-// contract's "same ring source, merely reconfigured".
+// In-place reconfigure. Accept only when the test opted in AND the device is
+// genuinely open (the engine's contract says it only calls in that state,
+// but a fake that enforces the contract catches an engine that breaks it).
+// The engine parked the RT thread before calling (stop() joined the pump),
+// so touching the format and scratch is race-free; the source stays attached,
+// exactly the contract's "same ring source, merely reconfigured".
 bool NullSink::reconfigure(const AudioFormat&  sourceFormat,
                            const RateDecision& decision) {
     if (!m_reconfigureSupported || !m_opened || !sourceFormat.isValid()) {

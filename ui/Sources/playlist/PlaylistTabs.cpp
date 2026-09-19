@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistTabs.cpp
+//
+// Implementation of the tab session manager: per-tab model, selection, and
+// reloader ownership, the active-tab pointers, the scanner seam with its FIFO of
+// scan targets, tab creation, closing, moving, and renaming, the live-playlist
+// autosave and restore, and the width and scroll parking that survives a switch.
+
 #include "playlist/PlaylistTabs.h"
 
 #include "columns/ColumnSchema.h"
@@ -207,7 +214,7 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     for (const QVariant& w : model->defaultColumnWidths())
         tab->widths << w.toInt();
 
-    // --- Per-tab wiring --------------------------------------------------
+    // --- Per-tab wiring ----------------------------------------------------
     // Each tab's selection drives ITS OWN reloader (freshness on its rows),
     // independent of which tab is shown.
     connect(selection, &QItemSelectionModel::selectionChanged, reloader,
@@ -844,7 +851,7 @@ void PlaylistTabs::loadInto(Tab* tab, const QString& localPath,
                 }
 
                 // Restore the focus row as CURRENT only, never a
-                // selection: foobar's remembered last-selected track is the
+                // selection: the remembered last-selected track is the
                 // focus outline, not a tint. NoUpdate leaves the (empty)
                 // selection untouched. Clamped against the live row count (the
                 // file may have been written against a different track list),

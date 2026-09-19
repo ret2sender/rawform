@@ -18,6 +18,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// Paths.h
+//
+// The one place the app-managed config directory is computed.
+
 #pragma once
 
 #include <QString>

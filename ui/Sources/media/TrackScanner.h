@@ -18,6 +18,33 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TrackScanner.h
+//
+// Off-thread file ingestion: dialog/drop URLs to per-file readTrack to batched results
+// marshaled back to the GUI thread. Nothing it does on the GUI thread touches the disk,
+// so adding a huge folder never freezes the UI.
+//
+// Model-free on purpose: it only emits results, and PlaylistTabs decides which
+// tab's model receives them. That keeps the "which playlist" decision a single
+// wiring seam, correct across tab switches.
+//
+// Two phases, both off the GUI thread:
+//   1. ENUMERATE (QtConcurrent::run): walk folders recursively, apply the
+//      audio-extension allowlist, expand .m3u/.m3u8 (merged with the walk,
+//      deduped by canonical path), natural-sort. Yields an ordered QStringList.
+//   2. SCAN (QtConcurrent::mapped): fan the per-file readTrack (TagLib, then
+//      the engine's FFmpeg probe, plus QFileInfo) across the global pool.
+//      mapped indexes by INPUT position, so output order matches the
+//      enumerated order regardless of which worker finishes first.
+//
+// Marshal: a QFutureWatcher delivers results on the GUI thread; we drain them in
+// order via a "next to emit" cursor (never blocking on one not ready yet) and a
+// coalescing QTimer flushes the buffer as one contiguous tracksReady() batch, so
+// thousands of files become a handful of model insertions.
+//
+// Re-entrancy: a scan requested while one is running is queued and started on
+// finish (one at a time; nothing is dropped).
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -32,33 +59,6 @@
 
 namespace rawform {
 
-/**
- * @brief Off-thread file ingestion: dialog/drop URLs to per-file readTrack to
- *        batched results marshaled back to the GUI thread. Nothing it does on
- *        the GUI thread touches the disk, so adding a huge folder never freezes
- *        the UI.
- *
- * Model-free on purpose: it only emits results, and PlaylistTabs decides which
- * tab's model receives them. That keeps the "which playlist" decision a single
- * wiring seam, correct across tab switches.
- *
- * Two phases, both off the GUI thread:
- *   1. ENUMERATE (QtConcurrent::run): walk folders recursively, apply the
- *      audio-extension allowlist, expand .m3u/.m3u8 (merged with the walk,
- *      deduped by canonical path), natural-sort. Yields an ordered QStringList.
- *   2. SCAN (QtConcurrent::mapped): fan the per-file readTrack (TagLib, then
- *      the engine's FFmpeg probe, plus QFileInfo) across the global pool.
- *      mapped indexes by INPUT position, so output order matches the
- *      enumerated order regardless of which worker finishes first.
- *
- * Marshal: a QFutureWatcher delivers results on the GUI thread; we drain them in
- * order via a "next to emit" cursor (never blocking on one not ready yet) and a
- * coalescing QTimer flushes the buffer as one contiguous tracksReady() batch, so
- * thousands of files become a handful of model insertions.
- *
- * Re-entrancy: a scan requested while one is running is queued and started on
- * finish (one at a time; nothing is dropped).
- */
 class TrackScanner : public QObject {
     Q_OBJECT
 

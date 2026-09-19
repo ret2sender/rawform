@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // ReplayGainEditor.h
 //
 // Writes the REPLAYGAIN_* tags to disk off the GUI thread, the ReplayGain
@@ -37,7 +34,8 @@
 // refreshes the model through MetadataReloader so the display reflects
 // exactly what landed on disk. Writes are deduplicated by path (subsongs share
 // a file), so one file is never written from two pool threads at once.
-// =============================================================================
+
+#pragma once
 
 #include <QFutureWatcher>
 #include <QObject>

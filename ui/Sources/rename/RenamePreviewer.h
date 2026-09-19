@@ -18,6 +18,46 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// RenamePreviewer.h
+//
+// The rename dialog's preview engine: evaluates a %token% pattern over a snapshot of
+// track identities and classifies every row per the skip rules, so the dialog can render
+// old-vs-new with flags and gate Apply. Pure computation plus read-only filesystem
+// existence checks; it never renames anything (FileRenamer does) and never mutates the
+// model.
+//
+// One entry point: preview(model, keys, pattern), where keys are the dialog's
+// open-time snapshot from PlaylistModel::trackKeys ({ path, subsong } maps).
+// Resolution back to rows is done here, NOT via rowsForKeys: that helper
+// compacts missing tracks away, losing the key<->result correspondence the
+// preview table needs (every snapshotted row must render SOMETHING, including
+// "left the playlist"). Duplicate keys consume duplicate playlist rows
+// greedily in ascending order, same semantics as rowsForKeys.
+//
+// Each result is a map: { path, oldName, newName, status, note }.
+// status values and their meaning to the dialog:
+//  - "ok"              rename this file (contributes a job)
+//  - "identity"        new name equals current name; grayed, skipped
+//  - "subsong"         subsongIndex != 0; grayed, skipped (siblings share
+//                      one physical file, per-subsong names are ambiguous)
+//  - "duplicate_entry" the same physical file appeared earlier in the
+//                      selection (duplicate playlist entries); grayed, skipped
+//  - "gone"            the track left the playlist since the dialog opened;
+//                      grayed, skipped
+//  - "invalid"         the pattern yields no usable name for this track
+//                      (empty/overlong; note carries renameFileNameProblem's
+//                      text); BLOCKS Apply
+//  - "conflict_batch"  two rows in this batch produce the same target name;
+//                      both flagged; BLOCKS Apply
+//  - "conflict_disk"   the target exists on disk and is not this same file
+//                      (the same-file check is what keeps case-only renames
+//                      legal on macOS); BLOCKS Apply
+//
+// The blocking rule: grayed statuses degrade gracefully, blocking ones
+// disable Apply/OK until the pattern changes, no auto-suffixing. The disk
+// check is advisory (the world can change between preview and Apply);
+// FileRenamer's no-clobber QFile::rename remains the enforcement.
+
 #pragma once
 
 #include "playlist/PlaylistModel.h" // complete type: preview() takes the
@@ -34,46 +74,6 @@
 
 namespace rawform {
 
-/**
- * @brief The rename dialog's preview engine: evaluates a %token% pattern
- *        over a snapshot of track identities and classifies every row per the
- *        skip rules, so the dialog can render old-vs-new with flags and gate
- *        Apply. Pure computation plus read-only filesystem existence checks;
- *        it never renames anything (FileRenamer does) and never mutates the
- *        model.
- *
- * One entry point: preview(model, keys, pattern), where keys are the dialog's
- * open-time snapshot from PlaylistModel::trackKeys ({ path, subsong } maps).
- * Resolution back to rows is done here, NOT via rowsForKeys: that helper
- * compacts missing tracks away, losing the key<->result correspondence the
- * preview table needs (every snapshotted row must render SOMETHING, including
- * "left the playlist"). Duplicate keys consume duplicate playlist rows
- * greedily in ascending order, same semantics as rowsForKeys.
- *
- * Each result is a map: { path, oldName, newName, status, note }.
- * status values and their meaning to the dialog:
- *  - "ok"              rename this file (contributes a job)
- *  - "identity"        new name equals current name; grayed, skipped
- *  - "subsong"         subsongIndex != 0; grayed, skipped (siblings share
- *                      one physical file, per-subsong names are ambiguous)
- *  - "duplicate_entry" the same physical file appeared earlier in the
- *                      selection (duplicate playlist entries); grayed, skipped
- *  - "gone"            the track left the playlist since the dialog opened;
- *                      grayed, skipped
- *  - "invalid"         the pattern yields no usable name for this track
- *                      (empty/overlong; note carries renameFileNameProblem's
- *                      text); BLOCKS Apply
- *  - "conflict_batch"  two rows in this batch produce the same target name;
- *                      both flagged; BLOCKS Apply
- *  - "conflict_disk"   the target exists on disk and is not this same file
- *                      (the same-file check is what keeps case-only renames
- *                      legal on macOS); BLOCKS Apply
- *
- * The blocking rule: grayed statuses degrade gracefully, blocking ones
- * disable Apply/OK until the pattern changes, no auto-suffixing. The disk
- * check is advisory (the world can change between preview and Apply);
- * FileRenamer's no-clobber QFile::rename remains the enforcement.
- */
 class RenamePreviewer : public QObject {
     Q_OBJECT
     QML_ELEMENT

@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // RenameSanitizer.h
 //
 // The pure string pipeline behind File Operations > Rename To: from a
@@ -61,7 +58,8 @@
 // "mr._blue_sky" and "(feat. X)" -> "feat._x", dot-underscore collisions no
 // scene name has, plus fake-double-extension confusion. The gate is
 // valueCharsToUnderscores.
-// =============================================================================
+
+#pragma once
 
 #include "media/TrackData.h" // TrackData
 
@@ -69,74 +67,66 @@
 
 namespace rawform {
 
-/**
- * @brief Normalize ONE resolved token value to scene form (stage 1).
- *
- * Steps, in order:
- *  - apostrophes (straight and typographic) are DELETED, not underscored
- *    ("Don't Stop" -> "dont_stop", never "don_t_stop");
- *  - '&' -> " and " (spaced, so "AC&DC" -> "ac_and_dc", not "acanddc");
- *  - Unicode NFKD, then combining marks stripped ("Motorhead" from
- *    "Mot\u00f6rhead");
- *  - a small fold table for the Latin letters NFKD cannot decompose
- *    (ae oe o a-ring ss d th l from their aeligature/oslash/eth/thorn/stroke
- *    forms), so "M\u00f8" -> "mo" rather than "m";
- *  - lowercase;
- *  - every char outside [a-z0-9] -> '_' ('.' and '-' included; see DOTS in
- *    the file top);
- *  - '_' runs collapsed, leading/trailing '_' trimmed.
- *
- * Pure; empty in -> empty out. Code points with no ASCII rendering at all
- * (e.g. CJK) fold to '_' and may collapse away entirely; the caller's empty
- * checks catch a name that ends up blank.
- */
+/// Normalize ONE resolved token value to scene form (stage 1).
+///
+/// Steps, in order:
+///  - apostrophes (straight and typographic) are DELETED, not underscored
+///    ("Don't Stop" -> "dont_stop", never "don_t_stop");
+///  - '&' -> " and " (spaced, so "AC&DC" -> "ac_and_dc", not "acanddc");
+///  - Unicode NFKD, then combining marks stripped ("Motorhead" from
+///    "Mot\u00f6rhead");
+///  - a small fold table for the Latin letters NFKD cannot decompose
+///    (ae oe o a-ring ss d th l from their aeligature/oslash/eth/thorn/stroke
+///    forms), so "M\u00f8" -> "mo" rather than "m";
+///  - lowercase;
+///  - every char outside [a-z0-9] -> '_' ('.' and '-' included; see DOTS in
+///    the file top);
+///  - '_' runs collapsed, leading/trailing '_' trimmed.
+///
+/// Pure; empty in -> empty out. Code points with no ASCII rendering at all
+/// (e.g. CJK) fold to '_' and may collapse away entirely; the caller's empty
+/// checks catch a name that ends up blank.
 [[nodiscard]] QString sceneSanitizeValue(const QString& value);
 
-/**
- * @brief Evaluate @p pattern against @p track in RENAME context and finalize
- *        the stem (stage 2). No extension; may be empty (caller rejects).
- *
- * Token values go through sceneSanitizeValue, with track_no / disc_no
- * zero-padded to 2 digits first (the padding then survives sanitize
- * untouched). The assembled string then gets the finalize pass, which is what
- * makes half-empty metadata degrade gracefully instead of producing junk:
- *
- *  - literals are lowercased and mapped into [a-z0-9._-] ('&' -> "and",
- *    anything else foreign -> '_'), so "%artist% - %title%" is usable as
- *    typed;
- *  - each maximal run of [-_] collapses to ONE char: '-' if the run contains
- *    a '-' (field separator wins), else '_'. An empty %album% in
- *    "%artist%-%album%-%title%" thus yields "artist-title", not
- *    "artist--title";
- *  - '.' runs collapse to one '.';
- *  - leading/trailing [-_.] are trimmed (also kills the leading '-' POSIX
- *    forbids and the leading '.' that would hide the file).
- */
+/// Evaluate @p pattern against @p track in RENAME context and finalize the stem (stage
+/// 2). No extension; may be empty (caller rejects).
+///
+/// Token values go through sceneSanitizeValue, with track_no / disc_no
+/// zero-padded to 2 digits first (the padding then survives sanitize
+/// untouched). The assembled string then gets the finalize pass, which is what
+/// makes half-empty metadata degrade gracefully instead of producing junk:
+///
+///  - literals are lowercased and mapped into [a-z0-9._-] ('&' -> "and",
+///    anything else foreign -> '_'), so "%artist% - %title%" is usable as
+///    typed;
+///  - each maximal run of [-_] collapses to ONE char: '-' if the run contains
+///    a '-' (field separator wins), else '_'. An empty %album% in
+///    "%artist%-%album%-%title%" thus yields "artist-title", not
+///    "artist--title";
+///  - '.' runs collapse to one '.';
+///  - leading/trailing [-_.] are trimmed (also kills the leading '-' POSIX
+///    forbids and the leading '.' that would hide the file).
 [[nodiscard]] QString buildRenameStem(const TrackData& track, const QString& pattern);
 
-/**
- * @brief Stem + the SOURCE file's extension, lowercased (stage 3a).
- *
- * The extension is everything after the last '.' of @p sourceFileName,
- * lowercased and reduced to [a-z0-9]; the pattern never carries it. No
- * extension (no dot, a dotfile, or a trailing dot) -> the stem alone. An
- * empty stem returns empty (never a bare ".flac").
- */
+/// Stem + the SOURCE file's extension, lowercased (stage 3a).
+///
+/// The extension is everything after the last '.' of @p sourceFileName,
+/// lowercased and reduced to [a-z0-9]; the pattern never carries it. No
+/// extension (no dot, a dotfile, or a trailing dot) -> the stem alone. An
+/// empty stem returns empty (never a bare ".flac").
 [[nodiscard]] QString composeRenameFileName(const QString& stem,
                                             const QString& sourceFileName);
 
-/**
- * @brief Final verdict on a complete candidate file name (stage 3b): an empty
- *        string when the name is usable, else a short human-readable reason
- *        (surfaced verbatim as the preview row's flag text).
- *
- * Rejects: empty; "." / ".."; anything outside [a-z0-9._-] or a leading '-'
- * (defensive; unreachable through the builder); over 255 UTF-8 bytes (the
- * classic NAME_MAX; ASCII by construction, so bytes == chars).
- *
- * Deliberately NOT here: duplicate-in-batch and exists-on-disk. Those
- * are relational / filesystem questions; this function stays pure.
- */
+/// Final verdict on a complete candidate file name (stage 3b): an empty string when the
+/// name is usable, else a short human-readable reason (surfaced verbatim as the preview
+/// row's flag text).
+///
+/// Rejects: empty; "." / ".."; anything outside [a-z0-9._-] or a leading '-'
+/// (defensive; unreachable through the builder); over 255 UTF-8 bytes (the
+/// classic NAME_MAX; ASCII by construction, so bytes == chars).
+///
+/// Deliberately NOT here: duplicate-in-batch and exists-on-disk. Those
+/// are relational / filesystem questions; this function stays pure.
 [[nodiscard]] QString renameFileNameProblem(const QString& fileName);
 
 } // namespace rawform

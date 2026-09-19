@@ -18,23 +18,25 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-pragma Singleton
-import QtQuick
-
 // Format.qml
 //
-// The QML-side display formatters shared by the transport surfaces, one
-// definition instead of a copy per component (SeekBar's hover bubble and
-// PlayerBar's timing readout render the same m:ss). Registered as a module
-// singleton in ui/CMakeLists.txt via
-// QT_QML_SINGLETON_TYPE, the same two-halves contract as Theme and
-// TitleBarStyle; a plain `Format.mmss(x)` resolves from any document in the
-// module.
+// The QML-side display formatters shared by the transport surfaces, one definition
+// instead of a copy per component (SeekBar's hover bubble and PlayerBar's timing readout
+// render the same m:ss). Registered as a module singleton in ui/CMakeLists.txt via
+// QT_QML_SINGLETON_TYPE, the same two-halves contract as Theme and TitleBarStyle; a plain
+// `Format.mmss(x)` resolves from any document in the module.
 //
 // Scope rule, mirroring the C++ side (utils/Formats.h): only formats used by
 // MORE THAN ONE document live here. The C++ singleton formats MILLISECONDS
 // for the playlist column; this one formats SECONDS, the unit the transport
 // bindings already carry. Keep the two shapes in step if either ever changes.
+
+pragma Singleton
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+
 QtObject {
     // m:ss from SECONDS (seconds zero-padded, minutes not); NaN and negative
     // clamp to a clean "0:00" so a binding evaluating before the first

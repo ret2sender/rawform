@@ -18,11 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import QtQuick
-import QtQuick.Layouts
-
-
-// =============================================================================
 // TaggingSettingsPane.qml
 //
 // The "Tagging" ROOT page in the Settings window. The Settings nav supports
@@ -35,7 +30,12 @@ import QtQuick.Layouts
 // The `settings` / `uiFont` properties are declared even though `settings` is
 // unused here, so SettingsWindow instantiates every pane uniformly and a
 // format-agnostic knob lands here without touching the call site.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Layouts
+
 Item {
     id: pane
 

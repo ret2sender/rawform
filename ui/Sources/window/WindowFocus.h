@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // WindowFocus.h
 //
 // A QML singleton exposing QGuiApplication::focusWindow() as a notifying
@@ -48,7 +45,8 @@
 // relay, no state of its own. The notify rides
 // QGuiApplication::focusWindowChanged directly; the argument is dropped by
 // the connection, consumers re-read the property.
-// =============================================================================
+
+#pragma once
 
 #include <QGuiApplication>
 #include <QObject>

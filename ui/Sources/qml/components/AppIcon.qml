@@ -18,27 +18,32 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// AppIcon.qml
+//
+// DPI-safe SVG icon.
+//
+// A QML Image without an explicit sourceSize rasterizes an SVG at its
+// intrinsic document size in *device* pixels, so on high-DPI screens the
+// icon shrinks to intrinsicSize / devicePixelRatio logical pixels and
+// renders blurry. Setting sourceSize declares the *logical* size instead:
+// Qt rasterizes at sourceSize x devicePixelRatio and re-rasterizes when
+// the window moves between screens with different scale factors.
+//
+// Use iconSize for square icons, or iconWidth/iconHeight independently
+// for non-square assets (logo, minimize glyph).
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
-/// DPI-safe SVG icon.
-///
-/// A QML Image without an explicit sourceSize rasterizes an SVG at its
-/// intrinsic document size in *device* pixels, so on high-DPI screens the
-/// icon shrinks to intrinsicSize / devicePixelRatio logical pixels and
-/// renders blurry. Setting sourceSize declares the *logical* size instead:
-/// Qt rasterizes at sourceSize x devicePixelRatio and re-rasterizes when
-/// the window moves between screens with different scale factors.
-///
-/// Use iconSize for square icons, or iconWidth/iconHeight independently
-/// for non-square assets (logo, minimize glyph).
 Image {
     id: root
 
-    /// Convenience for square icons; sets both dimensions.
+    // Convenience for square icons; sets both dimensions.
     property int iconSize: 24
-    /// Logical width in device-independent pixels.
+    // Logical width in device-independent pixels.
     property int iconWidth: root.iconSize
-    /// Logical height in device-independent pixels.
+    // Logical height in device-independent pixels.
     property int iconHeight: root.iconSize
 
     asynchronous: true

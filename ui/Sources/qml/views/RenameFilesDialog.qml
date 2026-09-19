@@ -18,20 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// Wiring layer, same license as PropertiesWindow: this file reaches the C++
-// context properties (audioController, playlistTabs), which qmllint cannot
-// see, so the unqualified-access category is disabled file-wide.
-
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Effects
-import QtQuick.Layouts
-import QtQuick.Window
-
-// =============================================================================
 // RenameFilesDialog.qml
 //
 // File Operations > Rename To: pattern-driven on-disk renaming of the
@@ -65,7 +51,21 @@ import QtQuick.Window
 // non-modal window; every touch goes through _alive (playlistTabs.objectAlive,
 // the destroyed-object probe). A dead model degrades the dialog to a
 // static view whose Apply is disabled (jobs need a live preview).
-// =============================================================================
+
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// playlistTabs, windowGeometry), which qmllint cannot see, so the
+// unqualified-access category is disabled file-wide. Components stay fully
+// linted; keep global wiring in the views so they can. Cost: a typo'd global
+// name here surfaces at runtime, not at lint.
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import QtQuick.Window
+
 Window {
     id: renameDialog
 
@@ -91,7 +91,7 @@ Window {
     // macOS delivery rationale). The pattern field's edit menu and the preset
     // combo popup consume Escape themselves (CloseOnEscape) before this can
     // match; Escape while TYPING in the pattern field does close the dialog,
-    // accepted, matching foobar's dialog behavior.
+    // accepted, since that is the standard dialog behavior.
     //
     // The visible && strict-focus gate. This instance dies on close,
     // so it cannot linger hidden like the reused windows, but SEVERAL Rename
@@ -110,7 +110,7 @@ Window {
         onActivated: renameDialog.close()
     }
 
-    // --- captured world (openFor) + live state -------------------------------
+    // --- captured world (openFor) + live state -----------------------------
     property var _model: null      // owning tab's PlaylistModel (guard via _alive)
     property var _keys: []         // durable { path, subsong } snapshot
     property var _previewRows: []  // last RenamePreviewer result
@@ -228,7 +228,7 @@ Window {
         renamer.apply(renameDialog._buildJobs())
     }
 
-    // --- engines -------------------------------------------------------------
+    // --- engines -----------------------------------------------------------
     RenamePreviewer { id: previewer }
     RenamePatternStore { id: presetStore }
     FileRenamer {
@@ -297,7 +297,7 @@ Window {
     // context menus below need it or they render over nothing.
     property Item menuBlurSource: windowBody
 
-    // --- chrome --------------------------------------------------------------
+    // --- chrome ------------------------------------------------------------
     Rectangle {
         id: windowBody
         anchors.fill: parent
@@ -311,7 +311,7 @@ Window {
             anchors.margins: 1
             spacing: 0
 
-            // ----- title bar: drag + close -----------------------------------
+            // ----- title bar: drag + close ---------------------------------
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
@@ -340,7 +340,7 @@ Window {
                 }
             }
 
-            // ----- pattern + presets -----------------------------------------
+            // ----- pattern + presets ---------------------------------------
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
@@ -488,7 +488,7 @@ Window {
                 }
             }
 
-            // ----- preview table ---------------------------------------------
+            // ----- preview table -------------------------------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -621,7 +621,7 @@ Window {
                 }
             }
 
-            // ----- footer: status + Cancel / Apply / OK ----------------------
+            // ----- footer: status + Cancel / Apply / OK --------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56

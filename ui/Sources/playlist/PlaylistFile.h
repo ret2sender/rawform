@@ -18,6 +18,51 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistFile.h
+//
+// rawform's own on-disk playlist format (".rwfpl"): a single playlist's track list and
+// its column layout, doubling as a tag cache (a cached record is a TrackData as readTrack
+// produced it).
+//
+// A deliberately distinct format with its own extension and magic number; no
+// compatibility with any other player's binary playlist format is intended.
+//
+// Design:
+//  - QDataStream over a binary file. No SQLite, no text/JSON.
+//  - Byte order is pinned LittleEndian by convention (not stored: it is our
+//    format, read with the same fixed order it was written with).
+//  - The QDataStream version is stored in the header so the file is
+//    self-describing: the writer uses one pinned `kStreamVersion`; the reader
+//    honors whatever the file declares, validated against a supported range. POD
+//    integers in the header encode identically across stream versions, so the
+//    header always parses first.
+//  - Chunk-based: after the header, a sequence of (id, byteLength, payload)
+//    chunks. The per-chunk length prefix lets an unknown/newer chunk be skipped
+//    wholesale and lets a reader bounds-check against truncation.
+//  - Each track record is also length-prefixed, so one corrupt record is bounded
+//    and a record that grows new trailing fields in a future version still reads
+//    (an older reader takes the fields it knows, ignores the rest): forward
+//    compatibility without a format bump.
+//  - Column layout is stored by field id (string) paired with width, never by
+//    positional index, so it survives the user editing the schema. This is the
+//    currentColumnOrder() / currentColumnWidths() pair, restored via
+//    applyColumnLayout().
+//
+// Not stored on disk (by design):
+//  - TrackData::valid:     transient scan status; a cached record is valid by
+//                          construction, and availability is recomputed against
+//                          the real file on load, so a stale `false` can't poison
+//                          the cache.
+//  - TrackData::available: runtime-only "present and readable" flag, recomputed
+//                          on every load.
+//  - embedded cover bytes: only the hasEmbeddedArt flag is stored; the bytes stay
+//                          lazy (AlbumArtProvider), so covers never bloat the file
+//                          or the in-RAM list.
+//
+// This translation unit is pure, Qt-object-free and thread-safe: PlaylistStore
+// runs readPlaylist()/writePlaylist() on the global thread pool so neither a big
+// load nor a save blocks the GUI.
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -31,51 +76,6 @@
 #include <cstdint>
 
 namespace rawform {
-
-/**
- * @brief rawform's own on-disk playlist format (".rwfpl"): a single playlist's
- *        track list and its column layout, doubling as a tag cache (a cached
- *        record is a TrackData as readTrack produced it).
- *
- * A deliberately distinct format with its own extension and magic number; no
- * binary compatibility with foobar's ".fpl" is intended.
- *
- * Design:
- *  - QDataStream over a binary file. No SQLite, no text/JSON.
- *  - Byte order is pinned LittleEndian by convention (not stored: it is our
- *    format, read with the same fixed order it was written with).
- *  - The QDataStream version is stored in the header so the file is
- *    self-describing: the writer uses one pinned @ref kStreamVersion; the reader
- *    honors whatever the file declares, validated against a supported range. POD
- *    integers in the header encode identically across stream versions, so the
- *    header always parses first.
- *  - Chunk-based: after the header, a sequence of (id, byteLength, payload)
- *    chunks. The per-chunk length prefix lets an unknown/newer chunk be skipped
- *    wholesale and lets a reader bounds-check against truncation.
- *  - Each track record is also length-prefixed, so one corrupt record is bounded
- *    and a record that grows new trailing fields in a future version still reads
- *    (an older reader takes the fields it knows, ignores the rest): forward
- *    compatibility without a format bump.
- *  - Column layout is stored by field id (string) paired with width, never by
- *    positional index, so it survives the user editing the schema. This is the
- *    currentColumnOrder() / currentColumnWidths() pair, restored via
- *    applyColumnLayout().
- *
- * Not stored on disk (by design):
- *  - TrackData::valid:     transient scan status; a cached record is valid by
- *                          construction, and availability is recomputed against
- *                          the real file on load, so a stale `false` can't poison
- *                          the cache.
- *  - TrackData::available: runtime-only "present and readable" flag, recomputed
- *                          on every load.
- *  - embedded cover bytes: only the hasEmbeddedArt flag is stored; the bytes stay
- *                          lazy (AlbumArtProvider), so covers never bloat the file
- *                          or the in-RAM list.
- *
- * This translation unit is pure, Qt-object-free and thread-safe: PlaylistStore
- * runs readPlaylist()/writePlaylist() on the global thread pool so neither a big
- * load nor a save blocks the GUI.
- */
 
 /// The document a .rwfpl carries: the playlist's tracks plus its saved column
 /// layout. fieldIds and widths are parallel (index i is one column), in visual
@@ -124,7 +124,7 @@ struct PlaylistReadResult {
     [[nodiscard]] bool ok() const { return error == PlaylistIoError::None; }
 };
 
-// --- Format identity / versioning (exposed for tests + diagnostics) ---------
+// --- Format identity / versioning (exposed for tests + diagnostics) --------
 
 /// File magic. Bytes on disk (LittleEndian) read "1WFR"; the exact value is
 /// arbitrary; it only has to match on read. Identity travels with the MAGIC,
@@ -148,28 +148,24 @@ inline constexpr int kStreamVersion = QDataStream::Qt_6_6;
 /// Qt_6_0 onward, so we accept the whole 6.x range up to the pinned writer.
 inline constexpr int kMinStreamVersion = QDataStream::Qt_6_0;
 
-// --- API --------------------------------------------------------------------
+// --- API -------------------------------------------------------------------
 
-/**
- * @brief Write @p doc to @p path atomically.
- *
- * Uses QSaveFile (write to a temporary, then atomic rename on commit), so a
- * crash or error mid-write never corrupts an existing file at @p path. Returns
- * false with a reason in @p error on any failure.
- */
+/// Write @p doc to @p path atomically.
+///
+/// Uses QSaveFile (write to a temporary, then atomic rename on commit), so a
+/// crash or error mid-write never corrupts an existing file at @p path. Returns
+/// false with a reason in @p error on any failure.
 [[nodiscard]] bool writePlaylist(const QString& path,
                                  const PlaylistDocument& doc,
                                  QString* error = nullptr);
 
-/**
- * @brief Read a .rwfpl from @p path.
- *
- * Reads the whole file once (no per-track disk I/O, the cache win),
- * validates the header and every chunk/record length against the file size, and
- * returns the parsed document or a precise error. Unknown chunks are skipped;
- * a track chunk is required, a layout/meta chunk is optional. A higher
- * formatVersion than this build understands is refused (see PlaylistIoError).
- */
+/// Read a .rwfpl from @p path.
+///
+/// Reads the whole file once (no per-track disk I/O, the cache win),
+/// validates the header and every chunk/record length against the file size, and
+/// returns the parsed document or a precise error. Unknown chunks are skipped;
+/// a track chunk is required, a layout/meta chunk is optional. A higher
+/// formatVersion than this build understands is refused (see PlaylistIoError).
 [[nodiscard]] PlaylistReadResult readPlaylist(const QString& path);
 
 } // namespace rawform

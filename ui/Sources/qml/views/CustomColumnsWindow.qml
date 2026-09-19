@@ -18,31 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer for the custom-columns manager: it
-// deliberately reaches the C++ context property `customColumns`, which qmllint
-// cannot see, so the unqualified-access category is disabled file-wide. Under
-// the Bound pragma this directive covers that context property ONLY; the
-// row delegate declares its injected names (index, modelData) and every
-// outer-id capture is statically checked under the pragma. Cost: a typo'd
-// global name here surfaces at runtime, not lint.
-
-// Bound component behavior: the ListView row delegate resolves outer document
-// ids statically instead of through dynamic context lookup, and declares
-// `index` and `modelData` as required properties (the contract and the qmllint
-// proof); child items inside it qualify those reads through the delegate root
-// id. The captures of `customColumnsWindow` throughout are exactly what the
-// pragma makes statically valid.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Effects
-import QtQuick.Layouts
-import QtQuick.Window
-
-
-// =============================================================================
 // CustomColumnsWindow.qml
 //
 // The manager for user-defined custom playlist columns, opened from the header
@@ -79,7 +54,20 @@ import QtQuick.Window
 // Fonts resolve through the Theme singleton, which is scope-independent, so
 // this being a separate top-level Window (outside PlaylistView's id scope) does
 // not matter for font resolution.
-// =============================================================================
+
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (customColumns),
+// which qmllint cannot see, so the unqualified-access category is disabled
+// file-wide. Components stay fully linted; keep global wiring in the views so
+// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import QtQuick.Window
+
 Window {
     id: customColumnsWindow
 
@@ -235,14 +223,14 @@ Window {
         focusFieldId = ""
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // One editable text cell: a display Text by default, swapped to a TextField
     // on DOUBLE-CLICK, committing on editing-finished and discarding on Esc. A
     // single click is forwarded as rowClicked (the row uses it for selection).
     // Self-contained, it references no outer ids (the font family is passed in),
     // reused by both the Name and Pattern cells. Moved here with the window: it
     // was used nowhere else in PlaylistView.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component EditableCell: Item {
         id: editableCell
 
@@ -304,9 +292,9 @@ Window {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Body: rounded frame matching the main window and the other manager windows.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: windowBody
         anchors.fill: parent
@@ -320,7 +308,7 @@ Window {
             anchors.margins: 1   // sit inside the 1 px border
             spacing: 0
 
-            // ----- title bar: drag + close -----------------------------------
+            // ----- title bar: drag + close ---------------------------------
             Item {
                 id: titleBar
                 Layout.fillWidth: true
@@ -352,7 +340,7 @@ Window {
                 }
             }
 
-            // ----- content: +/- strip and the Name/Align/Pattern table -------
+            // ----- content: +/- strip and the Name/Align/Pattern table -----
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -549,11 +537,12 @@ Window {
                                         anchors.left: parent.left
                                         anchors.leftMargin: 6
                                         width: parent.width - 12
-                                        // The Basic style's implicit height is taller than the
-                                        // 30 px row; pin an explicit height that fits and zero
-                                        // the insets so the background matches it. Centered,
-                                        // this leaves 3 px clearance top and bottom and no
-                                        // longer spills into the next row.
+                                        // The Basic style's implicit height is taller
+                                        // than the 30 px row; pin an explicit height that
+                                        // fits and zero the insets so the background
+                                        // matches it. Centered, this leaves 3 px
+                                        // clearance top and bottom and no longer spills
+                                        // into the next row.
                                         height: 24
                                         topInset: 0
                                         bottomInset: 0
@@ -561,15 +550,17 @@ Window {
                                         font.family: Theme.uiFont
                                         font.pixelSize: 12
 
-                                        // Basic's default label contentItem is a TextField that
-                                        // reserves ~6 px of vertical padding; a 24 px control has
-                                        // no room for it and clips the glyphs. A plain Text with
-                                        // no vertical padding sits flush in the row. The control's
-                                        // own rightPadding already reserves the chevron, so no
-                                        // right inset is needed here (adding one shrank the box
-                                        // until even "Left" elided). With no elide set the label
-                                        // can never show an ellipsis, and the widest option,
-                                        // "Center", fits the ~49 px box with room to spare.
+                                        // Basic's default label contentItem is a
+                                        // TextField that reserves ~6 px of vertical
+                                        // padding; a 24 px control has no room for it and
+                                        // clips the glyphs. A plain Text with no vertical
+                                        // padding sits flush in the row. The control's
+                                        // own rightPadding already reserves the chevron,
+                                        // so no right inset is needed here (adding one
+                                        // shrank the box until even "Left" elided). With
+                                        // no elide set the label can never show an
+                                        // ellipsis, and the widest option, "Center", fits
+                                        // the ~49 px box with room to spare.
                                         contentItem: Text {
                                             leftPadding: 2
                                             text: alignCombo.displayText
@@ -612,7 +603,7 @@ Window {
                 }
             }
 
-            // ----- footer: Close ---------------------------------------------
+            // ----- footer: Close -------------------------------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56
@@ -633,9 +624,9 @@ Window {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A small themed footer button (same shape as the Settings window's).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component FooterButton: Rectangle {
         id: fbtn
         property string label: ""

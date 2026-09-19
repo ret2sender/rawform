@@ -18,6 +18,54 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// MetadataModel.h
+//
+// Two-column (Name / Value) model backing the metadata pane.
+//
+// A flat Name/Value table broken into sections ("Metadata", "Location",
+// "General") with header rows. The full set of possible rows is a static
+// template; the VISIBLE rows are rebuilt from it on each selection, because some
+// rows are conditional. Two reasons a row can vanish:
+//
+//  - CONDITIONAL: the field has no value for the current selection (e.g. a FLAC
+//    has no "Codec Profile" worth showing). Hidden whenever its value is empty.
+//  - SINGLE-ONLY: the field is meaningless for more than one track, so it is
+//    hidden the moment the selection holds two or more rows: "File path",
+//    "Subsong index", "Created" and "Audio MD5" all disappear in a
+//    multi-selection.
+//
+// To keep navigation smooth, setSelection compares the new visible shape to the
+// current one: an unchanged shape emits dataChanged() (delegate reuse, no
+// flicker), and only a changed shape (a conditional or single-only row appearing
+// or disappearing) triggers a begin/endResetModel.
+//
+// Multi-selection presentation, field by field:
+//
+//  - JOIN fields (most of Metadata, plus Codec / Tool / etc.): each track's
+//    value is collected, de-duplicated (first-seen order) and joined. The
+//    separator is "; " by default (so a multi-value Genre and a cross-track join
+//    read the same way), with the two path fields ("File name"
+//    and "Folder name") joining with ", " instead. When the selection is a MIX
+//    (some tracks carry the tag, some do not), the missing tracks contribute the
+//    literal "(unknown)"; when EVERY track lacks the tag the value is left blank,
+//    so always-on rows show empty and conditional rows still hide.
+//  - NUMERIC AGGREGATES (single value, never a join):
+//      Items Selected = the selection count,
+//      Duration       = summed length, in "M:SS.mmm (N samples)" form,
+//      Total size     = summed bytes,
+//      Avg. bitrate   = duration-weighted mean,
+//      Last modified  = the most recent timestamp.
+//  - RELABELED fields: a few Name labels change in a multi-selection:
+//      "File name"   -> "File names"   (when >1 distinct file),
+//      "Folder name" -> "Folder names" (when >1 distinct folder),
+//      "File size"   -> "Total size"   (whenever >1 track is selected),
+//      "Bitrate"     -> "Avg. bitrate" (whenever >1 track is selected).
+//    The two path fields pluralize on the number of DISTINCT values, not the
+//    selection size, so two files in one folder keep the singular "Folder name".
+//
+// TrackData stays in C++; main.cpp hands this model the selected tracks and QML
+// only ever reads display strings.
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -38,53 +86,6 @@
 
 namespace rawform {
 
-/**
- * @brief Two-column (Name / Value) model backing the metadata pane.
- *
- * A flat Name/Value table broken into sections ("Metadata", "Location",
- * "General") with header rows. The full set of possible rows is a static
- * template; the VISIBLE rows are rebuilt from it on each selection, because some
- * rows are conditional. Two reasons a row can vanish:
- *
- *  - CONDITIONAL: the field has no value for the current selection (e.g. a FLAC
- *    has no "Codec Profile" worth showing). Hidden whenever its value is empty.
- *  - SINGLE-ONLY: the field is meaningless for more than one track, so it is
- *    hidden the moment the selection holds two or more rows. These mirror
- *    foobar2000: "File path", "Subsong index", "Created" and "Audio MD5" all
- *    disappear in a multi-selection.
- *
- * To keep navigation smooth, setSelection compares the new visible shape to the
- * current one: an unchanged shape emits dataChanged() (delegate reuse, no
- * flicker), and only a changed shape (a conditional or single-only row appearing
- * or disappearing) triggers a begin/endResetModel.
- *
- * Multi-selection presentation also matches foobar2000 field by field:
- *
- *  - JOIN fields (most of Metadata, plus Codec / Tool / etc.): each track's
- *    value is collected, de-duplicated (first-seen order) and joined. The
- *    separator is "; " by default (so a multi-value Genre and a cross-track join
- *    read the same way foobar shows them), with the two path fields ("File name"
- *    and "Folder name") joining with ", " instead. When the selection is a MIX
- *    (some tracks carry the tag, some do not), the missing tracks contribute the
- *    literal "(unknown)"; when EVERY track lacks the tag the value is left blank,
- *    so always-on rows show empty and conditional rows still hide.
- *  - NUMERIC AGGREGATES (single value, never a join):
- *      Items Selected = the selection count,
- *      Duration       = summed length, foobar's "M:SS.mmm (N samples)" format,
- *      Total size     = summed bytes,
- *      Avg. bitrate   = duration-weighted mean,
- *      Last modified  = the most recent timestamp.
- *  - RELABELED fields: a few Name labels change in a multi-selection:
- *      "File name"   -> "File names"   (when >1 distinct file),
- *      "Folder name" -> "Folder names" (when >1 distinct folder),
- *      "File size"   -> "Total size"   (whenever >1 track is selected),
- *      "Bitrate"     -> "Avg. bitrate" (whenever >1 track is selected).
- *    The two path fields pluralize on the number of DISTINCT values, not the
- *    selection size, so two files in one folder keep the singular "Folder name".
- *
- * TrackData stays in C++; main.cpp hands this model the selected tracks and QML
- * only ever reads display strings.
- */
 class MetadataModel : public QAbstractTableModel {
     Q_OBJECT
     QML_ELEMENT
@@ -113,7 +114,7 @@ public:
     explicit MetadataModel(QObject* parent = nullptr);
     ~MetadataModel() override = default;
 
-    // --- QAbstractTableModel interface -----------------------------------
+    // --- QAbstractTableModel interface -------------------------------------
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
@@ -197,7 +198,7 @@ private:
     ///  - conditional: dropped from the visible set when its value is empty.
     ///  - singleOnly:  dropped whenever the selection holds more than one track.
     ///  - multiName:   alternate Name label used in a multi-selection (empty
-    ///                 means the single-selection @ref name is used throughout).
+    ///                 means the single-selection `name` is used throughout).
     struct Row {
         bool    isSection   = false;
         QString name;            ///< section title, or field label (STATIC)
@@ -225,7 +226,7 @@ private:
     [[nodiscard]] static Agg aggStrategy(FieldId id);
 
     /// Separator for a JOIN field: "; " by default, ", " for the two path
-    /// fields (File name / Folder name), matching foobar2000.
+    /// fields (File name / Folder name).
     [[nodiscard]] static QString joinSeparator(FieldId id);
 
     /// True for fields hidden in any multi-selection (File path, Subsong index,
@@ -238,12 +239,12 @@ private:
     /// caller; aggregatedValue() computes the across-selection version itself.)
     [[nodiscard]] static QString fieldValue(const TrackData& t, FieldId id);
 
-    // --- Shared value formatters (used by both single and aggregate paths) ---
+    // --- Shared value formatters (single and aggregate paths) --------------
     [[nodiscard]] static QString formatDurationSamples(qint64 totalMs, qint64 totalSamples);
     [[nodiscard]] static QString formatSize(qint64 bytes);
     [[nodiscard]] static QString formatBitrate(int kbps);
 
-    // --- Across-selection numeric aggregates (read m_selection directly) -----
+    // --- Across-selection numeric aggregates (read m_selection directly) ---
     [[nodiscard]] QString aggDuration() const;    ///< summed length + samples
     [[nodiscard]] QString aggTotalSize() const;   ///< summed bytes
     [[nodiscard]] QString aggAvgBitrate() const;  ///< duration-weighted mean
@@ -252,7 +253,7 @@ private:
     /// Group the selection by a field's per-track value and render each distinct
     /// value with its share of the selection, e.g. "libFLAC ... (51.4%); libFLAC
     /// ... (48.6%)". Shares are DURATION-weighted (matching how Avg. bitrate is
-    /// weighted, and reproducing foobar's non-round percentages); when no track
+    /// weighted, which is why the percentages are non-round); when no track
     /// reports a duration every track weights equally, so equal-length or
     /// duration-less selections fall back to plain proportions. A single distinct
     /// value (or a single-track selection) renders bare, with no "(100%)". Empty

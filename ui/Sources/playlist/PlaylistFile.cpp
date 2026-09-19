@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistFile.cpp
+//
+// Implementation of the .rwfpl reader and writer declared in PlaylistFile.h: the
+// FourCC chunk identifiers, the length-prefixed TrackData record encoding, the
+// bounded container reads that keep a corrupt or truncated file from being
+// trusted, and the chunk writing and parsing loops.
+
 #include "playlist/PlaylistFile.h"
 
 #include <QByteArray>
@@ -31,7 +38,7 @@
 namespace rawform {
 namespace {
 
-// --- Chunk identifiers (FourCC) ---------------------------------------------
+// --- Chunk identifiers (FourCC) --------------------------------------------
 // Internal to the format; not part of the public surface.
 constexpr quint32 byteOf(char c) {
     return static_cast<unsigned char>(c);
@@ -55,7 +62,7 @@ void configure(QDataStream& s, int streamVersion) {
     s.setVersion(streamVersion);
 }
 
-// --- TrackData record encoding ----------------------------------------------
+// --- TrackData record encoding ---------------------------------------------
 // The FROZEN on-disk field order. Adding a field appends at the END only; the
 // record length prefix lets older readers ignore trailing additions. NEVER
 // reorder or remove an existing field without bumping kFormatVersion.
@@ -107,7 +114,7 @@ void writeTrackFields(QDataStream& s, const TrackData& t) {
     // NOT written: valid, available (recomputed on load).
 }
 
-// --- Bounded container reads -------------------------------------------------
+// --- Bounded container reads -----------------------------------------------
 // QDataStream's own container operator>> reads the element count and calls
 // reserve(count) BEFORE reading a single element (readArrayBasedContainer),
 // trusting the stream. Qt chunk-limits STRING payload allocation against
@@ -260,7 +267,7 @@ QByteArray encodeTrack(const TrackData& t) {
     return buf;
 }
 
-// --- Chunk writing ----------------------------------------------------------
+// --- Chunk writing ---------------------------------------------------------
 
 void writeChunk(QDataStream& out, quint32 id, const QByteArray& payload) {
     out << id << static_cast<quint64>(payload.size());
@@ -324,7 +331,7 @@ QByteArray buildScrollPayload(const PlaylistDocument& doc) {
     return buf;
 }
 
-// --- Chunk parsing ----------------------------------------------------------
+// --- Chunk parsing ---------------------------------------------------------
 
 bool parseTracks(const QByteArray& payload, int streamVersion, PlaylistDocument& doc) {
     QDataStream s(payload);

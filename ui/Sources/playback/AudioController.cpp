@@ -26,7 +26,7 @@
 // bridge in the ctor; every engine callback marshals to a GUI-thread applier; the
 // transport verbs drive the engine through playNow/setQueue; and the cursor (a
 // QPersistentModelIndex into the playing model) plus the lookahead projection
-// keep playback following the playlist the foobar way.
+// keep playback following the playlist.
 
 #include "playback/AudioController.h"
 
@@ -110,10 +110,10 @@ constexpr double kPreviousRestartThresholdSeconds = 5.0;
 //   1.5           -> 0.354  (-9 dB)
 //   2.0 (square)  -> 0.250  (-12 dB)   <- default; gentler, louder mids
 //   2.5           -> 0.177  (-15 dB)
-//   3.0 (cubic)   -> 0.125  (-18 dB)   <- too quiet vs foobar at half travel
+//   3.0 (cubic)   -> 0.125  (-18 dB)   <- too quiet at half travel
 // Lower is louder through the middle of the travel (toward a straight linear
 // fader); higher is steeper. The curve is smooth to true silence at 0 regardless,
-// so the bottom of the slider still reaches quiet. Square law matches foobar's
+// so the bottom of the slider still reaches quiet. Square law gives the expected
 // half-slider feel; this one number is the whole tuning surface.
 constexpr double kVolumeTaperExponent = 2.0;
 
@@ -464,15 +464,14 @@ QString AudioController::formatSummary() const {
     } else {
         ch = QStringLiteral("%1 ch").arg(m_channels);
     }
-    // e.g. "FLAC 961kbps 44100Hz Stereo" (the player-bar status line). The bitrate
-    // is the live, moment-to-moment figure while a track is being decoded (Feature
-    // A), frozen at its last value on pause; it falls back to the nominal/average
-    // when stopped or before the first position tick. displayBitrateKbps() owns
-    // that live-or-nominal choice so the isolated digits the bar renders and this
-    // full string can never disagree.
-    // The device-outcome suffix comes from outputSuffix() below,
-    // the single source the player bar's split rendering also
-    // consumes, so the two surfaces cannot disagree.
+    // e.g. "FLAC 961kbps 44100Hz Stereo" (the player-bar status line). The bitrate is the
+    // live, moment-to-moment figure while a track is being decoded (Feature A), frozen at
+    // its last value on pause; it falls back to the nominal/average when stopped or
+    // before the first position tick. displayBitrateKbps() owns that live-or-nominal
+    // choice so the isolated digits the bar renders and this full string can never
+    // disagree. The device-outcome suffix comes from outputSuffix() below, the single
+    // source the player bar's split rendering also consumes, so the two surfaces cannot
+    // disagree.
     const QString suffix = outputSuffix();
     return suffix.isEmpty()
                ? QStringLiteral("%1 %2kbps %3Hz %4")
@@ -999,7 +998,7 @@ void AudioController::previous() {
     // to 0 rather than leaving it; within the first few seconds it steps to the
     // previous row. The decision keys off the playback position (m_positionSeconds,
     // the latest tick), so a seek forward past the threshold also makes Previous
-    // restart, matching how foobar and most players behave.
+    // restart, matching how most players behave.
     if (m_positionSeconds >= kPreviousRestartThresholdSeconds) {
         playAt(m_playingModel.data(), row);  // restart current from 0
         return;

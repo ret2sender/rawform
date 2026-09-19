@@ -18,20 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import com.rawform.app
-
-
-// =============================================================================
 // PlaybackSettingsPane.qml
 //
 // The "Playback" page inside the Settings window, the parent section
@@ -52,7 +38,14 @@ import com.rawform.app
 // bitPerfectDefault) and drives both the modified-from-default accent dot and
 // the right-click reset, exactly as the sibling panes do. Output device
 // selection lives here too, right below.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import com.rawform.app
+
 Item {
     id: pane
 
@@ -155,7 +148,7 @@ Item {
             color: Theme.separatorStrong
         }
 
-        // ----- Output device -----------------------------------------
+        // ----- Output device -----------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -279,7 +272,7 @@ Item {
             color: Theme.separator
         }
 
-        // ----- Output rate policy ---------------------------------------------
+        // ----- Output rate policy ------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -329,9 +322,9 @@ Item {
         Item { Layout.fillHeight: true }  // push rows to the top
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Label plus modified-from-default dot, matching the sibling panes.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component RowLabel: Row {
         property string text: ""
         property bool modified: false
@@ -356,9 +349,9 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A pill toggle, the same control the ReplayGain pane uses.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component Toggle: Rectangle {
         id: tg
         property bool checked: false

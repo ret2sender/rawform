@@ -18,20 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import com.rawform.app
-
-
-// =============================================================================
 // SpectrumSettingsPane.qml
 //
 // The "Spectrum view" page inside the Settings window, the sibling of
@@ -46,7 +32,14 @@ import com.rawform.app
 //
 // The selector and the row chrome are local inline components styled to the app, so
 // the whole page stays one file and matches the ReplayGain page visually.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import com.rawform.app
+
 Item {
     id: pane
 
@@ -92,7 +85,7 @@ Item {
             color: Theme.separatorStrong
         }
 
-        // ----- Analyzer source ----------------------------------------------
+        // ----- Analyzer source ---------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 46
@@ -138,9 +131,9 @@ Item {
         Item { Layout.fillHeight: true }  // push rows to the top
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Label plus modified-from-default dot, matching the ReplayGain pane.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component RowLabel: Row {
         property string text: ""
         property bool modified: false
@@ -165,11 +158,11 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Segmented Output / Source selector, the two-choice sibling of the ReplayGain
     // Off / Track / Album control. Values 0 (Output) and 1 (Source) match
     // SpectrumProvider's source ints, so the picked value maps straight through.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component SourceSelect: Row {
         id: ss
         property int value: 0

@@ -18,6 +18,29 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TrackData.h
+//
+// One track's tag + filesystem data: the unit shared by the playlist view, the metadata
+// pane, and the .rwfpl cache. Filled by TagLib + QFileInfo in TrackReader / TrackScanner.
+//
+// Stores raw fields, never a pre-formatted display string; each view composes
+// its own presentation. The layout is frozen into the binary cache, so a few
+// choices are shaped against real-world tag messiness:
+//
+//  - Fields a single file legitimately carries several of (artists, genres) are
+//    QStringList. ("Mixed across a multi-selection" is a separate, edit-time
+//    concept, never a stored sentinel.)
+//  - Any tag not promoted to a named field is kept verbatim in `extraTags`,
+//    so MetadataEditor writes back only the keys an edit names and every other
+//    tag round-trips losslessly.
+//  - Date keeps both a parsed `year` (sort/column) and the raw `dateRaw`
+//    string (full fidelity). Track and disc numbers do the same: parsed ints for
+//    sort, plus `trackNoRaw` / `discNoRaw` for verbatim display.
+//  - Embedded art is a flag only; the bytes are fetched lazily by
+//    AlbumArtProvider, so covers never bloat the in-RAM list or the cache.
+//
+// mtime + fileSize double as the cache-invalidation key.
+
 #pragma once
 
 #include <QDateTime>
@@ -29,29 +52,6 @@
 
 namespace rawform {
 
-/**
- * @brief One track's tag + filesystem data: the unit shared by the playlist
- *        view, the metadata pane, and the .rwfpl cache. Filled by TagLib +
- *        QFileInfo in TrackReader / TrackScanner.
- *
- * Stores raw fields, never a pre-formatted display string; each view composes
- * its own presentation. The layout is frozen into the binary cache, so a few
- * choices are shaped against real-world tag messiness:
- *
- *  - Fields a single file legitimately carries several of (artists, genres) are
- *    QStringList. ("Mixed across a multi-selection" is a separate, edit-time
- *    concept, never a stored sentinel.)
- *  - Any tag not promoted to a named field is kept verbatim in @ref extraTags,
- *    so MetadataEditor writes back only the keys an edit names and every other
- *    tag round-trips losslessly.
- *  - Date keeps both a parsed @ref year (sort/column) and the raw @ref dateRaw
- *    string (full fidelity). Track and disc numbers do the same: parsed ints for
- *    sort, plus @ref trackNoRaw / @ref discNoRaw for verbatim display.
- *  - Embedded art is a flag only; the bytes are fetched lazily by
- *    AlbumArtProvider, so covers never bloat the in-RAM list or the cache.
- *
- * mtime + fileSize double as the cache-invalidation key.
- */
 struct TrackData {
     // Promoted multi-value text tags (TagLib StringList).
     QStringList artists;
@@ -117,9 +117,9 @@ struct TrackData {
 
 /// Join a within-file multi-value field (e.g. several artists or genres on one
 /// track) for display with "; ". The metadata pane's across-selection join uses
-/// "; " as well, matching foobar2000, so a within-file value and a cross-track
-/// value share the separator by design: a multi-genre track inside a multi-
-/// selection reads as one flat "A; B; C" list, exactly as foobar presents it.
+/// "; " as well, so a within-file value and a cross-track value share the
+/// separator by design: a multi-genre track inside a multi-selection reads as
+/// one flat "A; B; C" list.
 [[nodiscard]] inline QString joinedValues(const QStringList& values) {
     return values.join(QStringLiteral("; "));
 }

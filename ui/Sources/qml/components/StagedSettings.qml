@@ -18,25 +18,26 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// StagedSettings.qml
+//
+// The Settings window's staged edit object as a NAMED type. The scenario a
+// declared type prevents: an anonymous inline QtObject in SettingsWindow.qml
+// leaves the panes' `settings` properties typed as bare QtObject, qmllint
+// cannot check a single member access on the staged surface, and a renamed
+// property surfaces only at runtime. As a declared type, the panes write
+// `property StagedSettings settings` and every read and write below is
+// verified statically.
+//
+// Lifecycle contract (owned by SettingsWindow): seeded from the applied
+// values on every open via reseed(), read and written by the panes while the
+// window is up, and copied back on Apply/OK. The initializers below only
+// cover the pre-open state and mirror the factory defaults; do not
+// treat them as the source of truth, the stores' *Default constants are.
+
+pragma ComponentBehavior: Bound
+
 import QtQml
 
-/*
- * StagedSettings.qml
- *
- * The Settings window's staged edit object as a NAMED type. The scenario a
- * declared type prevents: an anonymous inline QtObject in SettingsWindow.qml
- * leaves the panes' `settings` properties typed as bare QtObject, qmllint
- * cannot check a single member access on the staged surface, and a renamed
- * property surfaces only at runtime. As a declared type, the panes write
- * `property StagedSettings settings` and every read and write below is
- * verified statically.
- *
- * Lifecycle contract (owned by SettingsWindow): seeded from the applied
- * values on every open via reseed(), read and written by the panes while the
- * window is up, and copied back on Apply/OK. The initializers below only
- * cover the pre-open state and mirror the factory defaults; do not
- * treat them as the source of truth, the stores' *Default constants are.
- */
 QtObject {
     // Playback page: the output rate policy. True is
     // bit-perfect (switch the device to the track's rate, nearest-best fallback

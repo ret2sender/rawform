@@ -18,6 +18,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// AlbumArtProvider.h
+//
+// Supplies album art to QML on demand, keyed by a track's file path.
+//
+// Registered as the "rawformart" image provider. PlaylistModel::artUrlForRow
+// builds the URL, `image://rawformart/<percent-encoded-absolute-path>?v=<tag>`,
+// and QML binds it to an Image source. Resolution order:
+//
+//   1. SIDECAR image in the track's folder (cover/folder/front/album/albumart.*),
+//      which takes priority over the embedded picture.
+//   2. EMBEDDED picture, extracted from the file via TagLib's complex-properties
+//      API (the bytes are read here, lazily, only for the displayed selection).
+//
+// Returns a null QImage when neither is found (QML shows its placeholder). Runs
+// on the asynchronous QML image-loading path, so the decode never blocks the UI.
+
 #pragma once
 
 #include <QImage>
@@ -26,21 +42,6 @@
 
 namespace rawform {
 
-/**
- * @brief Supplies album art to QML on demand, keyed by a track's file path.
- *
- * Registered as the "rawformart" image provider. PlaylistModel::artUrlForRow
- * builds the URL, `image://rawformart/<percent-encoded-absolute-path>?v=<tag>`,
- * and QML binds it to an Image source. Resolution order:
- *
- *   1. SIDECAR image in the track's folder (cover/folder/front/album/albumart.*),
- *      which takes priority over the embedded picture.
- *   2. EMBEDDED picture, extracted from the file via TagLib's complex-properties
- *      API (the bytes are read here, lazily, only for the displayed selection).
- *
- * Returns a null QImage when neither is found (QML shows its placeholder). Runs
- * on the asynchronous QML image-loading path, so the decode never blocks the UI.
- */
 class AlbumArtProvider : public QQuickImageProvider {
 public:
     AlbumArtProvider();

@@ -18,20 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import com.rawform.app
-
-
-// =============================================================================
 // Mp3TaggingSettingsPane.qml
 //
 // The "MP3" sub-page under Tagging in the Settings window, holding the
@@ -61,7 +47,14 @@ import com.rawform.app
 // that specific staged combination paints the hint in the app's warning
 // amber (Theme.warning, the StatusLogBar/LogStore warning-level color) instead of
 // the subdued gray.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import com.rawform.app
+
 Item {
     id: pane
 
@@ -109,7 +102,7 @@ Item {
             color: Theme.separatorStrong
         }
 
-        // ----- ID3v2 version --------------------------------------------------
+        // ----- ID3v2 version -----------------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 42
@@ -151,7 +144,7 @@ Item {
                   : "The most widely compatible revision."
         }
 
-        // ----- ID3v1 ----------------------------------------------------------
+        // ----- ID3v1 -------------------------------------------------------
         Item {
             Layout.fillWidth: true
             Layout.topMargin: 8
@@ -199,7 +192,7 @@ Item {
             }
         }
 
-        // ----- APEv2 ----------------------------------------------------------
+        // ----- APEv2 -------------------------------------------------------
         Item {
             Layout.fillWidth: true
             Layout.topMargin: 8
@@ -231,7 +224,7 @@ Item {
             }
         }
 
-        // ----- ID3v2 text encoding --------------------------------------------
+        // ----- ID3v2 text encoding -----------------------------------------
         Item {
             Layout.fillWidth: true
             Layout.topMargin: 8
@@ -291,9 +284,9 @@ Item {
         Item { Layout.fillHeight: true }  // push rows to the top
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Label plus modified-from-default dot, matching the sibling panes.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component RowLabel: Row {
         property string text: ""
         property bool modified: false
@@ -318,12 +311,12 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Generalized segmented selector: the RG pane's Off/Track/Album control with
     // the labels and segment width as properties, since this page needs four
     // different segment sets. Picked index == enum value by construction (the
     // labels arrays above are in enum order).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component SegmentSelect: Row {
         id: ss
         property var labels: []

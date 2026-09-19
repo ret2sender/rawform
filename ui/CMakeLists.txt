@@ -149,7 +149,8 @@ find_package(TagLib 2.0 CONFIG REQUIRED)
 
 # Opt into modern Qt 6.8+ QML resource and module policies.
 # QTP0001: embed QML files under :/qt/qml/ instead of :/ to avoid resource collisions.
-# QTP0004: require qmldir files for QML subdirectories, enforcing explicit module structure.
+# QTP0004: require qmldir files for QML subdirectories, enforcing explicit module
+# structure.
 qt_policy(SET QTP0001 NEW)
 qt_policy(SET QTP0004 NEW)
 
@@ -345,9 +346,12 @@ set_source_files_properties(
 #   cmake --build <dir> --target all_qmllint        (every module in the tree)
 # The warning class that motivates this is "unqualified access": a QML file
 # reaching an id or context property it does not declare, i.e. the
-# non-self-contained pattern. Every view that reaches a C++ context property
-# carries a file-wide `qmllint disable unqualified` for exactly that reach,
-# and the components declare what they consume (their few directives cover
+# non-self-contained pattern. Every QML file carries
+# `pragma ComponentBehavior: Bound`, so delegates and other nested components
+# resolve outer document ids statically (checked by qmllint) and declare what
+# they consume as `required property`. Every view that reaches a C++ context
+# property carries a file-wide `qmllint disable unqualified` for exactly that
+# reach; the components declare what they consume (their few directives cover
 # other categories, each at its site), so any warning is a regression.
 qt_add_qml_module(rawform
         URI com.rawform.app

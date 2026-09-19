@@ -18,6 +18,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistStore.cpp
+//
+// Implementation of the playlist saver: format resolution from the chosen path
+// and the dialog's filter hint, the off-thread .rwfpl / M3U write with its
+// completion signal, and the column-layout preset load and save.
+
 #include "playlist/PlaylistStore.h"
 
 #include "paths/Paths.h"

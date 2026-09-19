@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TrackReader.cpp
+//
+// Implementation of readTrack, the single tag-read boundary: the TagLib pass
+// (generic PropertyMap promotion plus per-format helpers for codec detection,
+// bits per sample, tag types, the FLAC vendor string and audio MD5, and the MP3
+// and MP4 bitrate-mode sniffers), the engine's FFmpeg metadata fallback for the
+// long tail, and the filesystem fields.
+
 #include "media/TrackReader.h"
 
 // Engine read-side FFmpeg metadata fallback: the second reader in readTrack's
@@ -89,7 +97,7 @@ QString tstr(const TagLib::String& s) {
     return QString::fromUtf8(s.toCString(true)); // true = UTF-8
 }
 
-// --- Byte-buffer helpers for the plain-bytes sniffers ------------------------
+// --- Byte-buffer helpers for the plain-bytes sniffers ----------------------
 // Widened to quint32 at the source so the shift-and-or assembly below needs no
 // per-byte cast. Callers bounds-check the offset.
 
@@ -172,7 +180,7 @@ std::unique_ptr<TagLib::File> openOggFile(const char* fileName, const QString& c
 }
 
 /// The Vorbis-comment VENDOR string of a native FLAC file (e.g. "reference
-/// libFLAC 1.4.3"). This is what foobar shows as the FLAC "Tool"; it is NOT an
+/// libFLAC 1.4.3"). This is what the FLAC "Tool" field shows; it is NOT an
 /// ENCODER tag, so the PropertyMap never carries it, and TagLib does not expose
 /// it reliably. We read it directly: after the "fLaC" marker, FLAC metadata
 /// blocks are [1 byte: last-flag + type][3 bytes BE: length][body]; the
@@ -209,14 +217,13 @@ QString flacVendorString(const QString& path) {
     return {};
 }
 
-/// FLAC stores an MD5 of the DECODED audio in its STREAMINFO block; foobar shows
-/// it as "Audio MD5". TagLib does not expose it, so read it directly. STREAMINFO
-/// is mandatorily the first metadata block: after the "fLaC" marker and the
-/// 4-byte block header, the 34-byte body's last 16 bytes are the MD5 (it sits at
-/// body offset 18, after min/max block size, min/max frame size, and the packed
-/// rate/channels/bits/total-samples word). An all-zero signature means the
-/// encoder stored none (e.g. --no-md5), reported here as absent. Plain bytes, no
-/// TagLib dependency.
+/// FLAC stores an MD5 of the DECODED audio in its STREAMINFO block; the pane shows it as
+/// "Audio MD5". TagLib does not expose it, so read it directly. STREAMINFO is mandatorily
+/// the first metadata block: after the "fLaC" marker and the 4-byte block header, the
+/// 34-byte body's last 16 bytes are the MD5 (it sits at body offset 18, after min/max
+/// block size, min/max frame size, and the packed rate/channels/bits/total-samples word).
+/// An all-zero signature means the encoder stored none (e.g. --no-md5), reported here as
+/// absent. Plain bytes, no TagLib dependency.
 QString flacAudioMd5(const QString& path) {
     QFile fp(path);
     if (!fp.open(QIODevice::ReadOnly))
@@ -298,7 +305,7 @@ QString codecProfileOf(TagLib::AudioProperties* ap) {
 }
 
 // ===========================================================================
-// Bitrate mode (CBR / ABR / VBR), the foobar-style suffix on the codec profile.
+// Bitrate mode (CBR / ABR / VBR), the suffix on the codec profile.
 // ===========================================================================
 //
 // Three sources feed the "Codec Profile" pane field:
@@ -354,7 +361,7 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
     if (!fp.open(QIODevice::ReadOnly))
         return out;
 
-    // ----- 1. Skip an ID3v2 tag so the frame search starts at real audio. ----
+    // ----- 1. Skip an ID3v2 tag so the frame search starts at audio. -------
     // Header: "ID3", version(2), flags(1), size(4, syncsafe = 7 bits/byte). A
     // footer (flag bit 0x10) adds another 10 bytes after the tag body.
     qint64 start = 0;
@@ -368,7 +375,7 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
         }
     }
 
-    // ----- 2. Find the first valid MPEG audio frame sync from `start`. --------
+    // ----- 2. Find the first valid MPEG audio frame sync from `start`. -----
     // Bounded so a pathological file cannot make us scan forever; the first
     // frame always lands within the first few KB of audio in practice.
     constexpr qint64 kScanLimit = 512 * 1024;
@@ -404,7 +411,7 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
         return out;
     }
 
-    // ----- 3. Locate the Xing/Info tag (after the side-info block). -----------
+    // ----- 3. Locate the Xing/Info tag (after the side-info block). --------
     const bool mpeg1   = (version == 3);
     const bool mono    = (channelMode == 3);
     const int  sideLen = mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17);
@@ -431,7 +438,7 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
     // Magic-based first guess; the LAME method nibble below refines it.
     out.mode = isXing ? BitrateMode::Vbr : BitrateMode::Cbr;
 
-    // ----- 4. Walk the Xing/Info optional fields to reach the LAME tag. -------
+    // ----- 4. Walk the Xing/Info optional fields to reach the LAME tag. ----
     // Layout: magic(4) flags(4), then conditionally frames(4), bytes(4),
     // TOC(100), quality(4), in that order, gated by the flag bits.
     int p = tagOff + 4;
@@ -479,7 +486,7 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
         }
     }
 
-    // ----- 5. Best-effort -V preset for true VBR. ----------------------------
+    // ----- 5. Best-effort -V preset for true VBR. --------------------------
     // LAME stores roughly (100 - 10*V) in the Xing quality field, so the inverse
     // is V = (100 - quality) / 10. TWEAK POINT: if your -V files read wrong, this
     // is the one line to adjust. Gated to 0..9.
@@ -655,8 +662,7 @@ AacEsds parseAacEsds(const QByteArray& m, int esdsPayload) {
 /// trustworthy hint is an esds that declares a peak above the average, which only
 /// a genuine VBR stream does; we append "(VBR)" then, with a margin so a CBR
 /// reservoir's small headroom is not mistaken for it. FFmpeg sets max == avg in
-/// BOTH modes, so its files read as the object type alone, which is also what
-/// foobar shows for AAC.
+/// BOTH modes, so its files read as the object type alone.
 QString aacProfile(const QString& path) {
     QFile fp(path);
     if (!fp.open(QIODevice::ReadOnly))
@@ -743,7 +749,7 @@ QString tagTypeOf(TagLib::File* file) {
     return parts.join(QStringLiteral(" + "));
 }
 
-// --- Shared tag promotion ----------------------------------------------------
+// --- Shared tag promotion --------------------------------------------------
 
 /// Promote the canonical-keyed tags in @p props onto @p t's named fields, then
 /// sweep whatever is left into extraTags. Shared by the TagLib reader and the
@@ -927,13 +933,13 @@ TrackData readTrack(const QString& path) {
     const QString suffix = fi.suffix().toLower();
     t.codec = codecForSuffix(suffix); // provisional; refined from content below
 
-    // ---------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Acquire the right TagLib file object. For Ogg containers we sniff the
     // bitstream and open the matching class, because the extension alone cannot
     // tell Vorbis from Opus (both can be .ogg) and FileRef would misread it.
     // Everything else goes through FileRef, then the codec is taken from the
     // concrete type. The rest of the function reads uniformly from `file`.
-    // ---------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     static const QSet<QString> kOggExts = {
         QStringLiteral("ogg"), QStringLiteral("oga"),
         QStringLiteral("opus"), QStringLiteral("spx"),
@@ -962,7 +968,7 @@ TrackData readTrack(const QString& path) {
             t.codec = codecForFile(file, suffix);
     }
 
-    // --- Metadata reader cascade --------------------------------------------
+    // --- Metadata reader cascade -------------------------------------------
     // Ordered precedence, the read-side mirror of DecoderFactory: TagLib is the
     // native reference reader and was tried just above; when it cannot parse the
     // file we fall through to the engine's FFmpeg probe, which reads the long tail
@@ -1009,7 +1015,7 @@ TrackData readTrack(const QString& path) {
     t.tagType       = tagTypeOf(file);
 
     // Promote the tags. The MP3 LAME-header encoder is the highest-precedence
-    // source for the Tool field (it is what foobar surfaces), so set it before the
+    // source for the Tool field, so set it before the
     // shared promotion, whose ENCODER/ENCODING fills only when Tool is still empty.
     if (t.codec == QLatin1String("MP3") && !mp3.encoder.isEmpty())
         t.tool = mp3.encoder;
@@ -1032,7 +1038,7 @@ TrackData readTrack(const QString& path) {
     }
     promoteTagMap(tagMap, t);
 
-    // ----- TagLib-only enrichment (no FFmpeg-probe equivalent) ---------------
+    // ----- TagLib-only enrichment (no FFmpeg-probe equivalent) -------------
     // Native FLAC stores its encoder in the Vorbis-comment VENDOR string, not an
     // ENCODER tag, so the PropertyMap never has it. Read it directly. (Ogg Vorbis
     // / Opus already carry an ENCODER tag, handled by the promotion above.)

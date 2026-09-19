@@ -18,29 +18,30 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistDialogs.qml
+//
+// The four native file dialogs (Add files, Add folder, Save playlist, Open
+// playlist) and the consequences of accepting them, behind one controller.
+// MainWindow only instantiates this and forwards ThemedMenuBar's request
+// signals to the open* functions below; the menu holds no reference to a
+// dialog and MainWindow holds no dialog ids.
+//
+// Dependencies are declared and typed, never ambient:
+//  - tabs: the PlaylistTabs registry (scan targets, tab creation, open)
+//  - store: the PlaylistStore (.rwfpl / .m3u / .m3u8 save)
+//  - columnSource: the PlaylistView whose live column order/widths a save
+//    snapshots (the C++ store cannot see the QML-owned header widths)
+//
+// The root is a zero-size, invisible Item rather than a QtObject: FileDialog
+// needs an Item ancestry to find its transient parent window, which is what
+// centers the dialogs on the main window.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Dialogs
 import com.rawform.app
 
-/*
- * PlaylistDialogs.qml
- *
- * The four native file dialogs (Add files, Add folder, Save playlist, Open
- * playlist) and the consequences of accepting them, behind one controller.
- * MainWindow only instantiates this and forwards ThemedMenuBar's request
- * signals to the open* functions below; the menu holds no reference to a
- * dialog and MainWindow holds no dialog ids.
- *
- * Dependencies are declared and typed, never ambient:
- *  - tabs: the PlaylistTabs registry (scan targets, tab creation, open)
- *  - store: the PlaylistStore (.rwfpl / .m3u / .m3u8 save)
- *  - columnSource: the PlaylistView whose live column order/widths a save
- *    snapshots (the C++ store cannot see the QML-owned header widths)
- *
- * The root is a zero-size, invisible Item rather than a QtObject: FileDialog
- * needs an Item ancestry to find its transient parent window, which is what
- * centers the dialogs on the main window.
- */
 Item {
     id: host
     visible: false

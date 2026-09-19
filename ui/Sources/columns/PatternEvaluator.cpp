@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PatternEvaluator.cpp
+//
+// Implementation of the per-field renderer and the %token% pattern evaluator.
+// renderFieldValue is the single place a built-in field becomes display text;
+// evaluatePattern resolves each token to a native field first, then a custom tag,
+// then empty, with the optional per-value transform hook the rename pipeline uses.
+
 #include "columns/PatternEvaluator.h"
 
 #include "utils/Formats.h"
@@ -79,7 +86,7 @@ QString resolveToken(const TrackData& t, const QString& name) {
 
 QString renderFieldValue(const TrackData& t, ColumnField field) {
     switch (field) {
-    // --- Direct tag fields ----------------------------------------------
+    // --- Direct tag fields -------------------------------------------------
     case ColumnField::Artist:       return joinedValues(t.artists);
     case ColumnField::AlbumArtist:  return joinedValues(t.albumArtists);
     case ColumnField::Album:        return t.album;
@@ -91,7 +98,7 @@ QString renderFieldValue(const TrackData& t, ColumnField field) {
     case ColumnField::TrackTotal:   return intOrEmpty(t.trackTotal);
     case ColumnField::DiscTotal:    return intOrEmpty(t.discTotal);
 
-    // --- Direct audio properties ----------------------------------------
+    // --- Direct audio properties -------------------------------------------
     case ColumnField::Duration:     return formats::durationText(t.durationMs);
     case ColumnField::Bitrate:      return t.bitrateKbps > 0
                                         ? QStringLiteral("%1 kbps").arg(t.bitrateKbps) : QString{};
@@ -100,7 +107,7 @@ QString renderFieldValue(const TrackData& t, ColumnField field) {
     case ColumnField::Channels:     return intOrEmpty(t.channels);
     case ColumnField::Codec:        return t.codec;
 
-    // --- Direct filesystem fields ---------------------------------------
+    // --- Direct filesystem fields ------------------------------------------
     case ColumnField::FileName:     return t.fileName;
     case ColumnField::FolderName:   return t.folderName;
     case ColumnField::FilePath:     return t.filePath;
@@ -109,7 +116,7 @@ QString renderFieldValue(const TrackData& t, ColumnField field) {
     case ColumnField::Created:      return dateText(t.created);
     case ColumnField::SubsongIndex: return QString::number(t.subsongIndex);
 
-    // --- Composite renderers --------------------------------------------
+    // --- Composite renderers -----------------------------------------------
     case ColumnField::TrackIndex:
         // "disc.track" with the track zero-padded to two digits, e.g. "1.01".
         // Fall back gracefully when fields are unknown (0).

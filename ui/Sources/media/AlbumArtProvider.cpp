@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// AlbumArtProvider.cpp
+//
+// Implementation of the "rawformart" image provider: the sidecar lookup
+// (cover/folder/front/album/albumart with the usual image extensions), the
+// embedded-picture extraction through TagLib's complex properties, and the
+// requestImage entry point that tries them in that order.
+
 #include "media/AlbumArtProvider.h"
 
 #include <QByteArray>

@@ -18,11 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
+// ThemedSplitView.qml
+//
+// The app's SplitView with the rawform handle: a transparent 12 x 6 strip
+// whose center third carries a short gradient bar that fades in on hover
+// (SplitHandle.hovered, animated over 250 ms). Orientation-aware, so the same
+// handle serves the horizontal main split and any vertical one.
+
 pragma ComponentBehavior: Bound
 
 import QtQuick

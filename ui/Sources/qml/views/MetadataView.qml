@@ -18,26 +18,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
+// MetadataView.qml
+//
+// Metadata pane: a two-column Name/Value table, grouped into sections
+// ("Metadata", "Location") with purple section-header rows, matching the
+// Figma design. Driven by MetadataModel, which is populated in C++ whenever
+// the playlist's current (anchor) row changes.
+//
+// Section rows are flagged via the isSection role; the delegate renders those
+// as a full-width purple label and the field rows as Name | Value.
+
 pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
 import com.rawform.app
 
-/*
- * Metadata pane: a two-column Name/Value table, grouped into sections
- * ("Metadata", "Location") with purple section-header rows, matching the
- * Figma design. Driven by MetadataModel, which is populated in C++ whenever
- * the playlist's current (anchor) row changes.
- *
- * Section rows are flagged via the isSection role; the delegate renders those
- * as a full-width purple label and the field rows as Name | Value.
- */
 Item {
     id: root
 
@@ -217,7 +213,7 @@ Item {
                 required property var display
                 required property bool isSection
 
-                // --- Section header row -------------------------------------
+                // --- Section header row ------------------------------------
                 // #232323 band, 26px visual height. For sections after the
                 // first, the row is 3px taller and the band is pushed down by
                 // that amount, so the extra space lands ABOVE the title.
@@ -241,7 +237,7 @@ Item {
                     }
                 }
 
-                // --- Field row ----------------------------------------------
+                // --- Field row ---------------------------------------------
                 // Alternating background, restarting at #232323 for the first
                 // field of each section (parity from fieldIndexInSection).
                 Rectangle {

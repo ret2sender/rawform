@@ -80,7 +80,7 @@ extern "C" const char* __tsan_default_suppressions() {
         // this entry covers the residual (a genuine TZ change at runtime).
         "race:tzset_internal\n"
 
-        // --- Linux (GCC libtsan, uninstrumented prebuilt Qt) --------------
+        // --- Linux (GCC libtsan, uninstrumented prebuilt Qt) ---------------
         // Structural cause for this whole block: Qt6's QMutex/atomics are
         // futex-based on Linux, INVISIBLE to TSan when Qt itself is not
         // instrumented, so handoffs synchronized purely inside Qt report as

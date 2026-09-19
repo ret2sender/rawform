@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ReplayGainRowsModel.cpp
+//
+// Implementation of the ReplayGain rows model: population from PlaylistModel's
+// row list in one reset, the per-cell field plumbing and strict value
+// validation, row selection, staging with the revert-on-equal rule, scan scope
+// resolution and result staging, the collect / adopt / revert apply path, and
+// the Summary recomputation.
+
 #include "ReplayGainRowsModel.h"
 
 #include "media/ReplayGainTags.h"
@@ -46,7 +54,7 @@ QString multipleValuesMarker() {
 ReplayGainRowsModel::ReplayGainRowsModel(QObject* parent)
     : QAbstractListModel(parent) {}
 
-// --- QAbstractListModel ------------------------------------------------------
+// --- QAbstractListModel ----------------------------------------------------
 
 int ReplayGainRowsModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
@@ -88,7 +96,7 @@ QHash<int, QByteArray> ReplayGainRowsModel::roleNames() const {
     };
 }
 
-// --- population --------------------------------------------------------------
+// --- population ------------------------------------------------------------
 
 void ReplayGainRowsModel::setSelection(PlaylistModel* playlist, const QVariantList& rows) {
     beginResetModel();
@@ -123,7 +131,7 @@ void ReplayGainRowsModel::clear() {
     setSelection(nullptr, {});
 }
 
-// --- field plumbing ----------------------------------------------------------
+// --- field plumbing --------------------------------------------------------
 
 QString& ReplayGainRowsModel::cur(Row& r, int field) {
     switch (field) {
@@ -163,7 +171,7 @@ int ReplayGainRowsModel::roleFor(int field) {
     }
 }
 
-// --- comparison + validation --------------------------------------------
+// --- comparison + validation -----------------------------------------------
 
 bool ReplayGainRowsModel::fieldChanged(const QString& curV, const QString& origV,
                                        bool peak) {
@@ -189,7 +197,7 @@ bool ReplayGainRowsModel::fieldChanged(const QString& curV, const QString& origV
     return replaygain::formatGainValue(*gc) != replaygain::formatGainValue(*go);
 }
 
-// --- selection ---------------------------------------------------------------
+// --- selection -------------------------------------------------------------
 
 void ReplayGainRowsModel::select(int row, int modifiers) {
     const int n = static_cast<int>(m_rows.size());
@@ -240,7 +248,7 @@ void ReplayGainRowsModel::clearSelection() {
     recomputeSummary();
 }
 
-// --- staging -----------------------------------------------------------------
+// --- staging ---------------------------------------------------------------
 
 bool ReplayGainRowsModel::validInput(const QString& raw, int field) const {
     const QString t = raw.trimmed();
@@ -302,7 +310,7 @@ void ReplayGainRowsModel::clearAllReplayGain() {
     setScoped(AlbumPeak, {}, true);
 }
 
-// --- scanning ----------------------------------------------------------------
+// --- scanning --------------------------------------------------------------
 
 QList<int> ReplayGainRowsModel::scopedIndices(bool allRows) const {
     QList<int> out;
@@ -434,7 +442,7 @@ void ReplayGainRowsModel::stageScanResults(const QVariantList& results) {
     }
 }
 
-// --- apply / revert ----------------------------------------------------------
+// --- apply / revert --------------------------------------------------------
 
 QVariantList ReplayGainRowsModel::collectEdits() const {
     QVariantList edits;
@@ -492,7 +500,7 @@ void ReplayGainRowsModel::revertEdits() {
     recomputeSummary();
 }
 
-// --- summary -----------------------------------------------------------------
+// --- summary ---------------------------------------------------------------
 
 void ReplayGainRowsModel::recomputeSummary() {
     // The single pass: gather selection count, dirtiness, and the

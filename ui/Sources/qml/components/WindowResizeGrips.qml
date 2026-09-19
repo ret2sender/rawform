@@ -18,39 +18,38 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// WindowResizeGrips.qml
+//
+// Resize affordances for a FRAMELESS window. A frameless window has no
+// compositor-drawn frame, and the frame is where a window system puts its
+// resize edges; without this, a Qt.FramelessWindowHint window on Wayland
+// cannot be resized at all (X11 window managers drop the borders too). On
+// macOS the main window is titled and AppKit supplies the edges itself, so
+// the host gates this off there (a second set of grips would fight the
+// native ones); the tool windows are frameless everywhere and use it on
+// every platform.
+//
+// Anchor it to fill the window's root item and DECLARE IT LAST so it sits
+// above the chrome in z-order; the grips are thin transparent strips along
+// the edges plus small corner squares, so they steal nothing from the body
+// except those few pixels.
+//
+// Each grip hands the drag to the window system through startSystemResize,
+// which is the only correct route on Wayland (the client cannot set its own
+// position) and is what X11 (_NET_WM_MOVERESIZE) and macOS honor as well.
+// Where a platform declines (returns false), an incremental-delta fallback
+// resizes manually, but ONLY for the right/bottom family: those grips ride
+// the moving edge under a stationary cursor, so the delta is well defined.
+// The left/top family cannot be emulated (it needs x/y writes, forbidden on
+// Wayland and jittery on X11), so those grips are system-resize only.
+//
+// One implementation shared by the main window and every tool window.
+
 pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Window
 
-/*
- * WindowResizeGrips.qml
- *
- * Resize affordances for a FRAMELESS window. A frameless window has no
- * compositor-drawn frame, and the frame is where a window system puts its
- * resize edges; without this, a Qt.FramelessWindowHint window on Wayland
- * cannot be resized at all (X11 window managers drop the borders too). On
- * macOS the main window is titled and AppKit supplies the edges itself, so
- * the host gates this off there (a second set of grips would fight the
- * native ones); the tool windows are frameless everywhere and use it on
- * every platform.
- *
- * Anchor it to fill the window's root item and DECLARE IT LAST so it sits
- * above the chrome in z-order; the grips are thin transparent strips along
- * the edges plus small corner squares, so they steal nothing from the body
- * except those few pixels.
- *
- * Each grip hands the drag to the window system through startSystemResize,
- * which is the only correct route on Wayland (the client cannot set its own
- * position) and is what X11 (_NET_WM_MOVERESIZE) and macOS honor as well.
- * Where a platform declines (returns false), an incremental-delta fallback
- * resizes manually, but ONLY for the right/bottom family: those grips ride
- * the moving edge under a stationary cursor, so the delta is well defined.
- * The left/top family cannot be emulated (it needs x/y writes, forbidden on
- * Wayland and jittery on X11), so those grips are system-resize only.
- *
- * One implementation shared by the main window and every tool window.
- */
 Item {
     id: root
 
@@ -107,7 +106,7 @@ Item {
         }
     }
 
-    // ----- edges ------------------------------------------------------------
+    // ----- edges -----------------------------------------------------------
     Grip {
         anchors.left: parent.left
         anchors.top: parent.top
@@ -149,7 +148,7 @@ Item {
         edges: Qt.BottomEdge
     }
 
-    // ----- corners ----------------------------------------------------------
+    // ----- corners ---------------------------------------------------------
     // The top corners sit BELOW topInset: the title bar's own drag zone owns
     // the very top strip, and a corner square poking into it would turn the
     // outermost title bar pixels into a resize rather than a move.

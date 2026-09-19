@@ -29,8 +29,8 @@
 // WHY A WINDOW, NOT A RAW PER-FRAME VALUE. A single frame's bitrate is jittery
 // (VBR frame sizes swing hard frame to frame), so a raw readout would flicker. A
 // trailing window of fixed DURATION (not a fixed frame count) gives a stable,
-// codec-independent "current bitrate" with the same feel as foobar2000's display,
-// and reads correctly whether a codec emits ~10 frames/sec (FLAC) or ~38 (MP3).
+// codec-independent "current bitrate" and reads correctly whether a codec emits
+// ~10 frames/sec (FLAC) or ~38 (MP3).
 //
 // THREADING. This is plain, lock-free, single-thread state. Each decoder owns one
 // in its Impl and touches it only from read()/seek(), which the engine calls on
@@ -101,8 +101,8 @@ private:
         double seconds;
     };
 
-    /// Window length. ~1 s gives a steady, foobar-like readout; shorten for a more
-    /// reactive display, lengthen for a calmer one. The single tuning knob here.
+    /// Window length. ~1 s gives a steady readout; shorten for a more reactive
+    /// display, lengthen for a calmer one. The single tuning knob here.
     static constexpr double kWindowSeconds = 1.0;
 
     std::deque<Sample> m_samples;

@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // SettingsStore.h
 //
 // The application-wide settings store, backed by settings.yaml under
@@ -59,7 +56,8 @@
 //     id3v1_mode: write         # write | preserve | strip
 //     ape_mode: preserve        # preserve | strip
 //     id3v2_encoding: utf16     # latin1 | utf16 | utf8
-// =============================================================================
+
+#pragma once
 
 #include <QObject>
 #include <QQmlEngine>  // QML_ELEMENT / QML_UNCREATABLE
@@ -99,24 +97,23 @@ class SettingsStore : public QObject {
     Q_PROPERTY(int id3v2EncodingDefault READ id3v2EncodingDefault CONSTANT)
 
 public:
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Enums. Values are stable API: they are what QML compares against and what
     // MetadataEditor snapshots into its jobs. The YAML spelling is a separate,
     // human-readable string mapping (see the .cpp), so reordering here would
     // NOT corrupt existing files, but do not reorder anyway; QML integers
     // written into staged state must keep meaning across versions.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
 
     /// Which ID3v2 revision the MP3 writer emits. 2.3 is the compatibility
-    /// default (foobar2000's default as well); 2.4 unlocks UTF-8 text frames.
+    /// default; 2.4 unlocks UTF-8 text frames.
     enum Id3v2Version { Id3v2_3 = 0, Id3v2_4 = 1 };
     Q_ENUM(Id3v2Version)
 
-    /// What happens to the legacy ID3v1 block on save. Write always emits one
-    /// (the default, matching foobar2000: maximum compatibility with
-    /// legacy readers, and the block can never go stale against the v2 frames
-    /// because every save rewrites it); Preserve updates an existing block but
-    /// never adds one; Strip removes it.
+    /// What happens to the legacy ID3v1 block on save. Write always emits one (the
+    /// default: maximum compatibility with legacy readers, and the block can never go
+    /// stale against the v2 frames because every save rewrites it); Preserve updates an
+    /// existing block but never adds one; Strip removes it.
     enum Id3v1Mode { Id3v1Write = 0, Id3v1Preserve = 1, Id3v1Strip = 2 };
     Q_ENUM(Id3v1Mode)
 
@@ -136,11 +133,11 @@ public:
     explicit SettingsStore(QObject* parent = nullptr);
     ~SettingsStore() override;
 
-    /// A plain value snapshot of the tagging knobs for the write workers:
-    /// MetadataEditor copies one of these into every Job on the GUI thread
-    /// before QtConcurrent spawns, so no worker ever reads this QObject. The
-    /// defaults match the documented policy, so a DEFAULT-CONSTRUCTED snapshot is the correct
-    /// fallback when instance() is null (an editor running without the store).
+    /// A plain value snapshot of the tagging knobs for the write workers: MetadataEditor
+    /// copies one of these into every Job on the GUI thread before QtConcurrent spawns,
+    /// so no worker ever reads this QObject. The defaults match the documented policy, so
+    /// a DEFAULT-CONSTRUCTED snapshot is the correct fallback when instance() is null (an
+    /// editor running without the store).
     struct TaggingSnapshot {
         int id3v2Version  = Id3v2_3;
         int id3v1Mode     = Id3v1Write;
@@ -185,7 +182,7 @@ private:
     void persistSettings();
 
     /// Defaults: ID3v2.3 for compatibility, always write
-    /// the legacy ID3v1 block (foobar2000's behavior), never add APE sidecar
+    /// the legacy ID3v1 block, never add APE sidecar
     /// blocks unasked, UTF-16 as the safe encoding under 2.3. These are the
     /// values a fresh install (no settings.yaml) runs with, and the fallback for
     /// any unknown value found in a hand-edited file; an existing file with an

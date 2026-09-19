@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// MetadataModel.cpp
+//
+// Implementation of the metadata pane model: the static row template, the
+// visible-row rebuild on each selection, the per-field value rendering, and the
+// multi-selection aggregation (joins, numeric aggregates, relabeling, and the
+// duration-weighted share breakdown for the Tool field).
+
 #include "metadata/MetadataModel.h"
 
 #include "utils/Formats.h"
@@ -38,7 +45,7 @@ MetadataModel::MetadataModel(QObject* parent)
 }
 
 void MetadataModel::buildTemplate() {
-    // Built once into m_template. Order matches foobar2000's pane. The field()
+    // Built once into m_template, in display order. The field()
     // helper derives the SINGLE-ONLY flag from isSingleOnlyField(id), so the
     // "hidden in a multi-selection" set lives in exactly one place; only the
     // CONDITIONAL flag and the multi-selection label are passed per field.
@@ -227,7 +234,7 @@ QString MetadataModel::joinSeparator(FieldId id) {
     switch (id) {
     case FieldId::FileName:
     case FieldId::FolderName:
-        return QStringLiteral(", "); // foobar joins the path fields with a comma
+        return QStringLiteral(", "); // the path fields join with a comma
     default:
         return QStringLiteral("; "); // everything else uses a semicolon
     }
@@ -253,7 +260,7 @@ QString MetadataModel::formatDurationSamples(qint64 totalMs, qint64 totalSamples
     const qint64 s  = (totalMs / 1000) % 60;
     const qint64 ms = totalMs % 1000;
     // H:MM:SS.mmm once an hour is reached, else M:SS.mmm (leading unit unpadded,
-    // matching foobar's "5:00.720" and "43:05.960").
+    // e.g. "5:00.720" and "43:05.960").
     QString clock = h > 0
         ? QStringLiteral("%1:%2:%3").arg(h)
               .arg(m, 2, 10, QLatin1Char('0'))
@@ -326,7 +333,7 @@ QString MetadataModel::fieldValue(const TrackData& t, FieldId id) {
         return t.sampleRateHz > 0
             ? QStringLiteral("%1 Hz").arg(t.sampleRateHz) : QString{};
     case FieldId::Channels:
-        // Subtlety kept (NOT foobar's bare integer): Mono / Stereo for the two
+        // Subtlety kept (not a bare integer): Mono / Stereo for the two
         // common cases, then the bare channel count for anything higher.
         switch (t.channels) {
         case 0:  return {};
@@ -340,7 +347,7 @@ QString MetadataModel::fieldValue(const TrackData& t, FieldId id) {
         return t.codec; // TrackReader's content-derived label; empty stays empty
     case FieldId::Encoding: {
         // Derived from the codec label, so there is no stored field and no cache
-        // surface. Lowercase ("lossless" / "lossy") to match foobar. The label
+        // surface. Lowercase ("lossless" / "lossy"). The label
         // is content-derived (TrackReader tells ALAC from AAC inside an m4a by
         // the MP4 properties), so the set below decides by codec, never by
         // container.
@@ -357,12 +364,12 @@ QString MetadataModel::fieldValue(const TrackData& t, FieldId id) {
     case FieldId::Tool:
         return t.tool; // empty stays empty (always-on row, shows blank)
     case FieldId::EmbeddedCuesheet:
-        // Lowercase yes / no, to match foobar. An empty selection is handled
+        // Lowercase yes / no. An empty selection is handled
         // upstream by aggregatedValue returning empty, so the row blanks there.
         return t.hasEmbeddedCuesheet ? QStringLiteral("yes")
                                      : QStringLiteral("no");
     case FieldId::BitsPerSample:
-        // Subtlety kept: the "bit" suffix stays (foobar shows a bare integer).
+        // Subtlety kept: the "bit" suffix stays (not a bare integer).
         // Conditional: 0 means lossy / not applicable, so the row hides.
         return t.bitsPerSample > 0 ? QStringLiteral("%1 bit").arg(t.bitsPerSample)
                                    : QString{};
@@ -371,7 +378,7 @@ QString MetadataModel::fieldValue(const TrackData& t, FieldId id) {
     case FieldId::TagType:
         return t.tagType;      // conditional; empty hides the row
     case FieldId::AudioMd5:
-        // Uppercase hex, to match foobar. Conditional + single-only: empty
+        // Uppercase hex. Conditional + single-only: empty
         // (non-FLAC / unset) hides it, and any multi-selection hides it too.
         return t.audioMd5.toUpper();
     case FieldId::None:
@@ -429,8 +436,8 @@ QString MetadataModel::aggAvgBitrate() const {
 }
 
 QString MetadataModel::aggMaxModified() const {
-    // Most recent modified timestamp across the selection. Foobar keeps "Last
-    // modified" in a multi-selection (unlike "Created", which it drops), so the
+    // Most recent modified timestamp across the selection. "Last modified" is
+    // kept in a multi-selection (unlike "Created", which is dropped), so the
     // single most meaningful value is the latest touch.
     QDateTime best;
     for (const TrackData& t : m_selection) {
@@ -443,12 +450,12 @@ QString MetadataModel::aggMaxModified() const {
 
 QString MetadataModel::aggWeightedShare(FieldId id) const {
     // Group the selection by per-track value, accumulating a WEIGHT per group,
-    // then render "value (share%)" for each. Reproduces foobar's Tool field in a
+    // then render "value (share%)" for each. This is the Tool field in a
     // multi-selection, e.g. "...1.2.1... (51.4%); ...1.1.4... (48.6%)".
     //
-    // Weight is the track duration: foobar's percentages are non-round (51.4 on
-    // two tracks is not a track count), and duration is the same weighting it
-    // uses for Avg. bitrate. If NO track reports a duration we fall back to a
+    // Weight is the track duration: the percentages are non-round (51.4 on
+    // two tracks is not a track count), and duration is the same weighting
+    // Avg. bitrate uses. If NO track reports a duration we fall back to a
     // weight of 1 each, so equal-length or duration-less selections degrade to
     // plain track proportions (the tidy 25 / 25 / 50 case).
     bool anyDuration = false;
@@ -499,10 +506,9 @@ QString MetadataModel::aggWeightedShare(FieldId id) const {
         return groups.first().value;
 
     // Two or more distinct values: each gets its duration-weighted share, to one
-    // decimal (foobar's precision; rounding can leave the sum at 99.9, as it does
-    // in foobar). The distinct-value cap mirrors joinDeduped; a truncated list's
-    // shares are necessarily partial, but 20+ distinct encoders in one selection
-    // is pathological.
+    // decimal (rounding can leave the sum at 99.9). The distinct-value cap mirrors
+    // joinDeduped; a truncated list's shares are necessarily partial, but 20+
+    // distinct encoders in one selection is pathological.
     constexpr int kMaxDistinctValues = 20;
     const QString sep = QStringLiteral("; ");
     QStringList out;

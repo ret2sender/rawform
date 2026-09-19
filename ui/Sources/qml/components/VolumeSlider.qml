@@ -18,10 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import QtQuick
-
-
-// =============================================================================
 // VolumeSlider.qml
 //
 // The master-volume control for the PlayerBar. It is a sibling in spirit to
@@ -55,13 +51,17 @@ import QtQuick
 // LOOK matches the SeekBar's lavender-on-gray pill. Every color and size is a
 // property defaulted to the current value, so the look can be retuned without
 // touching the logic below.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+
 Item {
     id: root
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Inputs (driven by PlayerBar from the AudioController).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
 
     // The displayed level, 0..1. This is the slider FRACTION (the percentage over
     // 100), not a gain: the perceptual taper that turns it into a gain lives in
@@ -77,10 +77,10 @@ Item {
     // controller's one source of truth, rather than guessing a curve here.
     property real taperExponent: 2.0
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Look. Defaults match the SeekBar's track/fill so the two bars read as a
     // pair; restyle freely without disturbing the logic.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     property color trackColor: Theme.border
     property color fillColor: Theme.accentSoft
     property color mutedFillColor: "#5A5668"  // the fill, grayed, while muted
@@ -99,22 +99,22 @@ Item {
     // a comfortable nudge that matches the percentage readout's granularity.
     property real wheelStep: 0.05
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Output. Emitted on every user change (press, drag tick, wheel notch) with
     // the new 0..1 level. The controller clamps and applies; we pre-clamp anyway
     // so a consumer that does not clamp still gets a valid value.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     signal moved(real level)
 
     // Match the SeekBar's comfortable hit target so the thin bar is easy to grab
     // and the two bars line up row-for-row in the PlayerBar.
     implicitHeight: barHeight + 12
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Private drag state. _dragging gates the fill: while true the fill follows
     // _dragRatio so it cannot fight the incoming `level` for the one frame the
     // round trip takes. That single flag IS the own-the-fill-during-drag rule.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     property bool _dragging: false
     property real _dragRatio: 0
 
@@ -158,10 +158,10 @@ Item {
         return s + " dB"
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // The bar: track plus fill, the SeekBar look. The fill reads _dragRatio while
     // dragging, else the live level; its color grays out while muted.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: track
         anchors.verticalCenter: parent.verticalCenter
@@ -180,12 +180,12 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // The hover/drag playhead: a thin vertical pipe at the cursor, the same marker
     // the SeekBar shows. No percentage bubble here, the readout above the bar
     // already shows the value; this is purely the positional pipe. Drawn above
     // the track and only while the pointer is engaged.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: playhead
         visible: root._showCursor
@@ -197,12 +197,12 @@ Item {
         x: root._cursorRatio * root.width
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // The dB bubble, the volume analogue of the SeekBar's time bubble: a small
     // mono readout above the bar showing the dB at the cursor, shown only while
     // the pointer is engaged (hover or drag). Clamped so it never runs off either
     // end of the bar. Drawn above the track; no ancestor clips it.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: bubble
         visible: root._showCursor
@@ -225,11 +225,11 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Interaction. One MouseArea owns press / drag / release and the wheel. Every
     // path emits moved() immediately: there is no release-only commit because a
     // volume change is free to apply live (see the file header).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     MouseArea {
         id: hit
         anchors.fill: parent

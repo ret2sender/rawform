@@ -18,6 +18,30 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// RenamePatternStore.h
+//
+// Saved rename patterns for File Operations > Rename To: named { name, pattern } presets,
+// persisted to rename_patterns.yaml under userConfigDir().
+//
+// CustomColumnRegistry's conventions: wholesale write-through through the
+// shared YAML idiom (utils/YamlFile.h: atomic write), tolerant load (a
+// missing or malformed file yields zero presets and never throws, so a
+// hand-edit typo cannot wedge the dialog), user order preserved in the file.
+//
+// One deliberate divergence from the registry: records are keyed by their
+// user-facing NAME, not a generated id. Nothing references a preset from
+// another file (unlike columns, whose ids live inside .rwfpl headers), so an
+// id would be dead weight, and name-keying gives save() the semantics the
+// dialog's Save button wants: saving under an existing name replaces that
+// preset in place, keeping its position in the list.
+//
+// QML_ELEMENT (unlike the injected registry): the rename dialog instantiates
+// its own store, and the constructor loads from disk, so a fresh dialog
+// always reflects the file, including edits made by another window's dialog
+// earlier in the session (write-through means the file is always the truth).
+//
+// Ships EMPTY by design: no seed presets.
+
 #pragma once
 
 #include <QList>
@@ -28,30 +52,6 @@
 
 namespace rawform {
 
-/**
- * @brief Saved rename patterns for File Operations > Rename To: named
- *        { name, pattern } presets, persisted to rename_patterns.yaml under
- *        userConfigDir().
- *
- * CustomColumnRegistry's conventions: wholesale write-through through the
- * shared YAML idiom (utils/YamlFile.h: atomic write), tolerant load (a
- * missing or malformed file yields zero presets and never throws, so a
- * hand-edit typo cannot wedge the dialog), user order preserved in the file.
- *
- * One deliberate divergence from the registry: records are keyed by their
- * user-facing NAME, not a generated id. Nothing references a preset from
- * another file (unlike columns, whose ids live inside .rwfpl headers), so an
- * id would be dead weight, and name-keying gives save() the semantics the
- * dialog's Save button wants: saving under an existing name replaces that
- * preset in place, keeping its position in the list.
- *
- * QML_ELEMENT (unlike the injected registry): the rename dialog instantiates
- * its own store, and the constructor loads from disk, so a fresh dialog
- * always reflects the file, including edits made by another window's dialog
- * earlier in the session (write-through means the file is always the truth).
- *
- * Ships EMPTY by design: no seed presets.
- */
 class RenamePatternStore : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -96,7 +96,7 @@ public:
     /// and emits patternsChanged().
     Q_INVOKABLE void remove(const QString& name);
 
-    // --- last-used preset (dialog convenience) ---------------------------
+    // --- last-used preset (dialog convenience) -----------------------------
     // Persisted in the same file (top-level `last_used:` key) so a freshly
     // opened dialog can preselect and preload what the person used last.
     // Stored as given (trimmed); the dialog guards through patternFor, so a

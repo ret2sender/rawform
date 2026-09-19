@@ -18,6 +18,45 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PropertiesMetadataModel.h
+//
+// Backs the Properties window's editable Metadata tab.
+//
+// Deliberately SEPARATE from MetadataModel. The dock's MetadataModel is a
+// read-only, section-grouped technical view that de-dupes multi-selections for a
+// compact summary. The Properties Metadata tab is an editor with a different
+// contract:
+//
+//  - A FIXED tag schema shown in full even when empty: Artist Name, Track Title,
+//    Album Title, Date, Genre, Composer, Performer, Album Artist, Track Number,
+//    Total Tracks, Disc Number, Total Discs, Comment. Each row maps a friendly
+//    label to a canonical tag KEY (ARTIST, TITLE, ... COMMENT), which is what
+//    the write path (MetadataEditor) targets.
+//  - CUSTOM rows for any other (non-technical) tag present across the selection,
+//    rendered as "<KEY>" (e.g. "<RELEASE_YEAR>"). The ReplayGain keys are filtered
+//    out (they live on the ReplayGain tab), as are the schema's own keys.
+//  - A trailing "+ add new" affordance row.
+//  - Multi-selection values are NOT de-duped. When the selected tracks agree, the
+//    shared value shows plainly; when they differ, the value is prefixed with the
+//    guillemet marker and lists the per-track values joined with "; ", in
+//    SELECTION ORDER, TRUNCATED at a hard display cap: the cell is one
+//    elided line, so the join is built only up to kDisplayCapChars and never
+//    materializes a library-sized megastring (the scenario this prevents: an
+//    OOM on a 15k-track selection). Display only; the full per-track values
+//    live in m_original / m_staged and feed editing through effectivePerTrack,
+//    and multi-track edits route to the Edit Value dialog, which reads the
+//    per-track lists directly.
+//
+// The display half is READ-ONLY: it renders the schema, the multi-value marker,
+// and the custom rows. Editing gestures (in-place,
+// the Single / Individual dialog, add-field, the context-menu actions) live in
+// the pane above it and stage through this model; the off-thread writer is
+// MetadataEditor. The role surface (the row-kind and multiple roles, plus the
+// isSectionRow / isAddRow probes) serves both halves.
+//
+// Fed from QML via setSelection(PlaylistModel*, rows), the same way the Details
+// tab feeds its MetadataModel. TrackData stays in C++; QML reads display strings.
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -37,44 +76,6 @@
 
 namespace rawform {
 
-/**
- * @brief Backs the Properties window's editable Metadata tab.
- *
- * Deliberately SEPARATE from MetadataModel. The dock's MetadataModel is a
- * read-only, section-grouped technical view that de-dupes multi-selections for a
- * compact summary. The Properties Metadata tab is an editor with a different
- * contract, matching foobar2000:
- *
- *  - A FIXED tag schema shown in full even when empty: Artist Name, Track Title,
- *    Album Title, Date, Genre, Composer, Performer, Album Artist, Track Number,
- *    Total Tracks, Disc Number, Total Discs, Comment. Each row maps a friendly
- *    label to a canonical tag KEY (ARTIST, TITLE, ... COMMENT), which is what
- *    the write path (MetadataEditor) targets.
- *  - CUSTOM rows for any other (non-technical) tag present across the selection,
- *    rendered as "<KEY>" (e.g. "<RELEASE_YEAR>"). The ReplayGain keys are filtered
- *    out (they live on the ReplayGain tab), as are the schema's own keys.
- *  - A trailing "+ add new" affordance row.
- *  - Multi-selection values are NOT de-duped. When the selected tracks agree, the
- *    shared value shows plainly; when they differ, the value is prefixed with the
- *    guillemet marker and lists the per-track values joined with "; ", in
- *    SELECTION ORDER, TRUNCATED at a hard display cap: the cell is one
- *    elided line, so the join is built only up to kDisplayCapChars and never
- *    materializes a library-sized megastring (the scenario this prevents: an
- *    OOM on a 15k-track selection). Display only; the full per-track values
- *    live in m_original / m_staged and feed editing through effectivePerTrack,
- *    and multi-track edits route to the Edit Value dialog, which reads the
- *    per-track lists directly.
- *
- * The display half is READ-ONLY: it renders the schema, the multi-value marker,
- * and the custom rows exactly as foobar shows them. Editing gestures (in-place,
- * the Single / Individual dialog, add-field, the context-menu actions) live in
- * the pane above it and stage through this model; the off-thread writer is
- * MetadataEditor. The role surface (the row-kind and multiple roles, plus the
- * isSectionRow / isAddRow probes) serves both halves.
- *
- * Fed from QML via setSelection(PlaylistModel*, rows), the same way the Details
- * tab feeds its MetadataModel. TrackData stays in C++; QML reads display strings.
- */
 class PropertiesMetadataModel : public QAbstractTableModel {
     Q_OBJECT
     QML_ELEMENT
@@ -103,7 +104,7 @@ public:
     explicit PropertiesMetadataModel(QObject* parent = nullptr);
     ~PropertiesMetadataModel() override = default;
 
-    // --- QAbstractTableModel interface -----------------------------------
+    // --- QAbstractTableModel interface -------------------------------------
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
@@ -129,7 +130,7 @@ public:
     /// mirroring MetadataModel::valueAt.
     Q_INVOKABLE [[nodiscard]] QString valueAt(int row) const;
 
-    // --- editing (inline; Edit Value dialog) -----------------------------
+    // --- editing (inline; Edit Value dialog) -------------------------------
     [[nodiscard]] bool dirty() const { return !m_staged.isEmpty(); }
 
     /// Number of tracks in the current selection. The pane gates editing on this: a
@@ -153,7 +154,7 @@ public:
     /// path. No-op if more than one track is selected.
     Q_INVOKABLE void applyInlineEdit(int row, const QString& text);
 
-    // --- Edit Value dialog ------------------------------------
+    // --- Edit Value dialog -------------------------------------------------
 
     /// Display label of @p row's field ("Track Title", "Genre", "<CUSTOM>"), for
     /// the dialog title. Empty for non-editable rows.
@@ -244,7 +245,7 @@ public:
     /// pass's job (MetadataEditor stripAllPaths); this only blanks the model.
     Q_INVOKABLE void removeAllFields();
 
-    // --- clipboard --------------------------------------------
+    // --- clipboard ---------------------------------------------------------
 
     /// Serialize the given field/custom rows to the clipboard text format: one block
     /// per selected track (in selection order), each block a run of "KEY=value"
@@ -266,7 +267,7 @@ public:
     /// success, else the count-mismatch message.
     Q_INVOKABLE QString pasteFields(const QString& text);
 
-    // --- transforms -------------------------------------------
+    // --- transforms --------------------------------------------------------
 
     /// Capitalize each selected field's per-track values: upper-case the first
     /// letter of every whitespace-delimited word and lower-case the rest, staged.
@@ -295,9 +296,9 @@ signals:
 private:
     enum class Kind { Section, Field, Custom, Add };
 
-    /// One visible row. For Field/Custom, @ref key is the canonical tag key the
-    /// value is read from and written to; @ref name is the display label
-    /// ("Album Artist", or "<RELEASE_YEAR>" for custom). @ref multiple marks a
+    /// One visible row. For Field/Custom, `key` is the canonical tag key the
+    /// value is read from and written to; `name` is the display label
+    /// ("Album Artist", or "<RELEASE_YEAR>" for custom). `multiple` marks a
     /// value that disagrees across the selection (drives the guillemet marker and
     /// the IsMultipleRole). Section/Add rows leave key/value empty.
     struct Row {

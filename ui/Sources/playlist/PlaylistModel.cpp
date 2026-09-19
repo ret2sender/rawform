@@ -18,6 +18,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistModel.cpp
+//
+// Implementation of the playlist table model: the schema-driven column overlay
+// (visual columns, reordering, alignment, default widths, layout persistence by
+// field id), the track list mutations the tabs and the scanner drive, and the
+// per-row accessors QML and the Properties window read.
+
 #include "playlist/PlaylistModel.h"
 
 #include "columns/CustomColumnRegistry.h" // registry lookup + signals
@@ -637,7 +644,7 @@ QString PlaylistModel::trackVersionTag(int row) const {
 
 QVariantList PlaylistModel::replayGainRows(const QVariantList& rows) const {
     // One map per valid row. Display strings keep the tag's own precision (so a
-    // "-4" tag and a "-6.00 dB" tag render side by side as foobar does); the
+    // "-4" tag and a "-6.00 dB" tag render side by side, precision intact); the
     // numbers are for the QML Summary aggregation and are absent (an invalid
     // QVariant, which reads as undefined in QML) when the tag is missing or
     // unparseable. Out-of-range rows are silently skipped, so a stale selection
@@ -661,7 +668,7 @@ QVariantList PlaylistModel::replayGainRows(const QVariantList& rows) const {
         m.insert(QStringLiteral("path"),       t.filePath);  // the write identity
         m.insert(QStringLiteral("name"),       name);
         // Album grouping key for "Scan album gain (multiple albums, by tags)",
-        // foobar's default grouping pattern: %album artist% | %date% | %album%
+        // the conventional grouping pattern: %album artist% | %date% | %album%
         // (album artist falls back to the track artist, and the date falls back
         // to the parsed year when no raw date string was tagged). Joined with a
         // unit separator so tag content containing a pipe cannot collide.

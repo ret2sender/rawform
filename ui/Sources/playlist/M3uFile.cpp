@@ -18,6 +18,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// M3uFile.cpp
+//
+// Implementation of the plain-M3U writer declared in M3uFile.h: path
+// relativization against the playlist's own directory, UTF-8 without BOM, CRLF
+// written literally, and an atomic replace of the target file.
+
 #include "playlist/M3uFile.h"
 
 #include "media/TrackData.h"

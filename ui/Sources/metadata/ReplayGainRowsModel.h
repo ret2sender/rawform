@@ -18,28 +18,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-#include "playlist/PlaylistModel.h" // complete type: setSelection() takes a
-                                    // PlaylistModel* and calls replayGainRows()
-                                    // on it C++-to-C++, keeping PlaylistModel
-                                    // the single authority on name rendering
-                                    // and the albumKey grouping rule. (Same
-                                    // include rationale as the sibling models.)
-
-#include <QAbstractListModel>
-#include <QList>
-#include <QQmlEngine>
-#include <QString>
-#include <QStringList>
-#include <QVariantList>
-
-#include <optional>
-
-namespace rawform {
-
-// =============================================================================
-// ReplayGainRowsModel
+// ReplayGainRowsModel.h
 //
 // The C++ backing model for the ReplayGain Properties pane: per-track rows
 // (current + on-open original values plus a selection flag), the staging rules,
@@ -75,7 +54,27 @@ namespace rawform {
 // whole trimmed token, after stripping a trailing "dB" and mapping comma to
 // dot, to parse), so "-4x" is rejected as invalid input rather than truncated
 // to -4.
-// =============================================================================
+
+#pragma once
+
+#include "playlist/PlaylistModel.h" // complete type: setSelection() takes a
+                                    // PlaylistModel* and calls replayGainRows()
+                                    // on it C++-to-C++, keeping PlaylistModel
+                                    // the single authority on name rendering
+                                    // and the albumKey grouping rule. (Same
+                                    // include rationale as the sibling models.)
+
+#include <QAbstractListModel>
+#include <QList>
+#include <QQmlEngine>
+#include <QString>
+#include <QStringList>
+#include <QVariantList>
+
+#include <optional>
+
+namespace rawform {
+
 class ReplayGainRowsModel : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
@@ -118,7 +117,7 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-    // --- population ----------------------------------------------------------
+    // --- population --------------------------------------------------------
 
     /// Snapshot the given playlist rows into this model (one model reset).
     /// Ingests through playlist->replayGainRows() so the name rendering
@@ -134,7 +133,7 @@ public:
 
     [[nodiscard]] int count() const { return static_cast<int>(m_rows.size()); }
 
-    // --- selection -----------------------------------------------------------
+    // --- selection ---------------------------------------------------------
     // The anchor lives here with the membership it anchors. `modifiers` is the
     // raw Qt modifier mask from the pane's mouse / key handlers: Control OR
     // Meta toggles (Qt swaps Ctrl and Cmd on macOS, so either is accepted),
@@ -149,7 +148,7 @@ public:
     [[nodiscard]] bool hasSelection() const { return m_selCount > 0; }
     [[nodiscard]] int selectionCount() const { return m_selCount; }
 
-    // --- staging -------------------------------------------------------------
+    // --- staging -----------------------------------------------------------
 
     /// True when @p raw is committable into a cell of @p field's kind: empty
     /// (a clear) always is; otherwise the whole token must parse (strict; see
@@ -168,7 +167,7 @@ public:
     /// every row (written as removals on Apply / OK; Cancel undoes it).
     Q_INVOKABLE void clearAllReplayGain();
 
-    // --- scanning ------------------------------------------------------------
+    // --- scanning ----------------------------------------------------------
 
     /// Resolve the scan scope to { row, path, name [, albumKey] } items for the
     /// host's off-thread scan. mode 0 per-track, 1 whole scope as one album,
@@ -188,7 +187,7 @@ public:
     /// equal per cell; ONE recompute for the whole batch.
     Q_INVOKABLE void stageScanResults(const QVariantList& results);
 
-    // --- apply / revert ------------------------------------------------------
+    // --- apply / revert ----------------------------------------------------
 
     /// Diff current vs original; only changed fields are reported (empty means
     /// remove). Same map shape the window already consumes: { row, path,

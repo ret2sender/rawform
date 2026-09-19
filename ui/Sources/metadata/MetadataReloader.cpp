@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// MetadataReloader.cpp
+//
+// Implementation of the freshness pass: the pool worker that stat-compares and
+// re-reads one row, the four entry points (automatic on selection, explicit
+// reload, load-time validation, path-directed refresh), the one-pass-at-a-time
+// scheduling with its pending and FIFO rules, and the drift-guarded application
+// of results back onto the model.
+
 #include "metadata/MetadataReloader.h"
 
 #include "playlist/PlaylistModel.h"

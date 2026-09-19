@@ -18,18 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import com.rawform.app
-
-// =============================================================================
 // MetadataPropertiesPane.qml
 //
 // The Properties window's editable-Metadata tab.
@@ -60,7 +48,13 @@ import com.rawform.app
 // with click-hold-drag range selection (see the drag-select block below).
 // This stays a separate component from MetadataView (the read-only renderer
 // used by the dock and the Details tab).
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import com.rawform.app
+
 Item {
     id: root
 
@@ -112,7 +106,7 @@ Item {
     // on every keystroke by the inline TextField.
     property string _editorText: ""
 
-    // --- helpers -------------------------------------------------------------
+    // --- helpers -----------------------------------------------------------
     function _editable(i) {
         return root.model && i >= 0 && i < rowList.count
             && !root.model.isSectionRow(i) && !root.model.isAddRow(i)
@@ -140,7 +134,7 @@ Item {
         }
     }
 
-    // --- field-row selection -------------------------------------------------
+    // --- field-row selection -----------------------------------------------
     function _selRows() {
         var out = []
         for (var k in root._rowSel)
@@ -177,7 +171,7 @@ Item {
         root._rowAnchor = root._firstEditable(1)
     }
 
-    // --- click-hold-drag selection --------------------------------------
+    // --- click-hold-drag selection -----------------------------------------
     // Press a field row and, without releasing, move up/down: the selection
     // ranges live from the press anchor, mirroring the playlist. The press
     // handling stays per-delegate (an overlay would eat the inline editor's
@@ -246,7 +240,7 @@ Item {
         root.currentRow = -1
     }
 
-    // --- clipboard ------------------------------------------------
+    // --- clipboard ---------------------------------------------------------
     // Copy serializes the selected field rows to the system clipboard as one block
     // per selected track. Cut copies then removes. Paste distributes the clipboard's
     // blocks across the WHOLE track selection (it does not depend on which field rows
@@ -271,7 +265,7 @@ Item {
         root.hintText = (err !== "") ? err : ""
     }
 
-    // --- transforms -----------------------------------------------
+    // --- transforms --------------------------------------------------------
     // Capitalize and Clean up rewrite the selected fields' values in place (indices
     // unchanged, so the selection is kept for chaining). Crop removes everything
     // except the selection, which can shift row indices, so it clears the selection.
@@ -406,7 +400,7 @@ Item {
             anchors.fill: parent
             spacing: 0
 
-            // ----- header (Name | Value) -------------------------------------
+            // ----- header (Name | Value) -----------------------------------
             Rectangle {
                 width: parent.width
                 height: 22
@@ -429,7 +423,7 @@ Item {
                 }
             }
 
-            // ----- rows ------------------------------------------------------
+            // ----- rows ----------------------------------------------------
             // The wrapper carries a background click zone behind the list, so a
             // click on empty space (the footer padding or below short content)
             // commits any open editor and deselects.
@@ -572,7 +566,7 @@ Item {
                         width: rowList.width
                         height: rdel.isSection ? 26 : 19
 
-                        // --- section header band ----------------------------
+                        // --- section header band ---------------------------
                         Rectangle {
                             visible: rdel.isSection
                             anchors.fill: parent
@@ -616,7 +610,7 @@ Item {
                             }
                         }
 
-                        // --- field / custom row -----------------------------
+                        // --- field / custom row ----------------------------
                         Rectangle {
                             id: fieldBg
                             visible: !rdel.isSection && !rdel.isAdd
@@ -770,7 +764,7 @@ Item {
                 }
             }
 
-            // ----- bottom hint line: red error, else neutral menu-hover hint -
+            // ----- bottom hint line: red error, else menu-hover hint -------
             Rectangle {
                 id: hintBar
                 width: parent.width

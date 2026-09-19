@@ -18,10 +18,27 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// ThemedMenuItem.qml
+//
+// The themed row inside a ThemedMenu: a QtQuick.Controls MenuItem with the
+// rawform look (accent highlight, a 6 px checked dot in a fixed text gutter,
+// an AppIcon sub-menu arrow, optional italic text) and two additions the
+// menu relies on.
+//
+// `collapsed` is an intent flag for entries that must vanish from the menu
+// without leaving a gap. Effective `visible` cannot carry intent (a closed
+// popup propagates visible:false into every item), so this plain bool owns
+// the visible/height mechanics and call sites set one property.
+//
+// `fitWidth` is the width this row needs, measured through a TextMetrics
+// child rather than the control's deferred contentItem, so ThemedMenu can fit
+// its popup width before the first show and the value self-corrects when the
+// UI font finishes loading.
+
+pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-
 
 MenuItem {
     id: root
@@ -32,16 +49,15 @@ MenuItem {
     // so checkable and plain items share one gutter and stay aligned.
     property int textLeftPadding: 18
 
-    // Intent flag for entries that should vanish from the menu (no row, no
-    // gap), e.g. the custom-column header actions when the target column is
-    // native. This exists because effective `visible` cannot carry intent: a
-    // closed popup propagates visible:false into every item, so a call-site
-    // idiom of height: visible ? implicitHeight : 0 reads 0 for every item
-    // while closed, which makes intended visibility unrecoverable exactly
-    // when ThemedMenu's fit binding needs it.
-    // `collapsed` is a plain bool with no parent propagation, valid whether
-    // the popup is open or closed; the item owns the visible/height
-    // mechanics so call sites set one property instead of two coupled ones.
+    // Intent flag for entries that should vanish from the menu (no row, no gap), e.g. the
+    // custom-column header actions when the target column is native. This exists because
+    // effective `visible` cannot carry intent: a closed popup propagates visible:false
+    // into every item, so a call-site idiom of height: visible ? implicitHeight : 0 reads
+    // 0 for every item while closed, which makes intended visibility unrecoverable
+    // exactly when ThemedMenu's fit binding needs it. `collapsed` is a plain bool with no
+    // parent propagation, valid whether the popup is open or closed; the item owns the
+    // visible/height mechanics so call sites set one property instead of two coupled
+    // ones.
     property bool collapsed: false
     height: collapsed ? 0 : implicitHeight
     visible: !collapsed

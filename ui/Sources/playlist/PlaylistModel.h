@@ -18,6 +18,33 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistModel.h
+//
+// Table model backing the playlist view: rows are tracks, columns are the visible
+// playlist fields.
+//
+// Tracks are held by value in a QList<TrackData> (no manual heap ownership);
+// swapping the active playlist is a single setTracks() reset.
+//
+// Columns are schema-driven. The model owns a ColumnSchema (the catalog of
+// offerable fields), but WHICH columns show, in WHAT order, is a separate
+// mutable overlay: m_columns, one VisualColumn per visible column, each naming
+// either a native field or a custom-column id. headerData(), data(),
+// columnAlignment() and defaultColumnWidths() all read through that list via
+// columnAt(), so "what is at visual column N" is resolved in one place, and the
+// native/custom split with it. Custom columns are not catalog entries; their
+// definitions live in the injected CustomColumnRegistry, resolved by id at
+// render time.
+//
+// Interactive reordering is moveVisualColumn(), a begin/endMoveColumns()
+// permutation (a MOVE, not a reset) so the bound QItemSelectionModel remaps and
+// the metadata pane is undisturbed. Persistence is by field id (bare for native,
+// "custom:<id>" for custom), never by position, so a saved order survives the
+// user editing the schema or custom columns between sessions.
+//
+// I/O-free: it receives a ready ColumnSchema via setSchema() (loaded in
+// main.cpp). Registered into the com.rawform.app QML module via QML_ELEMENT.
+
 #pragma once
 
 #include "columns/ColumnSchema.h"
@@ -40,32 +67,6 @@ namespace rawform {
 
 class CustomColumnRegistry; // owns the user-defined custom columns (injected, read-only here)
 
-/**
- * @brief Table model backing the playlist view: rows are tracks, columns are
- *        the visible playlist fields.
- *
- * Tracks are held by value in a QList<TrackData> (no manual heap ownership);
- * swapping the active playlist is a single setTracks() reset.
- *
- * Columns are schema-driven. The model owns a ColumnSchema (the catalog of
- * offerable fields), but WHICH columns show, in WHAT order, is a separate
- * mutable overlay: m_columns, one VisualColumn per visible column, each naming
- * either a native field or a custom-column id. headerData(), data(),
- * columnAlignment() and defaultColumnWidths() all read through that list via
- * columnAt(), so "what is at visual column N" is resolved in one place, and the
- * native/custom split with it. Custom columns are not catalog entries; their
- * definitions live in the injected CustomColumnRegistry, resolved by id at
- * render time.
- *
- * Interactive reordering is moveVisualColumn(), a begin/endMoveColumns()
- * permutation (a MOVE, not a reset) so the bound QItemSelectionModel remaps and
- * the metadata pane is undisturbed. Persistence is by field id (bare for native,
- * "custom:<id>" for custom), never by position, so a saved order survives the
- * user editing the schema or custom columns between sessions.
- *
- * I/O-free: it receives a ready ColumnSchema via setSchema() (loaded in
- * main.cpp). Registered into the com.rawform.app QML module via QML_ELEMENT.
- */
 class PlaylistModel : public QAbstractTableModel {
     Q_OBJECT
     QML_ELEMENT
@@ -97,7 +98,7 @@ public:
     explicit PlaylistModel(QObject* parent = nullptr);
     ~PlaylistModel() override = default;
 
-    // --- QAbstractTableModel interface -----------------------------------
+    // --- QAbstractTableModel interface -------------------------------------
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
@@ -105,7 +106,7 @@ public:
                                       int role = Qt::DisplayRole) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-    // --- Column schema ---------------------------------------------------
+    // --- Column schema -----------------------------------------------------
 
     /// Install the column layout, resetting the model and the visual order to the
     /// schema's authored order. Call before assigning the model to the view.
@@ -139,7 +140,7 @@ public:
     /// playlist (.rwftp); this is only the starting point.
     Q_INVOKABLE [[nodiscard]] QVariantList defaultColumnWidths() const;
 
-    // --- Per-playlist layout persistence (.rwfpl) ------------------------
+    // --- Per-playlist layout persistence (.rwfpl) --------------------------
     // Keyed by field id rather than position so it survives schema edits. The
     // save path pairs currentColumnOrder()[v] with the view's
     // currentColumnWidths()[v] (same visual order); the load path hands both back
@@ -180,7 +181,7 @@ public:
     /// menu to address a column.
     Q_INVOKABLE [[nodiscard]] QString columnFieldId(int column) const;
 
-    // --- Playlist data management ----------------------------------------
+    // --- Playlist data management ------------------------------------------
 
     /// Replace the entire track list, resetting the model.
     void setTracks(QList<TrackData> tracks);
@@ -414,15 +415,14 @@ public:
     ///                           width) with ONE ClearAndSelect per call.
     ///   endAdditiveRangeDrag    closes the session and drops the snapshot.
     ///
-    /// Why baseline-restore instead of plain additive selects: a naive
-    /// additive live range never shrinks when the drag reverses, so its
-    /// feedback lies.
-    /// Rebuilding baseline-plus-range every move makes reversal truthful:
-    /// rows the range no longer covers drop out unless the baseline holds
-    /// them. Doing that rebuild here, as one merged QItemSelection and one
-    /// select(), keeps the one-selectionChanged-per-row-change discipline;
-    /// a QML per-row loop would fragment the stored selection and re-run the
-    /// downstream pipeline per row (see selectRowRange).
+    /// Why baseline-restore instead of plain additive selects: a naive additive live
+    /// range never shrinks when the drag reverses, so its feedback lies. Rebuilding
+    /// baseline-plus-range every move makes reversal truthful: rows the range no longer
+    /// covers drop out unless the baseline holds them. Doing that rebuild here, as one
+    /// merged QItemSelection and one select(), keeps the
+    /// one-selectionChanged-per-row-change discipline; a QML per-row loop would fragment
+    /// the stored selection and re-run the downstream pipeline per row (see
+    /// selectRowRange).
     ///
     /// The snapshot's ranges hold persistent indexes, so it survives
     /// incidental model remaps. Same wrong-model refusal as selectRowRange;

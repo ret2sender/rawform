@@ -18,32 +18,33 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// LogStore.qml
+//
+// In-memory log of notable events for the session. Backs two surfaces:
+//   - the one-line StatusLogBar under the playlist pane, which shows the most
+//     recent entry (latestText / latestLevel), and
+//   - the pop-up LogConsole, which prints the whole history as a text log.
+//
+// Per the console being a text block (not a ListView), the history is kept as a
+// ready-to-render `logText`: an HTML string with one colored line per entry,
+// which a RichText TextEdit renders directly. We therefore hold the entries as a
+// small array of pre-built HTML lines (joined into logText) rather than a
+// ListModel; nothing renders a list, so the model would be dead weight.
+//
+// This is intentionally pure QML and non-persistent: it captures playback errors from
+// AudioController (via MainWindow's Connections; the StatusLogBar and console are their
+// only surfaces) plus any warnings/info a caller appends. Live transient activity
+// (scanning, saving, reading tags) is shown on the bar directly while busy; only its edge
+// transitions are appended here, as info entries. Note the consequence for the
+// single-line bar: it renders the LATEST entry, so an info edge that lands after an error
+// supersedes it on the bar while the console keeps the full history.
+//
+// No C++: callers push entries via append(level, text).
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
-/*
- * In-memory log of notable events for the session. Backs two surfaces:
- *   - the one-line StatusLogBar under the playlist pane, which shows the most
- *     recent entry (latestText / latestLevel), and
- *   - the pop-up LogConsole, which prints the whole history as a text log.
- *
- * Per the console being a text block (not a ListView), the history is kept as a
- * ready-to-render `logText`: an HTML string with one colored line per entry,
- * which a RichText TextEdit renders directly. We therefore hold the entries as a
- * small array of pre-built HTML lines (joined into logText) rather than a
- * ListModel; nothing renders a list, so the model would be dead weight.
- *
- * This is intentionally pure QML and non-persistent: it captures playback
- * errors from AudioController (via MainWindow's Connections; the StatusLogBar
- * and console are their only surfaces) plus any warnings/info a caller
- * appends. Live transient activity
- * (scanning, saving, reading tags) is shown on the bar directly while busy;
- * only its edge transitions are appended here, as info entries. Note the
- * consequence for the single-line bar: it renders the LATEST entry, so an
- * info edge that lands after an error supersedes it on the bar while the
- * console keeps the full history.
- *
- * No C++: callers push entries via append(level, text).
- */
 Item {
     id: store
 

@@ -136,15 +136,15 @@ struct CoreAudioSinkImpl {
     IPullSource*  source       = nullptr;  // non-owning
     std::size_t   channels     = 0;
     AudioFormat   working{};               // the SOURCE format we pull at
-    // deviceRate and bitPerfect are ATOMIC because of the event machinery: the nominal-rate
-    // property listener updates them from CoreAudio's notification thread when
-    // the world changes the rate underneath us, while bitPerfect() and
+    // deviceRate and bitPerfect are ATOMIC because of the event machinery: the
+    // nominal-rate property listener updates them from CoreAudio's notification
+    // thread when the world changes the rate underneath us, while bitPerfect() and
     // measuredDeviceRateHz() read them lock-free (and noexcept) on the engine
     // thread.
-    std::atomic<double> deviceRate{0.0};   // AUHAL output-scope rate, measured
+    std::atomic<double> deviceRate{0.0}; // AUHAL output-scope rate, measured
     std::atomic<bool>   bitPerfect{false}; // measured: output scope == source rate
-    double        originalRate = 0.0;      // device nominal rate at SESSION open, for restore
-    bool          rateChanged  = false;    // does the device sit off originalRate?
+    double        originalRate = 0.0; // device nominal rate at SESSION open, for restore
+    bool          rateChanged  = false; // does the device sit off originalRate?
     bool          opened       = false;
     bool          started      = false;
     ILogOutput*   logOut       = nullptr; // non-owning line logger

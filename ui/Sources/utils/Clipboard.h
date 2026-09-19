@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // Clipboard.h
 //
 // A minimal QML-exposed wrapper over the system clipboard, since QML has no
@@ -29,7 +26,8 @@
 // MetadataPropertiesPane's copy/paste of the selected fields, and
 // AboutWindow's click-to-copy version line. Header-only: the two calls are
 // trivial and stateless, so there is no .cpp.
-// =============================================================================
+
+#pragma once
 
 #include <QClipboard>
 #include <QGuiApplication>

@@ -18,26 +18,28 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// StatusLogBar.qml
+//
+// Status / log line, sitting directly under the playlist pane (added to
+// playlistLayout below PlaylistView in MainWindow). It is a single line:
+//
+//     [ > ]  <message>
+//
+// The `>` is a prompt that doubles as the affordance for the expanded log console
+// (LogConsole): clicking it emits consoleRequested(). The message is whatever the caller
+// resolves and feeds in via `text`, colored by `level` (info/warning/ error). This is a
+// pure view; it owns no log state. MainWindow decides what to show, live activity
+// (scanning/saving/reading tags) when busy, otherwise the latest logged entry from
+// LogStore, and binds text/level here.
+//
+// The frame mirrors the playlist and metadata panes (2 px Theme.accentSoft stroke, faint
+// by default, brighter when the prompt is hovered) so it reads as a sibling
+// surface rather than a stray bar. Height is fixed at 24.
+
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
-/*
- * Status / log line, sitting directly under the playlist pane (added to
- * playlistLayout below PlaylistView in MainWindow). It is a single line:
- *
- *     [ > ]  <message>
- *
- * The `>` is a prompt that doubles as the affordance for the expanded log
- * console (LogConsole): clicking it emits consoleRequested(). The message is
- * whatever the
- * caller resolves and feeds in via `text`, colored by `level` (info/warning/
- * error). This is a pure view; it owns no log state. MainWindow decides what to
- * show, live activity (scanning/saving/reading tags) when busy, otherwise the
- * latest logged entry from LogStore, and binds text/level here.
- *
- * The frame mirrors the playlist and metadata panes (2 px Theme.accentSoft stroke, faint
- * by default, brighter when the prompt is hovered) so it reads as a sibling
- * surface rather than a stray bar. Height is fixed at 24.
- */
 Rectangle {
     id: bar
     implicitHeight: 24

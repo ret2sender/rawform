@@ -18,17 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-
-
-// =============================================================================
 // SpectrumView.qml
 //
 // The spectrum bar display for the PlayerBar, a pure, dumb, reusable widget in the
@@ -49,7 +38,11 @@ import QtQuick
 // The provider already applies the attack/decay envelope, so the bars are smooth at
 // the source; this file adds no animation of its own (a Behavior here would fight
 // the per-tick updates rather than help).
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+
 Item {
     id: root
 
@@ -59,9 +52,9 @@ Item {
     implicitWidth: 120
     implicitHeight: 40
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Inputs (driven by PlayerBar from the SpectrumProvider).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
 
     // The bar magnitudes, each 0..1, low frequency first. Length is expected to
     // equal `count`; a shorter array simply leaves the trailing bars at zero, and a
@@ -72,10 +65,10 @@ Item {
     // delegate set does not churn on the per-tick values updates.
     property int count: 20
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Look. The lavender token shared with the seek and volume fills, on the
     // dark frame. Restyle freely.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     property color frameColor: Theme.surfacePanel
     property color barColor: Theme.accentSoft
     property real  frameRadius: 4
@@ -92,9 +85,9 @@ Item {
     // nub (the reference shows this) rather than vanishing.
     property real  minBarHeight: 2
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // The frame.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     Rectangle {
         id: frame
         anchors.fill: parent

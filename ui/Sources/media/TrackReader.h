@@ -18,6 +18,21 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TrackReader.h
+//
+// Read one media file's tags, audio properties, and filesystem fields into a TrackData.
+// The single tag-read boundary in the app: every TrackData is filled here (the editors
+// write, AlbumArtProvider fetches one picture; nothing else reads tags).
+//
+// Pure and stateless (each call owns its own TagLib::FileRef), so it is safe
+// both across the thread pool (TrackScanner) and directly on the GUI thread
+// (MetadataReloader, for a single stale file). Sharing one function keeps the
+// parsing identical between the "added" and "reloaded" paths.
+//
+// A file that cannot be opened or parsed comes back with valid=false (its
+// filesystem fields still filled); callers skip it rather than clobber good
+// cached data with an empty record.
+
 #pragma once
 
 #include "media/TrackData.h"
@@ -26,21 +41,6 @@
 
 namespace rawform {
 
-/**
- * @brief Read one media file's tags, audio properties, and filesystem fields
- *        into a TrackData. The single tag-read boundary in the app: every
- *        TrackData is filled here (the editors write, AlbumArtProvider fetches
- *        one picture; nothing else reads tags).
- *
- * Pure and stateless (each call owns its own TagLib::FileRef), so it is safe
- * both across the thread pool (TrackScanner) and directly on the GUI thread
- * (MetadataReloader, for a single stale file). Sharing one function keeps the
- * parsing identical between the "added" and "reloaded" paths.
- *
- * A file that cannot be opened or parsed comes back with valid=false (its
- * filesystem fields still filled); callers skip it rather than clobber good
- * cached data with an empty record.
- */
 [[nodiscard]] TrackData readTrack(const QString& path);
 
 } // namespace rawform

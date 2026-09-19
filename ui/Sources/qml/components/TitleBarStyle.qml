@@ -18,37 +18,38 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// TitleBarStyle.qml
+//
+// Per-platform styling for the frameless title bar caption buttons.
+//
+// Structure:
+//
+//   Profile          - every knob, with the default (Linux) values.
+//   <name>Profile    - a variant, stating ONLY what it changes.
+//   resolveVariant() - the single place that decides which one applies.
+//
+// Adding a variant is two edits: one Profile block, one case in
+// resolveVariant(). Nothing downstream changes.
+//
+// macOS never reaches here; the parent uses the native traffic lights.
+
 pragma Singleton
 
-import QtQuick
+pragma ComponentBehavior: Bound
 
+import QtQuick
 import com.rawform.app
 
-
-/*!
-    Per-platform styling for the frameless title bar caption buttons.
-
-    Structure:
-
-      Profile          - every knob, with the default (Linux) values.
-      <name>Profile    - a variant, stating ONLY what it changes.
-      resolveVariant() - the single place that decides which one applies.
-
-    Adding a variant is two edits: one Profile block, one case in
-    resolveVariant(). Nothing downstream changes.
-
-    macOS never reaches here; the parent uses the native traffic lights.
-*/
 QtObject {
     id: style
 
-    // ==================================================================
+    // =======================================================================
     // Profile definition
     //
     // These values are the default profile. Variants below inherit them
     // and override only what differs, so a new distro or desktop variant
     // is a handful of lines rather than a full copy.
-    // ==================================================================
+    // =======================================================================
     component Profile: QtObject {
         property url minimizeIcon: Qt.resolvedUrl("../../icons/default/control_minimize.svg")
         property url maximizeIcon: Qt.resolvedUrl("../../icons/default/control_maximize.svg")
@@ -131,9 +132,9 @@ QtObject {
         property bool showMaximize: true
     }
 
-    // ==================================================================
+    // =======================================================================
     // Variants
-    // ==================================================================
+    // =======================================================================
     readonly property Profile defaultProfile: Profile {}
 
     readonly property Profile windowsProfile: Profile {
@@ -197,14 +198,14 @@ QtObject {
         dimDuration: 0
     }
 
-    // ==================================================================
+    // =======================================================================
     // Resolution
     //
     // Explicit override wins, then platform, then the user's icon theme.
     // overrideVariant is a declared property, so binding it to a persisted
     // preference would expose the choice to the user and the whole title
     // bar would restyle live when it changes.
-    // ==================================================================
+    // =======================================================================
     property string overrideVariant: ""
 
     readonly property string variantName: style.resolveVariant()
@@ -219,16 +220,14 @@ QtObject {
         return style.resolveDesktopVariant()
     }
 
-    /*!
-        Keyed off the active icon theme rather than XDG_CURRENT_DESKTOP.
-        The theme name is what the user actually configured, so it stays
-        correct on Plasma-with-Papirus, on tiling compositors, and on any
-        desktop not enumerated here. Unknown themes fall through to the
-        default, which is always a valid answer.
-
-        Requires AppInfo.systemIconTheme; returns "default" harmlessly if
-        that property is absent.
-    */
+    // Keyed off the active icon theme rather than XDG_CURRENT_DESKTOP.
+    // The theme name is what the user actually configured, so it stays
+    // correct on Plasma-with-Papirus, on tiling compositors, and on any
+    // desktop not enumerated here. Unknown themes fall through to the
+    // default, which is always a valid answer.
+    //
+    // Requires AppInfo.systemIconTheme; returns "default" harmlessly if
+    // that property is absent.
     function resolveDesktopVariant(): string {
         const iconTheme = (AppInfo.systemIconTheme || "").toLowerCase()
 
@@ -249,12 +248,12 @@ QtObject {
         }
     }
 
-    // ==================================================================
+    // =======================================================================
     // Public API
     //
     // Flat forwards so consumers stay unaware of profiles and
     // TitleBarControls.qml needs no changes.
-    // ==================================================================
+    // =======================================================================
     readonly property url minimizeIcon: style.profile.minimizeIcon
     readonly property url maximizeIcon: style.profile.maximizeIcon
     readonly property url restoreIcon: style.profile.restoreIcon

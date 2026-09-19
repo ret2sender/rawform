@@ -18,41 +18,40 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/**
- * @file main.cpp
- * @brief Composition root for rawform.
- *
- * rawform is a cross-platform audio player in the spirit of foobar2000: a
- * fast, keyboard-friendly playlist view backed by its own binary playlist
- * format (.rwfpl), driven by the standalone rawform_audio engine (CoreAudio on
- * macOS, PipeWire on Linux).
- *
- * This file owns no UI logic. It constructs the app-global C++ services, wires
- * them together once, exposes them to QML, and loads the QML front end. The
- * context properties, in registration order (the name QML binds is on the
- * left):
- *
- *   - playlistTabs     : PlaylistTabs, one PlaylistModel + selection +
- *                        MetadataReloader per tab, the active-tab pointers,
- *                        the scanner seam, the live-playlist autosave/restore
- *   - customColumns    : CustomColumnRegistry, shared user-defined %pattern%
- *                        columns
- *   - metadataModel    : MetadataModel, the dock pane, following the active tab
- *   - trackScanner     : TrackScanner, off-thread file/tag ingestion
- *   - playlistStore    : PlaylistStore, Save / Save As + the column preset
- *   - audioController  : AudioController, the engine wrapper and the cursor
- *   - spectrumProvider : SpectrumProvider, the spectrum viewer
- *   - windowGeometry   : WindowGeometryStore, window.yaml
- *   - settingsStore    : SettingsStore, settings.yaml
- *
- * plus the "rawformart" image provider (AlbumArtProvider, engine-owned). The
- * types QML instantiates itself (the Properties window's models, editors, and
- * scan controller; FileRenamer, RenamePreviewer, RenamePatternStore; AppInfo,
- * Clipboard, WindowFocus) register through QML_ELEMENT and need nothing here.
- *
- * The one piece of behavior here is the seam that re-aggregates the metadata
- * pane whenever the active tab's selection changes or the active tab switches.
- */
+// main.cpp
+//
+// Composition root for rawform.
+//
+// rawform is a cross-platform audio player in the spirit of foobar2000: a
+// fast, keyboard-friendly playlist view backed by its own binary playlist
+// format (.rwfpl), driven by the standalone rawform_audio engine (CoreAudio on
+// macOS, PipeWire on Linux).
+//
+// This file owns no UI logic. It constructs the app-global C++ services, wires
+// them together once, exposes them to QML, and loads the QML front end. The
+// context properties, in registration order (the name QML binds is on the
+// left):
+//
+//   - playlistTabs     : PlaylistTabs, one PlaylistModel + selection +
+//                        MetadataReloader per tab, the active-tab pointers,
+//                        the scanner seam, the live-playlist autosave/restore
+//   - customColumns    : CustomColumnRegistry, shared user-defined %pattern%
+//                        columns
+//   - metadataModel    : MetadataModel, the dock pane, following the active tab
+//   - trackScanner     : TrackScanner, off-thread file/tag ingestion
+//   - playlistStore    : PlaylistStore, Save / Save As + the column preset
+//   - audioController  : AudioController, the engine wrapper and the cursor
+//   - spectrumProvider : SpectrumProvider, the spectrum viewer
+//   - windowGeometry   : WindowGeometryStore, window.yaml
+//   - settingsStore    : SettingsStore, settings.yaml
+//
+// plus the "rawformart" image provider (AlbumArtProvider, engine-owned). The
+// types QML instantiates itself (the Properties window's models, editors, and
+// scan controller; FileRenamer, RenamePreviewer, RenamePatternStore; AppInfo,
+// Clipboard, WindowFocus) register through QML_ELEMENT and need nothing here.
+//
+// The one piece of behavior here is the seam that re-aggregates the metadata
+// pane whenever the active tab's selection changes or the active tab switches.
 
 #include <QGuiApplication>
 
@@ -82,7 +81,6 @@
 #include "settings/SettingsStore.h"
 #include "utils/MacOSStyling.h"
 #include "window/WindowGeometryStore.h"
-
 
 int main(int argc, char* argv[]) {
 
@@ -241,7 +239,7 @@ int main(int argc, char* argv[]) {
     // a QObject: signals from the engine's Listener (marshaled to this thread),
     // Q_INVOKABLE transport, and Q_PROPERTY state/position/duration/now-playing
     // for QML to bind. It owns the cursor that makes playback follow a playlist
-    // the foobar way; the persistent playlist itself stays in PlaylistModel. The
+    // automatically; the persistent playlist itself stays in PlaylistModel. The
     // tabs pointer is the fallback source when play() is hit from Stopped with
     // nothing ever played (start the active tab).
     // -----------------------------------------------------------------------

@@ -18,26 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// qmllint disable unqualified
-// This file is the app's wiring layer: it deliberately reaches the C++
-// context properties (audioController, spectrumProvider), which qmllint
-// cannot see, so the unqualified-access category is disabled file-wide.
-// Under the Bound pragma this directive covers context properties ONLY;
-// nothing else in this file leans on dynamic scoping (see the pragma note).
-// Components stay fully linted; keep global wiring HERE so they can.
-// Cost: a typo'd global name in this file surfaces at runtime, not lint.
-
-// Bound component behavior: nested components resolve outer document ids
-// statically instead of through dynamic context lookup. This file's two
-// inline components (FmtText, TpBtn) are self-contained, so the pragma is
-// pure future-proofing here: any delegate added later must declare what it
-// consumes as `required property`.
-pragma ComponentBehavior: Bound
-import QtQuick
-import QtQuick.Layouts
-
-
-// =============================================================================
 // PlayerBar.qml
 //
 // The transport row, four regions left to right on one RowLayout
@@ -63,26 +43,33 @@ import QtQuick.Layouts
 //     console (and status line); the format slot stays blank when no track is
 //     loaded rather than flashing the reason in place of the format line.
 //
-// -----------------------------------------------------------------------------
-// Master volume: a two-line column, left of the spectrum, whose percentage
-// readout sits on the format/timing baseline and whose VolumeSlider sits on
-// the SeekBar baseline (bottomMargin and spacing mirror currentTrackColumn so
-// the columns share one vertical rhythm). The slider is a dumb, reusable bar
-// like SeekBar; it applies live (volume is a free, flush-less atomic store at
-// the engine's pull chokepoint, so unlike a seek every drag tick can be heard)
-// and supports wheel-to-nudge. The percentage label doubles as the mute
-// toggle, since this design carries no dedicated mute glyph. All policy (the
-// power-law percentage->gain taper, mute, and persistence) lives in the
-// AudioController; this file only binds level/muted in and the chosen level
-// out, through the controller's volume / volumePercent / muted plus setVolume
-// / toggleMute.
-// -----------------------------------------------------------------------------
-// Transport icons: the SVG set in icons/app/track_controls, rendered through
-// AppIcon so they stay crisp across DPI boundaries. TpBtn is plateless: no
-// background rectangle in any state; hover and disabled feedback are pure
-// opacity on the button root. The play/pause button swaps its SVG source on
-// isPlaying.
-// =============================================================================
+// Master volume: a two-line column, left of the spectrum, whose percentage readout sits
+// on the format/timing baseline and whose VolumeSlider sits on the SeekBar baseline
+// (bottomMargin and spacing mirror currentTrackColumn so the columns share one vertical
+// rhythm). The slider is a dumb, reusable bar like SeekBar; it applies live (volume is a
+// free, flush-less atomic store at the engine's pull chokepoint, so unlike a seek every
+// drag tick can be heard) and supports wheel-to-nudge. The percentage label doubles as
+// the mute toggle, since this design carries no dedicated mute glyph. All policy (the
+// power-law percentage->gain taper, mute, and persistence) lives in the AudioController;
+// this file only binds level/muted in and the chosen level out, through the controller's
+// volume / volumePercent / muted plus setVolume / toggleMute. Transport icons: the SVG
+// set in icons/app/track_controls, rendered through AppIcon so they stay crisp across DPI
+// boundaries. TpBtn is plateless: no background rectangle in any state; hover and
+// disabled feedback are pure opacity on the button root. The play/pause button swaps its
+// SVG source on isPlaying.
+
+// qmllint disable unqualified
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// spectrumProvider), which qmllint cannot see, so the unqualified-access
+// category is disabled file-wide. Components stay fully linted; keep global
+// wiring in the views so they can. Cost: a typo'd global name here surfaces at
+// runtime, not at lint.
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Layouts
+
 Item {
     id: root
     implicitHeight: 90
@@ -108,7 +95,7 @@ Item {
         font.weight: Font.Bold
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Transport button. An icon-only hit target: the 24x24 SVG glyph rendered
     // via AppIcon (whose explicit sourceSize keeps it crisp when the window
     // crosses DPI boundaries), with no background plate in any state. All
@@ -120,7 +107,7 @@ Item {
     // Item's handlers never see events, which is why hovered can never be
     // stuck true while disabled; the ternary tests `enabled` first anyway to
     // keep the precedence explicit rather than incidental.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component TpBtn: Item {
         id: btn
         property url icon
@@ -297,10 +284,9 @@ Item {
 
             // The progress track is the interactive scrubber: SeekBar owns the
             // click/drag/release state machine. We feed it the live
-            // position/duration/seekable (its
-            // hover bubble defaults to Theme.monoFont on its own) and commit its
-            // one-shot seekRequested straight to the controller. seekSeconds is
-            // the only engine call here, and it already existed: no new
+            // position/duration/seekable (its hover bubble defaults to Theme.monoFont on
+            // its own) and commit its one-shot seekRequested straight to the controller.
+            // seekSeconds is the only engine call here, and it already existed: no new
             // controller surface.
             SeekBar {
                 id: seekBar
@@ -316,14 +302,13 @@ Item {
             }
         }
 
-        // Master volume, left of the spectrum. Two lines that line up with the
-        // track column beside it: the
-        // percentage readout on the format/timing baseline (top), the slider on
-        // the SeekBar baseline (bottom). bottomMargin and spacing mirror
-        // currentTrackColumn so the two columns share a vertical rhythm; they are
-        // the obvious tunables if a baseline needs nudging. The column has no
-        // fillWidth, so it takes the slider's preferred width and leaves the
-        // surrounding layout (including the SeekBar's stretch) undisturbed.
+        // Master volume, left of the spectrum. Two lines that line up with the track
+        // column beside it: the percentage readout on the format/timing baseline (top),
+        // the slider on the SeekBar baseline (bottom). bottomMargin and spacing mirror
+        // currentTrackColumn so the two columns share a vertical rhythm; they are the
+        // obvious tunables if a baseline needs nudging. The column has no fillWidth, so
+        // it takes the slider's preferred width and leaves the surrounding layout
+        // (including the SeekBar's stretch) undisturbed.
         ColumnLayout {
             id: volumeColumn
             // Pinned to a fixed width on purpose. A ColumnLayout is a Layout type,

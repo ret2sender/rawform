@@ -18,31 +18,32 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// Theme.qml
+//
+// Application-wide look constants as a module singleton. One instance exists
+// per QML engine, resolvable by type name from any document in
+// com.rawform.app, including documents instantiated inside separate top-level
+// Windows (Settings, Properties). That last point is the reason this exists:
+// FontLoaders living in MainWindow.qml and reached by id through QML's
+// dynamic scoping would be a dependency every component carries silently,
+// and one that does not hold in other windows. A singleton is scope-independent,
+// so a component reading Theme.uiFont is self-contained: it can be
+// instantiated anywhere (another window, a test harness, qml preview) and
+// still resolve.
+//
+// Contents: the two font families and the palette, in two tiers (see the
+// section comments below). Add new shared look constants here rather than in
+// MainWindow.
+//
+// Registered in ui/CMakeLists.txt via QT_QML_SINGLETON_TYPE on this file;
+// the `pragma Singleton` below is the QML-side half of that contract.
+
 pragma Singleton
+
+pragma ComponentBehavior: Bound
 
 import QtQuick
 
-/*
- * Theme.qml
- *
- * Application-wide look constants as a module singleton. One instance exists
- * per QML engine, resolvable by type name from any document in
- * com.rawform.app, including documents instantiated inside separate top-level
- * Windows (Settings, Properties). That last point is the reason this exists:
- * FontLoaders living in MainWindow.qml and reached by id through QML's
- * dynamic scoping would be a dependency every component carries silently,
- * and one that does not hold in other windows. A singleton is scope-independent,
- * so a component reading Theme.uiFont is self-contained: it can be
- * instantiated anywhere (another window, a test harness, qml preview) and
- * still resolve.
- *
- * Contents: the two font families and the palette, in two tiers (see the
- * section comments below). Add new shared look constants here rather than in
- * MainWindow.
- *
- * Registered in ui/CMakeLists.txt via QT_QML_SINGLETON_TYPE on this file;
- * the pragma above is the QML-side half of that contract.
- */
 QtObject {
     // The loaders are implementation detail; consumers read the family-name
     // strings below. Paths are relative to this file (Sources/qml/theme/),
@@ -80,10 +81,9 @@ QtObject {
     readonly property color accentSoft: "#BDB2FF"    // lavender: focus strokes, highlights
     readonly property color accentHover: "#D4B8FF"   // menu-label hover tint
 
-    // The playlist's current-row (focus) outline, the remembered-track
-    // rectangle. Deliberately a quiet gray rather than the accent family: the
-    // outline marks FOCUS, not selection, and must read a full tier below the
-    // selection tint (matches foobar's focus rectangle). Its own token so
+    // The playlist's current-row (focus) outline, the remembered-track rectangle.
+    // Deliberately a quiet gray rather than the accent family: the outline marks FOCUS,
+    // not selection, and must read a full tier below the selection tint. Its own token so
     // taste-tuning is one edit here, never a hunt through delegates.
     readonly property color focusOutline: "#8A8A8A"  // shares #8A8A8A with textDim
 

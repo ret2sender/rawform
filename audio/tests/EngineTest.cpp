@@ -2234,12 +2234,12 @@ void testOutcomeObserversAndInfoForwarding() {
 }
 
 // ---------------------------------------------------------------------------
-// PLAYNOW / SETQUEUE SCENARIOS: the playNow / setQueue primitives, the currentTrackInfo() and
-// duration() observers, and the device-unavailable and seek-rejected hardening
-// paths. These pin the API: the primitives that let a controller
-// say "play this exact track now, with this list behind it" without the engine
-// owning a cursor, the pull observers a late-attaching UI needs, and graceful
-// failure when the sink cannot open or a seekable decoder refuses a target.
+// PLAYNOW / SETQUEUE SCENARIOS: the playNow / setQueue primitives, the
+// currentTrackInfo() and duration() observers, and the device-unavailable and
+// seek-rejected hardening paths. These pin the API: the primitives that let a
+// controller say "play this exact track now, with this list behind it" without
+// the engine owning a cursor, the pull observers a late-attaching UI needs, and
+// graceful failure when the sink cannot open or a seekable decoder refuses a target.
 // ---------------------------------------------------------------------------
 
 // playNow from a STOPPED state plays the requested track directly, with no blip of

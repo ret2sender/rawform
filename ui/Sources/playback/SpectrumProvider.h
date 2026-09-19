@@ -145,13 +145,13 @@ signals:
     void sourceChanged();
 
 private:
-    // --- the per-frame pipeline ------------------------------------------
+    // --- the per-frame pipeline --------------------------------------------
     void onTick();              ///< the timer slot: sample -> analyze -> smooth, or decay
     void onStateChanged();      ///< start the timer when playback begins
     void onTrackChanged();      ///< reconfigure the analyzer on a sample-rate change
     void reconfigureFor(std::uint32_t sampleRate);  ///< (re)size analyzer + scratch
 
-    // --- persistence -----------------------------------------------------
+    // --- persistence -------------------------------------------------------
     void loadSettings();        ///< read spectrum.yaml (absent == defaults)
     void persistSettings();     ///< write spectrum.yaml through the shared atomic writer
 

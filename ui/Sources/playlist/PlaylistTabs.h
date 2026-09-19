@@ -18,6 +18,47 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PlaylistTabs.h
+//
+// The playlist tab session manager: the C++ owner of every open tab and the single seam
+// that decides which tab a scan, load, or selection change acts on.
+//
+// Where the models multiply. The scanner is model-free, the custom-column
+// registry is app-global, and PlaylistView swaps the model underneath it; this
+// class owns the per-tab models those pieces were written toward.
+//
+// OWNERSHIP. Each tab owns, as a private subtree:
+//   - PlaylistModel:       the rows + the column order (m_columns);
+//   - QItemSelectionModel: that tab's selection (parented to its model);
+//   - MetadataReloader:    that tab's freshness pass (parented to its model).
+//                          One reloader PER tab, never re-pointed: its async
+//                          QFutureWatcher/pending state stays bound to one model
+//                          for life, so a pass in flight can't apply onto the
+//                          wrong playlist after a tab switch.
+//   - an autosave QTimer:  debounces writes of this tab's live .rwfpl.
+// Column WIDTHS are the one piece that can't live per-model: there is a single
+// HorizontalHeaderView, so the active tab's widths live there and inactive tabs
+// park theirs in Tab::widths, which QML keeps current via stashActiveWidths()
+// (on resize and just before a switch-away).
+//
+// ACTIVE POINTERS. activeModel()/activeSelection()/activeReloader() expose the
+// current tab's objects; QML binds to them and they change (activeChanged) on
+// every switch. activeSelectionChanged() fires for a selection change OR a
+// switch, so the metadata pane re-aggregates uniformly.
+//
+// SCANNER SEAM. setScanner() wires the scanner here.
+// scanIntoActive() captures the active model+selection into a FIFO at call time;
+// scanStarted pops it, so a scan launched while tab A was active lands in A even
+// if the user switches to B mid-scan. Closed-tab targets are QPointer-guarded.
+//
+// LIVE PLAYLISTS. Every tab is backed by an auto-saved
+// userConfigDir()/live_playlist/<uuid>.rwfpl, a working file until the tab is
+// closed (file deleted) or saved elsewhere. Opening a .rwfpl (openInNewTab)
+// creates a fresh live copy; the original is untouched. restoreSession() re-opens
+// the live files on startup, or seeds one empty tab.
+//
+// Registered via QML_ELEMENT into com.rawform.app; a QML context property.
+
 #pragma once
 
 #include "columns/ColumnSchema.h"
@@ -46,47 +87,6 @@ class CustomColumnRegistry;
 class TrackScanner;
 struct PlaylistDocument; // defined in PlaylistFile.h; returned by snapshotTab()
 
-/**
- * @brief The playlist tab session manager: the C++ owner of every open tab and
- *        the single seam that decides which tab a scan, load, or selection
- *        change acts on.
- *
- * Where the models multiply. The scanner is model-free, the custom-column
- * registry is app-global, and PlaylistView swaps the model underneath it; this
- * class owns the per-tab models those pieces were written toward.
- *
- * OWNERSHIP. Each tab owns, as a private subtree:
- *   - PlaylistModel:       the rows + the column order (m_columns);
- *   - QItemSelectionModel: that tab's selection (parented to its model);
- *   - MetadataReloader:    that tab's freshness pass (parented to its model).
- *                          One reloader PER tab, never re-pointed: its async
- *                          QFutureWatcher/pending state stays bound to one model
- *                          for life, so a pass in flight can't apply onto the
- *                          wrong playlist after a tab switch.
- *   - an autosave QTimer:  debounces writes of this tab's live .rwfpl.
- * Column WIDTHS are the one piece that can't live per-model: there is a single
- * HorizontalHeaderView, so the active tab's widths live there and inactive tabs
- * park theirs in Tab::widths, which QML keeps current via stashActiveWidths()
- * (on resize and just before a switch-away).
- *
- * ACTIVE POINTERS. activeModel()/activeSelection()/activeReloader() expose the
- * current tab's objects; QML binds to them and they change (activeChanged) on
- * every switch. activeSelectionChanged() fires for a selection change OR a
- * switch, so the metadata pane re-aggregates uniformly.
- *
- * SCANNER SEAM. setScanner() wires the scanner here.
- * scanIntoActive() captures the active model+selection into a FIFO at call time;
- * scanStarted pops it, so a scan launched while tab A was active lands in A even
- * if the user switches to B mid-scan. Closed-tab targets are QPointer-guarded.
- *
- * LIVE PLAYLISTS. Every tab is backed by an auto-saved
- * userConfigDir()/live_playlist/<uuid>.rwfpl, a working file until the tab is
- * closed (file deleted) or saved elsewhere. Opening a .rwfpl (openInNewTab)
- * creates a fresh live copy; the original is untouched. restoreSession() re-opens
- * the live files on startup, or seeds one empty tab.
- *
- * Registered via QML_ELEMENT into com.rawform.app; a QML context property.
- */
 class PlaylistTabs : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
@@ -109,7 +109,7 @@ public:
     explicit PlaylistTabs(QObject* parent = nullptr);
     ~PlaylistTabs() override;
 
-    // --- One-time dependency injection (call BEFORE creating any tab) -----
+    // --- One-time dependency injection (call BEFORE creating any tab) ------
 
     /// The schema each new tab's model is seeded with (copied per model). Pass
     /// the ColumnSchema::load() result main.cpp holds.
@@ -131,12 +131,12 @@ public:
     /// the change would only take effect after a restart re-reads the preset).
     Q_INVOKABLE void setDefaultLayout(QStringList fieldIds, QVariantList widths);
 
-    // --- QAbstractListModel ----------------------------------------------
+    // --- QAbstractListModel ------------------------------------------------
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-    // --- Active tab ------------------------------------------------------
+    // --- Active tab --------------------------------------------------------
     [[nodiscard]] int count() const { return static_cast<int>(m_tabs.size()); }
     [[nodiscard]] int currentIndex() const { return m_current; }
     void setCurrentIndex(int index);
@@ -145,7 +145,7 @@ public:
     [[nodiscard]] QItemSelectionModel* activeSelection() const;
     [[nodiscard]] MetadataReloader*    activeReloader() const;
 
-    // --- Lifecycle (QML) -------------------------------------------------
+    // --- Lifecycle (QML) ---------------------------------------------------
 
     /// Create a tab and make it active. @p title empty -> a unique generic
     /// "New Playlist" / "New Playlist N". Returns the new tab's index. The tab
@@ -183,7 +183,7 @@ public:
     /// target NOW, so a later tab switch can't misfile the results.
     Q_INVOKABLE void scanIntoActive(const QList<QUrl>& urls, int at = -1);
 
-    // --- Drop routing (QML hands the raw drop payload here in ONE call) ---
+    // --- Drop routing (QML hands the raw drop payload here in ONE call) ----
     //
     // These exist for performance, not convenience. QQuickDropEvent's
     // `urls` is a live getter that re-decodes the entire text/uri-list mime
@@ -212,7 +212,7 @@ public:
     ///   anything else            -> "" (caller falls back to a generic name)
     Q_INVOKABLE [[nodiscard]] QString suggestTabName(const QList<QUrl>& urls) const;
 
-    // --- Active-tab column layout (widths live in the QML header) ---------
+    // --- Active-tab column layout (widths live in the QML header) ----------
 
     /// Park the active tab's current column widths (visual order). QML calls
     /// this on a header resize and just before a switch, so Tab::widths is the
@@ -244,7 +244,7 @@ public:
     /// audioController.playingModel. Pointer identity only; this object is the
     /// one holder of all models, so a live model is found iff its tab is open.
     Q_INVOKABLE [[nodiscard]] int indexOfModel(PlaylistModel* model) const;
-    // --- File operations (File Operations > Rename To) ----------------------
+    // --- File operations (File Operations > Rename To) ---------------------
 
     /// Patch the in-memory identity of every row whose filePath is a KEY of
     /// @p renames (old absolute path -> new absolute path), across EVERY open
@@ -264,14 +264,14 @@ public:
     /// empty-value entries are skipped.
     Q_INVOKABLE void applyPathRenames(const QVariantMap& renames);
 
-    // --- Startup ---------------------------------------------------------
+    // --- Startup -----------------------------------------------------------
 
     /// Restore the previous session: open every userConfigDir()/live_playlist/
     /// *.rwfpl as a tab (titles from their saved file names). If none exist,
     /// seed one empty "New Playlist". Call once, after the dependencies are set.
     void restoreSession();
 
-    // --- Shutdown --------------------------------------------------------
+    // --- Shutdown ----------------------------------------------------------
 
     /// Synchronously write every dirty tab's live file, NOW, on the calling
     /// thread. The shutdown flush.

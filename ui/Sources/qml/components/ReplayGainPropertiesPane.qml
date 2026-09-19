@@ -18,24 +18,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// Bound component behavior: nested components and delegates resolve outer
-// document ids statically instead of through dynamic context lookup. The
-// flip side is that views no longer inject model data into delegates via
-// context; every delegate in this file declares what it consumes as
-// `required property`, which is both the contract and the qmllint proof.
-pragma ComponentBehavior: Bound
-
-import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
-import com.rawform.app
-
-
-// =============================================================================
 // ReplayGainPropertiesPane.qml
 //
 // Editable ReplayGain page with in-dialog row selection: the per-track
-// table over a Summary, foobar style.
+// table over a Summary.
 //
 // State: everything row-shaped lives in ReplayGainRowsModel (C++),
 // bound in as `model` by the host window, which also owns the model's
@@ -69,7 +55,14 @@ import com.rawform.app
 // the right-click menu here stays selection-scoped. Both funnel into the same
 // scope helpers via their allRows override, so the skip-existing rules and the
 // revert-on-equal staging behave identically in either scope.
-// =============================================================================
+
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import com.rawform.app
+
 Item {
     id: pane
 
@@ -167,7 +160,7 @@ Item {
         }
     }
 
-    // --- selection forwarding ------------------------------------------
+    // --- selection forwarding ----------------------------------------------
     // Gesture handlers call this; membership, the anchor, and the Summary all
     // live in the model. Focus re-take stays here with the Items it concerns.
     function _selectRow(i, modifiers) {
@@ -177,7 +170,7 @@ Item {
         keyCatcher.forceActiveFocus()
     }
 
-    // --- click-hold-drag selection -------------------------------------
+    // --- click-hold-drag selection -----------------------------------------
     // Same shape as the metadata pane's: press a row (name area OR one of the
     // numeric EditCells, which forward their presses) and, holding, move up or
     // down to range the selection live from the press anchor. Moves arrive in
@@ -225,7 +218,7 @@ Item {
     // collectEdits / adoptEdits / revertEdits moved to ReplayGainRowsModel
     //; the host window calls the model directly on the apply path.
 
-    // --- scanning ------------------------------------------------------------
+    // --- scanning ----------------------------------------------------------
     // Scope resolution, grouping, and the skip-existing rules live in
     // ReplayGainRowsModel.scanItems; this wrapper keeps only what is
     // UI: reading the live skip-existing setting off the controller, wording
@@ -257,7 +250,7 @@ Item {
         _requestScan(mode, true)
     }
 
-    // --- edit seeding --------------------------------------------------------
+    // --- edit seeding ------------------------------------------------------
     // The only parsing left UI-side: converting a formatted Summary value
     // ("+x.xx dB" / the guillemet marker) into a bare-number edit seed. This
     // consumes OUR OWN formatted output, never user input, so the lenient JS
@@ -270,12 +263,12 @@ Item {
         return isNaN(v) ? "" : String(v)
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // ----- sticky column header ------------------------------------------
+        // ----- sticky column header ----------------------------------------
         Item {
             Layout.fillWidth: true
             implicitHeight: 30
@@ -328,7 +321,7 @@ Item {
 
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.separatorStrong }
 
-        // ----- track rows + Summary footer (scrolls together) ----------------
+        // ----- track rows + Summary footer (scrolls together) --------------
         ListView {
             id: list
             Layout.fillWidth: true
@@ -493,12 +486,12 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A double-click-to-edit numeric cell. A single PRESS forwards as
     // clicked(mods) for row selection (on PRESS; the cell also drives the pane's
     // drag-select, see the MouseArea); kind 0 validates a gain, 1 a peak; empty
     // commit clears.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component EditCell: Item {
         id: ec
         property string text: ""
@@ -542,14 +535,12 @@ Item {
             id: ecMA
             anchors.fill: parent
             enabled: ec.editable && !ed.visible
-            // The `clicked` signal fires on PRESS (press-select matches the row
-            // area and the playlist), and the cell drives the pane's
-            // drag-select directly,
-            // ids being in scope for this inline component, so a drag starting
-            // on a numeric cell ranges exactly like one starting on the name.
-            // A double-click still opens the editor; opening it disables this
-            // area mid-press, which cancels the grab, and onCanceled ends the
-            // armed drag cleanly.
+            // The `clicked` signal fires on PRESS (press-select matches the row area and
+            // the playlist), and the cell drives the pane's drag-select directly, ids
+            // being in scope for this inline component, so a drag starting on a numeric
+            // cell ranges exactly like one starting on the name. A double-click still
+            // opens the editor; opening it disables this area mid-press, which cancels
+            // the grab, and onCanceled ends the armed drag cleanly.
             onPressed: function (mouse) {
                 ec.clicked(mouse.modifiers)
                 pane._beginDragSel(ecMA, mouse.y, mouse.modifiers)
@@ -605,9 +596,9 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // A read-only Summary row: label left, value right-aligned under Track Gain.
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component SummaryRow: Item {
         property string label: ""
         property string value: ""
@@ -632,10 +623,10 @@ Item {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // An editable Summary row (Track Gain / Album Gain). Applies the typed value
     // across the current scope (selected rows, or all when nothing is selected).
-    // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     component SummaryEditRow: Item {
         id: ser
         property string label: ""

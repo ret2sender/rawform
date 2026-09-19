@@ -18,9 +18,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#pragma once
-
-// =============================================================================
 // WindowGeometryStore.h
 //
 // Persists the app window's WINDOWED size and position across launches, via
@@ -68,7 +65,8 @@
 // invokables too: a tool window reads its size once as an initial value at
 // creation (invokable calls are not tracked as binding dependencies, which is
 // exactly right for a startup-only read).
-// =============================================================================
+
+#pragma once
 
 #include <QMap>
 #include <QObject>
