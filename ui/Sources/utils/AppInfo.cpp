@@ -1,5 +1,5 @@
 /*
-* This file is part of rawform.
+ * This file is part of rawform.
  * Copyright (C) 2026 Etienne Fleurant
  *
  * This program is free software: you can redistribute it and/or modify
