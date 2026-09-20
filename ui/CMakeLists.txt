@@ -338,25 +338,12 @@ set_source_files_properties(
 )
 
 # ---------------------------------------------------------------------------
-# QML lint (encapsulation hygiene)
+# QML sources
 # ---------------------------------------------------------------------------
-# qt_add_qml_module below auto-generates lint targets; no custom target is
-# needed (adding one would just duplicate Qt's). Run either of:
-#   cmake --build <dir> --target rawform_qmllint    (this module only)
-#   cmake --build <dir> --target all_qmllint        (every module in the tree)
-# The warning class that motivates this is "unqualified access": a QML file
-# reaching an id or context property it does not declare, i.e. the
-# non-self-contained pattern. Every QML file carries
-# `pragma ComponentBehavior: Bound`, so delegates and other nested components
-# resolve outer document ids statically (checked by qmllint) and declare what
-# they consume as `required property`. Every view that reaches a C++ context
-# property carries a file-wide `qmllint disable unqualified` for exactly that
-# reach; the components declare what they consume (their few directives cover
-# other categories, each at its site), so any warning is a regression.
-qt_add_qml_module(rawform
-        URI com.rawform.app
-        VERSION 1.0
-        QML_FILES
+# Listed once, here, because two things consume the list: the module
+# declaration below and the qmlcachegen-output rule after the warnings block,
+# which derives the generated file names from these paths.
+set(RAWFORM_QML_FILES
         # theme/: the Theme singleton (fonts and palette)
         Sources/qml/theme/Theme.qml
         # views/: top-level app regions bound to models
@@ -401,6 +388,28 @@ qt_add_qml_module(rawform
         Sources/qml/components/WindowResizeGrips.qml
         Sources/qml/components/TitleBarControls.qml
         Sources/qml/components/TitleBarStyle.qml
+)
+
+# ---------------------------------------------------------------------------
+# QML lint (encapsulation hygiene)
+# ---------------------------------------------------------------------------
+# qt_add_qml_module below auto-generates lint targets; no custom target is
+# needed (adding one would just duplicate Qt's). Run either of:
+#   cmake --build <dir> --target rawform_qmllint    (this module only)
+#   cmake --build <dir> --target all_qmllint        (every module in the tree)
+# The warning class that motivates this is "unqualified access": a QML file
+# reaching an id or context property it does not declare, i.e. the
+# non-self-contained pattern. Every QML file carries
+# `pragma ComponentBehavior: Bound`, so delegates and other nested components
+# resolve outer document ids statically (checked by qmllint) and declare what
+# they consume as `required property`. Every view that reaches a C++ context
+# property carries a file-wide `qmllint disable unqualified` for exactly that
+# reach; the components declare what they consume (their few directives cover
+# other categories, each at its site), so any warning is a regression.
+qt_add_qml_module(rawform
+        URI com.rawform.app
+        VERSION 1.0
+        QML_FILES ${RAWFORM_QML_FILES}
         RESOURCES
         Sources/fonts/Inter-VariableFont_opsz,wght.ttf
         Sources/fonts/Inter-Italic-VariableFont_opsz,wght.ttf
@@ -537,6 +546,30 @@ target_compile_options(rawform PRIVATE
         $<$<CONFIG:Debug>:-Werror>
         >
 )
+
+# qmlcachegen output is Qt's code, not ours. qt_add_qml_module compiles every
+# file in RAWFORM_QML_FILES ahead of time into one .cpp under .rcc/qmlcache/
+# and adds it to this target, so those sources inherit the -Werror above. What
+# they contain is a function of the Qt version that generated them: the same
+# QML has produced entries with unused lambda parameters on one Qt and clean
+# ones on the next, so a CI image on a different Qt than the workstation
+# failed on code nobody in this tree wrote. Warnings there stay warnings. The
+# paths mirror Qt's own naming (<target>_<relative path>_qml.cpp, plus the
+# module loader); a source property on a file that does not exist yet is
+# fine, it attaches when Qt adds the file to the target.
+set(_rawform_qmlcache_dir "${CMAKE_CURRENT_BINARY_DIR}/.rcc/qmlcache")
+set(_rawform_qmlcache_sources
+        "${_rawform_qmlcache_dir}/rawform_qmlcache_loader.cpp")
+foreach(_qml IN LISTS RAWFORM_QML_FILES)
+    cmake_path(REMOVE_EXTENSION _qml LAST_ONLY OUTPUT_VARIABLE _stem)
+    list(APPEND _rawform_qmlcache_sources
+            "${_rawform_qmlcache_dir}/rawform_${_stem}_qml.cpp")
+endforeach()
+set_source_files_properties(${_rawform_qmlcache_sources} PROPERTIES
+        COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-error>"
+)
+unset(_rawform_qmlcache_dir)
+unset(_rawform_qmlcache_sources)
 
 # ---------------------------------------------------------------------------
 # Optional unit tests (OFF by default; the normal app build is unaffected).
