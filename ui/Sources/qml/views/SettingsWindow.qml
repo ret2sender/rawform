@@ -24,7 +24,10 @@
 // window that reuses the main window's chrome: transparent Window, rounded
 // Theme.surfacePage body at radius 8, a slim custom title bar with window-drag and a
 // close button. Text Theme.textPrimary, accent Theme.accentSoft, panels
-// Theme.surfaceSunken.
+// Theme.surfaceSunken. Resizable through WindowResizeGrips, the same edge strips
+// the other tool windows carry; the size persists in window.yaml under the
+// `settings` key (size only, never position: the reused instance keeps whatever
+// spot the window system last gave it).
 //
 // STRUCTURE: a left navigation pane and a right content area, over an Apply / OK / Cancel
 // footer. The nav is a list of { label, depth } entries: depth 0 rows are top-level
@@ -46,7 +49,7 @@
 
 // qmllint disable unqualified
 // Wiring layer: this file reaches the C++ context properties (audioController,
-// settingsStore, spectrumProvider), which qmllint cannot see, so the
+// settingsStore, spectrumProvider, windowGeometry), which qmllint cannot see, so the
 // unqualified-access category is disabled file-wide. Components stay fully
 // linted; keep global wiring in the views so they can. Cost: a typo'd global
 // name here surfaces at runtime, not at lint.
@@ -69,8 +72,11 @@ Window {
     property Item menuBlurSource: windowBody
 
     title: "Settings"
-    width: 580
-    height: 440
+    // Size restores from window.yaml's keyed store, else the built-in
+    // default; clamped against the minimums here because the store does not
+    // know them. Initial values, not live bindings (startup-only read).
+    width: Math.max(minimumWidth, windowGeometry.savedWidth("settings", 580))
+    height: Math.max(minimumHeight, windowGeometry.savedHeight("settings", 440))
     minimumWidth: 520
     minimumHeight: 380
     color: "transparent"
@@ -107,8 +113,35 @@ Window {
                  && WindowFocus.focusWindow === settingsWindow
         onActivated: {
             settingsWindow.reseed()
-            settingsWindow.hide()
+            settingsWindow.dismiss()
         }
+    }
+
+    // Persist the size for the next open, windowed frames only (the same
+    // visibility guard as the main window). Called from every path that
+    // takes the window off screen.
+    function _saveSize() {
+        if (settingsWindow.visibility === Window.Windowed)
+            windowGeometry.saveSize("settings",
+                                    settingsWindow.width, settingsWindow.height)
+    }
+
+    // The single hide path for Cancel, OK, the title bar X and Escape. This is
+    // a hide()-reused instance, so onClosing never fires for any of them and
+    // the size save has to ride the hide itself. The caller decides what
+    // happens to the staged edits first (reseed or applyStaged).
+    function dismiss() {
+        _saveSize()
+        hide()
+    }
+
+    // A window-manager close request bypasses every in-window path above.
+    // Close == Cancel by contract, so revert the staged edits and save the
+    // size the same way; accepting the close hides the reused instance, and
+    // the next openSettings() shows it again.
+    onClosing: {
+        settingsWindow.reseed()
+        settingsWindow._saveSize()
     }
 
     // -----------------------------------------------------------------------
@@ -232,7 +265,7 @@ Window {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
-                    onClicked: { settingsWindow.reseed(); settingsWindow.hide() }
+                    onClicked: { settingsWindow.reseed(); settingsWindow.dismiss() }
                 }
             }
 
@@ -366,7 +399,7 @@ Window {
 
                     FooterButton {
                         label: "Cancel"
-                        onClicked: { settingsWindow.reseed(); settingsWindow.hide() }
+                        onClicked: { settingsWindow.reseed(); settingsWindow.dismiss() }
                     }
                     FooterButton {
                         label: "Apply"
@@ -376,11 +409,19 @@ Window {
                     FooterButton {
                         label: "OK"
                         accent: true
-                        onClicked: { settingsWindow.applyStaged(); settingsWindow.hide() }
+                        onClicked: { settingsWindow.applyStaged(); settingsWindow.dismiss() }
                     }
                 }
             }
         }
+    }
+
+    // Resize edges: this window is frameless on every platform, so the grips
+    // are unconditional. Declared after windowBody so they sit above the
+    // chrome. topInset keeps the top strip off the title bar's move zone.
+    WindowResizeGrips {
+        target: settingsWindow
+        topInset: 40
     }
 
     // -----------------------------------------------------------------------

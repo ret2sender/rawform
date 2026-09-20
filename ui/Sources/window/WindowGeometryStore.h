@@ -46,13 +46,15 @@
 //     every platform and stays unconditional.
 //
 //   - Keyed TOOL-WINDOW sizes: per-window `width`/`height` sub-maps
-//     under a name key (`properties:`, `rename:`), for the frameless tool
-//     windows (they resize through WindowResizeGrips). SIZE ONLY,
-//     never position: those windows cascade from the host at open, and a
-//     stored position would fight the cascade. Saved on each window's close
-//     (windowed visibility only, the same guard as the main window);
-//     several instances closing just means last write wins, matching the
-//     windows' own last-write-wins staging semantics.
+//     under a name key (`properties:`, `rename:`, `settings:`,
+//     `customColumns:`), for the frameless tool windows (they resize
+//     through WindowResizeGrips). SIZE ONLY, never position: the
+//     fresh-instance windows cascade from the host at open, and a stored
+//     position would fight the cascade; the hide()-reused ones keep the
+//     spot the window system last gave them. Saved on each window's close
+//     or hide (windowed visibility only, the same guard as the main
+//     window); several instances closing just means last write wins,
+//     matching the windows' own last-write-wins staging semantics.
 //
 // Lifecycle: constructed in main() AFTER the QGuiApplication (screens() needs
 // the app object) and registered as the "windowGeometry" context property
@@ -147,8 +149,9 @@ private:
     bool m_fileHasPosition    = false;
     bool m_platformCanPosition = true;
 
-    /// Keyed tool-window sizes, by name (`properties`, `rename`, ...). QMap so
-    /// the emit order (and therefore the file) is stable across runs.
+    /// Keyed tool-window sizes, by name (`properties`, `rename`, `settings`,
+    /// `customColumns`). QMap so the emit order (and therefore the file) is
+    /// stable across runs.
     QMap<QString, QSize> m_toolSizes;
 };
 

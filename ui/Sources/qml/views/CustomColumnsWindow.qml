@@ -42,7 +42,10 @@
 // LIFETIME: a SINGLE reused instance (show/hide), not a fresh-instance-per-open
 // like Properties. It is one manager over the shared `customColumns` registry;
 // reusing the instance keeps its position and size across opens, as Settings
-// does. There is no staging: edits commit straight to the registry (name and
+// does. Resizable through WindowResizeGrips, and the size persists in
+// window.yaml under the `customColumns` key (size only, never position; one
+// instance per tab all share the key, last hide wins). There is no staging:
+// edits commit straight to the registry (name and
 // pattern on editing-finished, align on combo change), which persists and
 // refreshes any SHOWN custom column live. `rows` is a SNAPSHOT taken on open
 // and re-taken only on add/remove (structural changes); a field edit updates
@@ -56,10 +59,11 @@
 // not matter for font resolution.
 
 // qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (customColumns),
-// which qmllint cannot see, so the unqualified-access category is disabled
-// file-wide. Components stay fully linted; keep global wiring in the views so
-// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
+// Wiring layer: this file reaches the C++ context properties (customColumns,
+// windowGeometry), which qmllint cannot see, so the unqualified-access category
+// is disabled file-wide. Components stay fully linted; keep global wiring in the
+// views so they can. Cost: a typo'd global name here surfaces at runtime, not at
+// lint.
 
 pragma ComponentBehavior: Bound
 
@@ -76,8 +80,11 @@ Window {
     property string uiFont: Theme.uiFont
 
     title: "Custom Playlist Columns"
-    width: 680
-    height: 490
+    // Size restores from window.yaml's keyed store, else the built-in
+    // default; clamped against the minimums here because the store does not
+    // know them. Initial values, not live bindings (startup-only read).
+    width: Math.max(minimumWidth, windowGeometry.savedWidth("customColumns", 680))
+    height: Math.max(minimumHeight, windowGeometry.savedHeight("customColumns", 490))
     minimumWidth: 560
     minimumHeight: 380
     color: "transparent"
@@ -133,10 +140,34 @@ Window {
                 customColumnsWindow.selectedRows = []
                 customColumnsWindow.selectionAnchor = -1
             } else {
-                customColumnsWindow.hide()
+                customColumnsWindow.dismiss()
             }
         }
     }
+
+    // Persist the size for the next open, windowed frames only (the same
+    // visibility guard as the main window). Called from every path that
+    // takes the window off screen.
+    function _saveSize() {
+        if (customColumnsWindow.visibility === Window.Windowed)
+            windowGeometry.saveSize("customColumns",
+                                    customColumnsWindow.width,
+                                    customColumnsWindow.height)
+    }
+
+    // The single hide path for Close, the title bar X and Escape. This is a
+    // hide()-reused instance, so onClosing never fires for any of them and
+    // the size save has to ride the hide itself. Edits are live, so there is
+    // nothing to revert on the way out.
+    function dismiss() {
+        _saveSize()
+        hide()
+    }
+
+    // A window-manager close request bypasses the in-window paths above;
+    // save the size the same way. Accepting the close hides the reused
+    // instance, and the next openManager() shows it again.
+    onClosing: customColumnsWindow._saveSize()
 
     function refresh() {
         rows = (typeof customColumns !== "undefined" && customColumns)
@@ -336,7 +367,7 @@ Window {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
-                    onClicked: customColumnsWindow.hide()
+                    onClicked: customColumnsWindow.dismiss()
                 }
             }
 
@@ -404,9 +435,9 @@ Window {
                 }
 
                 // The table: header strip + alternating-row list, in a rounded
-                // frame (metadata-view palette). Fills the remaining body height;
-                // the window is fixed-size (frameless, no resize grip), so this
-                // just adapts to the body rather than needing a hand-set height.
+                // frame (metadata-view palette). Fills the remaining body height,
+                // so it tracks the window through a resize with no hand-set
+                // height of its own.
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -617,11 +648,19 @@ Window {
 
                     FooterButton {
                         label: "Close"
-                        onClicked: customColumnsWindow.hide()
+                        onClicked: customColumnsWindow.dismiss()
                     }
                 }
             }
         }
+    }
+
+    // Resize edges: this window is frameless on every platform, so the grips
+    // are unconditional. Declared after windowBody so they sit above the
+    // chrome. topInset keeps the top strip off the title bar's move zone.
+    WindowResizeGrips {
+        target: customColumnsWindow
+        topInset: 40
     }
 
     // -----------------------------------------------------------------------

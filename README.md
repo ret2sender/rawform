@@ -73,7 +73,7 @@ the Flatpak sandbox the same paths resolve to
 | `settings.yaml` | Tagging preferences (the MP3/ID3 write settings) |
 | `playback.yaml` | Master volume and mute, ReplayGain settings, output rate policy, output device selection |
 | `spectrum.yaml` | Spectrum-view preferences (analyzer source) |
-| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename To) |
+| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename To, Settings, Custom Playlist Columns) |
 | `playlist_custom_columns.yaml` | Custom column definitions |
 | `rename_patterns.yaml` | Saved Rename To pattern presets |
 | `columns.rwftp` | Default playlist column layout |
