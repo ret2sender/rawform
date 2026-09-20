@@ -55,6 +55,11 @@
 // the right-click menu here stays selection-scoped. Both funnel into the same
 // scope helpers via their allRows override, so the skip-existing rules and the
 // revert-on-equal staging behave identically in either scope.
+//
+// Messages: the pane renders none of its own. The hovered right-click item's
+// description is exposed as menuHint, which the host window folds into its
+// single log bar above the tab content, the same way the metadata pane's
+// hints and the footer Tools hints get there.
 
 pragma ComponentBehavior: Bound
 
@@ -85,6 +90,10 @@ Item {
     // appearing to do nothing.
     signal scanRequested(var items, int mode)
     signal scanNoop(string message)
+
+    // Hovered right-click item description, read by the host's log bar;
+    // clears when the menu closes.
+    property string menuHint: ""
 
     readonly property int _numW: 100
 
@@ -130,25 +139,38 @@ Item {
     // Right-click menu for the row list. "Scan track / album gain" generate values
     // for the current scope; "Clear" stages empty values across it (the removal is
     // written on Apply / OK like any other staged edit, so Cancel undoes it). Themed
-    // to match the app's other menus.
+    // to match the app's other menus. Hover descriptions feed menuHint, which the
+    // host's log bar displays. "selected (or all)" is the scope rule of this
+    // menu (the selection, falling back to every row when nothing is
+    // selected), as opposed to the window-wide Tools entries; the hints stay
+    // within 72 characters so they fit the bar at the window's minimum width.
     ThemedMenu {
         id: rgRowMenu
+        onClosed: pane.menuHint = ""
 
         ThemedMenuItem {
             text: "Scan track gain"
+            property string hint: "Measure gain and peak of the selected (or all) tracks"
+            onHoveredChanged: if (hovered) pane.menuHint = hint
             onTriggered: pane._requestScan(0)
         }
         ThemedMenuItem {
             text: "Scan album gain (as one album)"
+            property string hint: "Measure the selected (or all) tracks as one album"
+            onHoveredChanged: if (hovered) pane.menuHint = hint
             onTriggered: pane._requestScan(1)
         }
         ThemedMenuItem {
             text: "Scan album gain (multiple albums, by tags)"
+            property string hint: "Group the selected (or all) tracks by album tags; measure each album separately"
+            onHoveredChanged: if (hovered) pane.menuHint = hint
             onTriggered: pane._requestScan(2)
         }
         MenuSeparator {}
         ThemedMenuItem {
             text: "Clear ReplayGain information"
+            property string hint: "Clear ReplayGain on the selected (or all) tracks"
+            onHoveredChanged: if (hovered) pane.menuHint = hint
             onTriggered: {
                 // Selection-scoped (allRows false): the model applies the same
                 // revert-on-equal staging per field, one recompute per call.

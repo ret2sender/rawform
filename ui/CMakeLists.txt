@@ -380,6 +380,7 @@ qt_add_qml_module(rawform
         Sources/qml/components/PlaybackSettingsPane.qml
         Sources/qml/components/PlaylistDialogs.qml
         Sources/qml/components/PlaylistTabBar.qml
+        Sources/qml/components/PropertiesLogBar.qml
         Sources/qml/components/ReplayGainPropertiesPane.qml
         Sources/qml/components/ReplayGainScanProgress.qml
         Sources/qml/components/ReplayGainSettingsPane.qml

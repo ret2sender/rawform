@@ -43,11 +43,16 @@
 // On top of the base pane: field-row selection (click / Ctrl-click /
 // Shift-click / Ctrl+A, orthogonal to the track selection) and a right-click
 // context menu wiring Edit and Edit-in-place (single row only), Add field,
-// Remove (Del), a blank-space Add menu, a bottom hover-hint line, and the
-// clipboard and transform actions. Row selection happens on PRESS, not click,
-// with click-hold-drag range selection (see the drag-select block below).
-// This stays a separate component from MetadataView (the read-only renderer
-// used by the dock and the Details tab).
+// Remove (Del), a blank-space Add menu, and the clipboard and transform
+// actions. Row selection happens on PRESS, not click, with click-hold-drag
+// range selection (see the drag-select block below). This stays a separate
+// component from MetadataView (the read-only renderer used by the dock and
+// the Details tab).
+//
+// Messages: the pane renders none of its own. It exposes hintText (an error
+// / status message) and menuHint (the hovered context-menu description) as
+// plain properties, and the host window folds them into its single log bar
+// above the tab content, alongside its own Tools hints and status.
 
 pragma ComponentBehavior: Bound
 
@@ -66,11 +71,15 @@ Item {
     readonly property int nameColumnWidth: 120
 
     // Keyboard-focused row (for F2 / Enter / arrow nav), and the row whose inline
-    // editor is open (-1 = none). The bottom hint line shows distribution errors.
+    // editor is open (-1 = none).
     property int currentRow: -1
     property int editingRow: -1
-    property string hintText: ""        // red: an error / status message
-    property string menuHint: ""        // neutral: hovered context-menu description
+    // Outward message slots, read by the host's log bar (see the banner):
+    // hintText carries an error (a paste distribution failure) and clears on
+    // the next selection change or commit; menuHint carries the hovered
+    // context-menu description and clears when the menu closes.
+    property string hintText: ""
+    property string menuHint: ""
 
     // Field-row multi-selection, over editable (Field / Custom) rows only,
     // and orthogonal to which TRACKS are being edited. Drives the row highlight and
@@ -430,7 +439,7 @@ Item {
             Item {
                 id: listArea
                 width: parent.width
-                height: parent.height - 22 - hintBar.height
+                height: parent.height - 22
 
                 MouseArea {
                     anchors.fill: parent
@@ -763,32 +772,13 @@ Item {
                     }
                 }
             }
-
-            // ----- bottom hint line: red error, else menu-hover hint -------
-            Rectangle {
-                id: hintBar
-                width: parent.width
-                height: 18
-                color: Theme.headerBand
-                Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: Theme.separator }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left; anchors.leftMargin: 8
-                    text: root.hintText !== "" ? root.hintText : root.menuHint
-                    color: root.hintText !== "" ? Theme.dangerSoft : Theme.accentSoft
-                    font.bold: root.hintText === "" && root.menuHint !== ""
-                    font.family: root.uiFont; font.pixelSize: 11
-                    elide: Text.ElideRight
-                    width: parent.width - 16
-                }
-            }
         }
     }
 
     // Context menu (row actions) and blank-space menu (Add only), one ThemedMenu
     // switched by _menuBlank. Item visibility is gated by the selection; collapsing
     // height to 0 when hidden keeps the menu from leaving gaps. Hover descriptions
-    // feed the bottom hint line.
+    // feed menuHint, which the host's log bar displays.
     ThemedMenu {
         id: fieldMenu
         onClosed: root.menuHint = ""

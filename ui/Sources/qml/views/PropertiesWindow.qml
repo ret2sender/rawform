@@ -87,8 +87,18 @@
 // disk through the owning tab's reloader and re-pulls all three tabs, DISCARDING staged
 // edits by design (it is the take-disk-truth action). It runs under the same _applying
 // gate as Apply but with its own token (_infoReloadToken), so the apply and reload
-// sequencers can never complete each other through the shared pathsReloaded handler. Menu
-// hover hints surface in the footer's left text slot while the menu is open.
+// sequencers can never complete each other through the shared pathsReloaded handler.
+//
+// Messages: ONE surface, the PropertiesLogBar between the tab strip and the
+// tab content. Everything transient the window or its panes produce is composed
+// into it by priority (see the bar's binding): a menu hover hint (the Tools
+// menu, or the visible pane's right-click menu) while a menu is open, else
+// the busy label while a pass runs, else the visible pane's own error, else
+// the window status (_statusMsg / _statusLevel, set through _setStatus).
+// The panes render no messages of their own; they expose menuHint / hintText
+// properties and this window reads them. Sitting above the panes, the bar is
+// out of every popup's path (the Tools menu opens upward from the footer, the
+// panes' context menus downward from the cursor).
 //
 // Menu layout: metadata actions first (Add new field, Auto track number,
 // Remove tags), then a ReplayGain submenu holding all five RG entries, then
@@ -152,7 +162,11 @@ Window {
     property int _reloadToken: -1
     property bool _applying: false
     property bool _closeAfter: false
+    // Window status for the log bar: the message and its severity (info |
+    // warning | error, the bar's level vocabulary). Always set together
+    // through _setStatus so the color can never lag the text.
     property string _statusMsg: ""
+    property string _statusLevel: "info"
     // What the footer's busy slot reads while _applying is up: "Applying..."
     // for the Apply / OK sequencer, "Reloading..." for the Tools reload.
     // _applying itself stays the single any-file-operation gate for both.
@@ -161,8 +175,8 @@ Window {
     // _reloadToken so the shared onPathsReloaded handler routes each pass to
     // its own finisher and the two sequencers can never complete each other.
     property int _infoReloadToken: -1
-    // Hover hint of the highlighted Tools menu item, shown in the footer's
-    // left text slot while non-empty; the menu clears it on close.
+    // Hover hint of the highlighted Tools menu item, shown in the log bar
+    // while non-empty; the menu clears it on close.
     property string toolsHint: ""
 
     // Edit Value dialog (multi-track editing) overlay visibility.
@@ -210,6 +224,14 @@ Window {
 
     function _closeWindow() {
         propertiesWindow.close() // -> onClosing -> destroy
+    }
+
+    // Set (or clear, with an empty message) the window status shown in the
+    // log bar. Failures are errors; a pass that had nothing to act on, or a
+    // staged intent worth confirming, is a warning.
+    function _setStatus(msg, level) {
+        propertiesWindow._statusMsg = msg
+        propertiesWindow._statusLevel = level === undefined ? "info" : level
     }
 
     // Reliable liveness probe for the captured tab references (_model, reloader),
@@ -424,7 +446,7 @@ Window {
         metaModel.removeAllFields()
         rgModel.clearAllReplayGain()
         propertiesWindow._stripAllStaged = true
-        propertiesWindow._statusMsg = "Remove tags staged; Apply / OK writes it."
+        propertiesWindow._setStatus("Remove tags staged; Apply / OK writes it.", "warning")
     }
 
     function _apply(closeAfter) {
@@ -458,7 +480,7 @@ Window {
         propertiesWindow._touchedPaths = Object.keys(touched)
 
         propertiesWindow._closeAfter = closeAfter
-        propertiesWindow._statusMsg = ""
+        propertiesWindow._setStatus("")
         propertiesWindow._busyText = "Applying\u2026"
         propertiesWindow._applying = true
         propertiesWindow._metaFailed = []
@@ -537,7 +559,8 @@ Window {
 
         var failed = propertiesWindow._metaFailed.concat(propertiesWindow._rgFailed)
         if (failed.length > 0)
-            propertiesWindow._statusMsg = failed.length + " file(s) could not be written."
+            propertiesWindow._setStatus(failed.length + " file(s) could not be written.",
+                                        "error")
         // The strip intent is consumed by the pass that carried it,
         // success or not; a failure is reported above and Remove tags can be
         // re-invoked. (The METADATA staging's survival on total failure is a
@@ -573,7 +596,8 @@ Window {
             return
         if (!propertiesWindow._alive(propertiesWindow.reloader)
                 || !propertiesWindow._alive(propertiesWindow._model)) {
-            propertiesWindow._statusMsg = "Owning playlist is gone; nothing to reload."
+            propertiesWindow._setStatus("Owning playlist is gone; nothing to reload.",
+                                        "warning")
             return
         }
         // Unique file paths from the durable identity keys (subsong siblings
@@ -588,7 +612,7 @@ Window {
         metaPane.closeEdit()
         rgPane.closeAnyEditor()
         propertiesWindow._stripAllStaged = false
-        propertiesWindow._statusMsg = ""
+        propertiesWindow._setStatus("")
         propertiesWindow._busyText = "Reloading\u2026"
         propertiesWindow._applying = true
         propertiesWindow._infoReloadToken =
@@ -612,7 +636,7 @@ Window {
         } else {
             // Nothing left to re-pull from; the panes keep showing the
             // open-time snapshot, staged edits included.
-            propertiesWindow._statusMsg = "Tracks are no longer in the playlist."
+            propertiesWindow._setStatus("Tracks are no longer in the playlist.", "warning")
         }
         propertiesWindow._applying = false
     }
@@ -640,7 +664,7 @@ Window {
     // Off-thread RG scanner. Driven by the pane's scanRequested; on completion it
     // stages the measured values back into the pane (so they commit through the
     // normal Apply / OK), or, if canceled, stages nothing. Failures and the noop
-    // case surface in the footer status line.
+    // case surface in the log bar.
     ReplayGainScanController { id: scanController }
 
     Connections {
@@ -651,8 +675,8 @@ Window {
             if (results.length > 0)
                 rgModel.stageScanResults(results)
             if (failedPaths.length > 0)
-                propertiesWindow._statusMsg =
-                    failedPaths.length + " file(s) could not be scanned."
+                propertiesWindow._setStatus(failedPaths.length + " file(s) could not be scanned.",
+                                            "error")
         }
     }
 
@@ -787,6 +811,40 @@ Window {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.separatorStrong }
 
+            // ----- log bar: the window's one message surface ---------------
+            // Above the panes, where no popup reaches it (see the component's
+            // banner). Aligned with the panes: 14 px sides, 10 px under the
+            // separator, and the panes' own 10 px top margin is the gap below.
+            // Priority, top to bottom: a menu hover hint (Tools, or the
+            // VISIBLE pane's right-click menu), the busy label, the visible
+            // pane's own error, the window status. The pane hints clear
+            // themselves on menu close and the busy label is gated by
+            // _applying, so each tenant yields as soon as it is stale; only the
+            // window status persists until the next _setStatus. Hints and the
+            // busy label read as info; the status carries its own level.
+            PropertiesLogBar {
+                Layout.fillWidth: true
+                Layout.leftMargin: 14
+                Layout.rightMargin: 14
+                Layout.topMargin: 10
+                readonly property string _paneHint:
+                    propertiesWindow.currentTab === 0 ? metaPane.menuHint
+                    : propertiesWindow.currentTab === 2 ? rgPane.menuHint
+                    : ""
+                readonly property string _paneError:
+                    propertiesWindow.currentTab === 0 ? metaPane.hintText : ""
+                text: propertiesWindow.toolsHint.length > 0 ? propertiesWindow.toolsHint
+                    : _paneHint.length > 0 ? _paneHint
+                    : propertiesWindow._applying ? propertiesWindow._busyText
+                    : _paneError.length > 0 ? _paneError
+                    : propertiesWindow._statusMsg
+                level: (propertiesWindow.toolsHint.length > 0
+                        || _paneHint.length > 0
+                        || propertiesWindow._applying) ? "info"
+                     : _paneError.length > 0 ? "error"
+                     : propertiesWindow._statusLevel
+            }
+
             // ----- tab content ---------------------------------------------
             Item {
                 Layout.fillWidth: true
@@ -835,16 +893,16 @@ Window {
                     model: rgModel
 
                     onScanRequested: function (items, mode) {
-                        propertiesWindow._statusMsg = ""
+                        propertiesWindow._setStatus("")
                         scanController.scan(items, mode)
                     }
                     onScanNoop: function (message) {
-                        propertiesWindow._statusMsg = message
+                        propertiesWindow._setStatus(message, "warning")
                     }
                 }
             }
 
-            // ----- footer: status + Apply / OK / Cancel --------------------
+            // ----- footer: Tools + Apply / OK / Cancel ---------------------
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 52
@@ -867,11 +925,11 @@ Window {
                     // info. Scan / clear act over EVERY row through the pane's
                     // all-rows entry points; results stage exactly like the
                     // pane's own right-click menu and commit through the normal
-                    // Apply / OK path. Hover hints feed the footer's left text
-                    // slot and clear when the menu closes; the auto-generated
-                    // submenu TITLE item carries no hint (the parent menu's
-                    // delegate creates it, so there is no per-item hint hook),
-                    // only its children do.
+                    // Apply / OK path. Hover hints feed the log bar through
+                    // toolsHint and clear when the menu closes; the
+                    // auto-generated submenu TITLE item carries no hint (the
+                    // parent menu's delegate creates it, so there is no
+                    // per-item hint hook), only its children do.
                     ThemedMenu {
                         id: toolsMenu
                         x: 0
@@ -895,7 +953,7 @@ Window {
                         }
                         ThemedMenuItem {
                             text: "Remove tags"
-                            property string hint: "Discards all metadata and removes known tag types from tracks being worked with; written on Apply / OK"
+                            property string hint: "Discard all metadata and strip known tag types; written on Apply / OK"
                             onHoveredChanged: if (hovered) propertiesWindow.toolsHint = hint
                             onTriggered: propertiesWindow._removeAllTags()
                         }
@@ -905,25 +963,25 @@ Window {
 
                             ThemedMenuItem {
                                 text: "Clear ReplayGain information"
-                                property string hint: "Stage empty ReplayGain values on every track; written on Apply / OK"
+                                property string hint: "Stage empty ReplayGain values on every track"
                                 onHoveredChanged: if (hovered) propertiesWindow.toolsHint = hint
                                 onTriggered: rgModel.clearAllReplayGain()
                             }
                             ThemedMenuItem {
                                 text: "Scan track gain"
-                                property string hint: "Measure every track's gain and peak; results are staged for review"
+                                property string hint: "Measure every track's gain and peak"
                                 onHoveredChanged: if (hovered) propertiesWindow.toolsHint = hint
                                 onTriggered: rgPane.requestScanAll(0)
                             }
                             ThemedMenuItem {
                                 text: "Scan album gain (as one album)"
-                                property string hint: "Measure all tracks as one album; results are staged for review"
+                                property string hint: "Measure all tracks as one album"
                                 onHoveredChanged: if (hovered) propertiesWindow.toolsHint = hint
                                 onTriggered: rgPane.requestScanAll(1)
                             }
                             ThemedMenuItem {
                                 text: "Scan album gain (multiple albums, by tags)"
-                                property string hint: "Group by album artist / date / album tags and measure each album separately"
+                                property string hint: "Group by album artist / date / album tags; measure each album separately"
                                 onHoveredChanged: if (hovered) propertiesWindow.toolsHint = hint
                                 onTriggered: rgPane.requestScanAll(2)
                             }
@@ -955,27 +1013,6 @@ Window {
                             onTriggered: propertiesWindow._reloadInfo()
                         }
                     }
-                }
-
-                // Footer left text slot: one slot, three tenants in priority
-                // order. The Tools hover hint while the menu is open, the busy
-                // label while a pass runs, else the status / failure message.
-                Text {
-                    anchors.left: toolsBtn.right
-                    anchors.leftMargin: 12
-                    anchors.right: footerButtons.left
-                    anchors.rightMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    elide: Text.ElideRight
-                    visible: text.length > 0
-                    text: propertiesWindow.toolsHint.length > 0 ? propertiesWindow.toolsHint
-                        : propertiesWindow._applying ? propertiesWindow._busyText
-                        : propertiesWindow._statusMsg
-                    color: (propertiesWindow.toolsHint.length > 0 || propertiesWindow._applying)
-                           ? Theme.textInactive
-                           : Theme.dangerSoft
-                    font.family: propertiesWindow.uiFont
-                    font.pixelSize: 12
                 }
 
                 RowLayout {
