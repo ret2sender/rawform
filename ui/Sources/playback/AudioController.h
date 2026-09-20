@@ -412,7 +412,9 @@ public slots:
     /// target clamps to [0, duration]; reaching the end lets the engine's own
     /// finished path run, as a scrub to the end does. A no-op while Stopped or
     /// on an unseekable source. Playing or Paused both work; a Paused seek stays
-    /// Paused at the new spot.
+    /// Paused at the new spot. Every step that moves the target emits
+    /// seekStepped with the EFFECTIVE delta (after clamping), for the view's
+    /// step badge.
     void seekBy(double deltaSeconds);
 
     /// Master volume. setVolume takes the 0..1 slider fraction, clamps it, applies
@@ -454,6 +456,11 @@ signals:
     /// 10 Hz live-bitrate refresh through trackChanged would erase errors instantly.
     void formatSummaryChanged();
     void playingChanged();  ///< playing model or cursor row changed
+    /// A keyboard step (seekBy) moved the seek target by @p deltaSeconds, the
+    /// effective amount after clamping to the track, so a view can show what
+    /// the press actually did ("+5", or "+3" against the end). Not emitted for
+    /// a press that moves nothing (Left at 0:00, Right at the end).
+    void seekStepped(double deltaSeconds);
     void errorOccurred(const QString& message);
     /// A notable non-error event worth a line in the log console: stopping
     /// playback because a tag write targets the loaded file (stopIfPlayingAny,

@@ -299,6 +299,17 @@ Item {
                 onSeekRequested: function (seconds) {
                     audioController.seekSeconds(seconds)
                 }
+
+                // The keyboard step badge, the same split as the seek itself:
+                // the controller reports each accepted step's effective delta,
+                // the bar draws and accumulates it, and this is the one line
+                // that knows both.
+                Connections {
+                    target: audioController
+                    function onSeekStepped(deltaSeconds) {
+                        seekBar.showSeekStep(deltaSeconds)
+                    }
+                }
             }
         }
 

@@ -1081,8 +1081,16 @@ void AudioController::seekBy(double deltaSeconds) {
     if (m_durationSeconds > 0.0 && target > m_durationSeconds) {
         target = m_durationSeconds;
     }
+
+    // A press the clamp swallowed whole moves nothing: no latch, no engine seek
+    // (a flush and re-prime to land where we already are), no badge.
+    const double effective = target - base;
+    if (qFuzzyIsNull(effective)) {
+        return;
+    }
     m_seekTarget = target;
     m_seekOwed   = true;
+    emit seekStepped(effective);
 
     // Leading edge: nothing throttling, so this press seeks now. Inside a
     // window the target just accumulated; the window's timeout commits it.

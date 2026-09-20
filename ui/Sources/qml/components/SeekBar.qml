@@ -39,10 +39,19 @@
 // seeks. Why release-only: a continuous seek per drag tick would each be a
 // real decoder seek that flushes the ring buffer, which would thrash and stutter.
 //
+// THE STEP BADGE. A keyboard seek (the host calls showSeekStep with each step's
+// effective delta) puts a small "+5" / "-5" in the fill's own color just above the
+// tip of the fill. Steps that land while it is showing add up ("+15") and restart
+// its hold; when the hold runs out it puffs away, fading while lifting, and only
+// then does the running total reset, so the next step starts over at its own
+// value. The badge follows the fill's tip, which follows the live position, so it
+// moves with the line the moment a seek lands.
+//
 // LOOK: a gray track with a lavender fill. Every color and size is a property defaulted
 // to the current value, so the look can be retuned without touching any of the logic
-// below. The hover playhead and the time bubble are the only added visuals, and they
-// appear only on hover/scrub.
+// below. The hover playhead, the time bubble and the step badge are the only added
+// visuals; the first two appear only on hover/scrub, the badge only on a keyboard
+// step.
 
 pragma ComponentBehavior: Bound
 
@@ -73,6 +82,14 @@ Item {
     property color bubbleTextColor: Theme.textPrimary
     property real  barHeight: 8
     property real  barRadius: 4
+    // Step badge timing and travel. Pop is the appear scale-in (first step of a
+    // run only), hold is measured from the LAST step, fade is the puff-away,
+    // and lift is how far it rises while fading.
+    property int   stepBadgePopMs: 120
+    property int   stepBadgeHoldMs: 700
+    property int   stepBadgeFadeMs: 250
+    property real  stepBadgeLift: 8
+    property real  stepBadgePopFrom: 0.85
 
     // -----------------------------------------------------------------------
     // Output. Emitted exactly once, on release (click or drag end), with the
@@ -112,6 +129,26 @@ Item {
     // before we call the seek landed and unpin. Seconds, not ratio, so the window
     // does not shrink on long tracks; a couple of 10 Hz ticks of slack.
     property real _seekLandTolerance: 0.5
+
+    // The step badge's running total, in seconds, signed. Zero between runs;
+    // the puff-away's completion is the only thing that zeroes it, so a step
+    // arriving mid-fade still compounds.
+    property real _stepTotal: 0
+
+    // A keyboard step to show. Compounds into the running total, snaps the
+    // badge back to fully visible wherever the run was (holding, fading), and
+    // restarts the hold. Only the first step of a run pops in; later ones must
+    // not, or a held key would flicker. Assignments rather than bindings so
+    // the run's animations can drive the same properties.
+    function showSeekStep(deltaSeconds) {
+        var fresh = root._stepTotal === 0
+        root._stepTotal += deltaSeconds
+        stepBadgeRun.stop()
+        stepBadge.opacity = 1
+        stepBadge.lift = 0
+        stepBadge.scale = fresh ? root.stepBadgePopFrom : 1
+        stepBadgeRun.start()
+    }
 
     // The live position as a 0..1 ratio, clamped and zero-guarded.
     readonly property real _progressRatio:
@@ -237,6 +274,63 @@ Item {
             font.pixelSize: 11
             font.weight: Font.Bold
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // The step badge (see the header). Bare text in the fill color, centered on
+    // the fill's tip just above the bar and clamped to the bar's ends, drawn in
+    // the same free space above the bar as the bubble. Visibility rides on
+    // opacity, which is 0 between runs, so a run that nets to zero ("+5" then
+    // "-5") shows "0" and fades like any other rather than vanishing.
+    // -----------------------------------------------------------------------
+    Text {
+        id: stepBadge
+        // The fade's upward travel, animated separately from y so the position
+        // binding below stays live while the badge lifts.
+        property real lift: 0
+        visible: opacity > 0
+        opacity: 0
+        text: (root._stepTotal > 0 ? "+" : "") + Math.round(root._stepTotal)
+        color: root.fillColor
+        font.family: root.timeFont
+        font.pixelSize: 11
+        font.weight: Font.Bold
+        transformOrigin: Item.Bottom
+        y: track.y - height - 2 - lift
+        x: Math.max(0, Math.min(root.width - width, fill.width - width / 2))
+    }
+
+    // One run of the badge: pop in, hold, then puff away (fade while lifting),
+    // and only at the very end zero the total. showSeekStep restarts this from
+    // the top on every step, which is what makes the hold measure from the
+    // last step and lets a mid-fade step revive the badge at full strength.
+    SequentialAnimation {
+        id: stepBadgeRun
+        NumberAnimation {
+            target: stepBadge
+            property: "scale"
+            to: 1
+            duration: root.stepBadgePopMs
+            easing.type: Easing.OutBack
+        }
+        PauseAnimation { duration: root.stepBadgeHoldMs }
+        ParallelAnimation {
+            NumberAnimation {
+                target: stepBadge
+                property: "opacity"
+                to: 0
+                duration: root.stepBadgeFadeMs
+                easing.type: Easing.InQuad
+            }
+            NumberAnimation {
+                target: stepBadge
+                property: "lift"
+                to: root.stepBadgeLift
+                duration: root.stepBadgeFadeMs
+                easing.type: Easing.OutQuad
+            }
+        }
+        ScriptAction { script: root._stepTotal = 0 }
     }
 
     // -----------------------------------------------------------------------
