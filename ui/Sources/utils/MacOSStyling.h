@@ -48,9 +48,11 @@ class QQmlApplicationEngine;
 ///
 /// Configures the title bar to be transparent with a full-size content view so
 /// the QML content extends behind it, hides the native title text, disables
-/// AppKit's own window dragging (QML's TitleBar MouseArea drives moves via
-/// `startSystemMove()` instead), and measures the native title bar height so
-/// QML can offset its content by exactly that amount.
+/// AppKit's own window dragging (QML's TitleBar drag handler drives moves via
+/// `startSystemMove()` instead), measures the native title bar height so QML
+/// can offset its content by exactly that amount, and publishes the system's
+/// title-bar double-click preference so QML can honor it (AppKit cannot act on
+/// a double-click the Qt content view receives).
 ///
 /// This function is a no-op on non-macOS platforms. In practice the build only
 /// compiles the implementation translation unit on macOS (see CMakeLists.txt),

@@ -130,6 +130,36 @@ ApplicationWindow {
     readonly property int titleBarOffset:
         Qt.platform.os === "osx" ? nativeTitleBarHeight : 0
 
+    // What a title-bar double-click does on macOS, written from C++
+    // (applyMacOSStyling) from the system preference behind System Settings >
+    // Desktop & Dock > "Double-click a window's title bar to": "Maximize"
+    // (zoom, the default), "Minimize", or "None". Ignored on every other
+    // platform, where a double-click always maximizes / restores.
+    property string macTitleBarDoubleClickAction: "Maximize"
+
+    // Title-bar double-click. Native behavior on every platform: Windows and
+    // Linux maximize / restore; macOS obeys the user's preference above. Only
+    // the windowed and maximized states take part: a double-click in
+    // fullscreen has no title bar to land on, and a minimized window cannot
+    // receive one.
+    function _onTitleBarDoubleClicked() {
+        var state = applicationWindow.visibility
+        if (state !== Window.Windowed && state !== Window.Maximized)
+            return
+        var action = Qt.platform.os === "osx"
+                ? applicationWindow.macTitleBarDoubleClickAction : "Maximize"
+        if (action === "None")
+            return
+        if (action === "Minimize") {
+            applicationWindow.showMinimized()
+            return
+        }
+        if (state === Window.Maximized)
+            applicationWindow.showNormal()
+        else
+            applicationWindow.showMaximized()
+    }
+
     // Status line content for the StatusLogBar under the playlist pane. While
     // something is busy, show that live activity; otherwise show the most recent
     // logged event from logStore. The activity strings are shared with the edge
@@ -288,6 +318,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
 
                 onMoveRequested: applicationWindow.startSystemMove()
+                onMaximizeToggleRequested: applicationWindow._onTitleBarDoubleClicked()
             }
 
             ThemedSplitView{

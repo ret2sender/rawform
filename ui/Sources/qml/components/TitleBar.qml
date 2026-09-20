@@ -22,8 +22,17 @@
 //
 // The main window's custom title bar: the rawform logo pinned at a
 // platform-dependent left inset, a fill-width spacer, and the caption buttons
-// (TitleBarControls) at the right. A full-bleed MouseArea emits moveRequested
-// on press so the host can start a system move.
+// (TitleBarControls) at the right. Two full-bleed pointer handlers give it
+// native title-bar behavior: a DragHandler emits moveRequested once the
+// pointer has traveled the drag threshold, so the host can start a system
+// move, and a TapHandler emits maximizeToggleRequested on a double-click.
+//
+// The move starts on DRAG, not on press, and that is load-bearing. A system
+// move hands the pointer to the window manager (or, on Windows, enters the
+// modal move loop) the instant it begins, so Qt never sees the release; had
+// the move started on press, no double-click could ever be detected. Deferring
+// it to the drag threshold also matches every native title bar, which does
+// not move on a click.
 //
 // On macOS the native traffic lights (see applyMacOSStyling) replace the
 // themed controls, which are hidden and disabled there, and the logo inset
@@ -42,14 +51,25 @@ Item {
     implicitHeight: 48
 
     signal moveRequested()
+    signal maximizeToggleRequested()
 
     readonly property bool usesCustomControls: Qt.platform.os !== "osx"
 
-    MouseArea {
-        id: moveArea
-        anchors.fill: parent
+    // Window move. target: null keeps the handler from dragging any item; it
+    // only reports the gesture, and the host does the system move. Going
+    // active means the pointer crossed the drag threshold with the button
+    // held, which is exactly when a native title bar starts moving.
+    DragHandler {
+        target: null
+        onActiveChanged: if (active) root.moveRequested()
+    }
 
-        onPressed: root.moveRequested()
+    // Double-click: maximize / restore (or whatever the platform does with a
+    // title-bar double-click; the host decides). The default DragThreshold
+    // gesture policy cancels the tap as soon as a drag starts, so a move can
+    // never also register as a click.
+    TapHandler {
+        onDoubleTapped: root.maximizeToggleRequested()
     }
 
     RowLayout {

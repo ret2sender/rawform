@@ -26,18 +26,26 @@
 // directly. It bridges from Qt's QQuickWindow to the underlying NSWindow to
 // configure the title bar appearance for rawform.
 //
-// The styling performs four operations:
+// The styling performs five operations:
 //   1. Adds `NSWindowStyleMaskFullSizeContentView` so the Qt content area
 //      extends behind the native title bar.
 //   2. Sets the title bar to transparent and hides the window title text, so
 //      only the traffic-light buttons remain visible over rawform's own QML
 //      title bar.
 //   3. Disables AppKit's default window dragging. rawform's QML TitleBar
-//      MouseArea moves the window via `startSystemMove()`; leaving AppKit
+//      drag handler moves the window via `startSystemMove()`; leaving AppKit
 //      dragging enabled as well would double-drive it.
 //   4. Measures the native title bar height (from the traffic-light buttons'
 //      superview) and passes it to QML as the `nativeTitleBarHeight` property,
 //      so the layout can offset its content by exactly that amount.
+//   5. Publishes the system's title-bar double-click preference (System
+//      Settings > Desktop & Dock > "Double-click a window's title bar to") to
+//      QML as the `macTitleBarDoubleClickAction` property. With the content
+//      view covering the title bar band, the double-click reaches Qt, not
+//      AppKit's title bar, so the native zoom / minimize never fires on its
+//      own; QML performs the action instead, and this property tells it which.
+//      The value is re-read live through key-value observation of the
+//      defaults key, so a change in System Settings applies without a restart.
 //
 // The styling is NOT one-shot. Entering and exiting native fullscreen (the
 // green traffic light on a resizable window), and miniaturize/deminiaturize,
@@ -63,6 +71,7 @@
 #include <QDebug>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
+#include <QString>
 
 /// Observer that owns the styling and keeps it applied across the window
 /// lifecycle events that reset a window's title bar. One instance is created per
@@ -81,7 +90,13 @@
 - (instancetype)initWithQuickWindow:(QQuickWindow*)quickWindow
                            nsWindow:(NSWindow*)nsWindow;
 - (void)applyTitleBarStyling;
+- (void)publishDoubleClickAction;
 @end
+
+/// The global-domain defaults key behind "Double-click a window's title bar
+/// to". Stored values: absent (the default, zoom), "Maximize" (zoom), "Fill"
+/// (newer systems' fill-the-screen variant), "Minimize", or "None".
+static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
 
 @implementation RawformWindowStyler
 
@@ -113,8 +128,46 @@
                    selector:@selector(onDeminiaturize:)
                        name:NSWindowDidDeminiaturizeNotification
                      object:nsWindow];
+
+        // The double-click preference lives in the global defaults domain,
+        // which standardUserDefaults searches, and NSUserDefaults is
+        // KVO-compliant for defaults keys, including changes made by another
+        // process (System Settings). Never removed: this object lives for the
+        // app's lifetime (see applyMacOSStyling).
+        [[NSUserDefaults standardUserDefaults] addObserver:self
+                                                forKeyPath:kDoubleClickActionKey
+                                                   options:0
+                                                   context:nil];
     }
     return self;
+}
+
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary*)change
+                       context:(void*)context {
+    (void)object;
+    (void)change;
+    (void)context;
+    if ([keyPath isEqualToString:kDoubleClickActionKey])
+        [self publishDoubleClickAction];
+}
+
+- (void)publishDoubleClickAction {
+    if (!_quickWindow)
+        return;
+    // Collapse the stored values to the three actions QML distinguishes.
+    // "Fill" is treated as zoom: Qt's showMaximized is the zoom operation, and
+    // the difference between zoom and fill is not worth a fourth branch.
+    NSString* stored = [[NSUserDefaults standardUserDefaults]
+                        stringForKey:kDoubleClickActionKey];
+    NSString* action = @"Maximize";
+    if ([stored isEqualToString:@"Minimize"])
+        action = @"Minimize";
+    else if ([stored isEqualToString:@"None"])
+        action = @"None";
+    _quickWindow->setProperty("macTitleBarDoubleClickAction",
+                              QString::fromNSString(action));
 }
 
 - (void)onWillEnterFullScreen:(NSNotification*)notification {
@@ -240,6 +293,7 @@ void applyMacOSStyling(QQmlApplicationEngine* engine) {
     s_styler = [[RawformWindowStyler alloc] initWithQuickWindow:rootObject
                                                        nsWindow:nsWindow];
     [s_styler applyTitleBarStyling];
+    [s_styler publishDoubleClickAction];
 
     qDebug().noquote() << "applyMacOSStyling: styling applied and observer installed";
 }
