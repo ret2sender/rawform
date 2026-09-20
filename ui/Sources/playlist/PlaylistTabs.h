@@ -240,7 +240,7 @@ public:
 
     /// The tab index owning @p model, -1 when no open tab does (null model, or
     /// the owning tab was closed). Lets QML resolve which tab to switch
-    /// to for the Ctrl+P playing-track reveal, from
+    /// to for the Ctrl+F playing-track reveal, from
     /// audioController.playingModel. Pointer identity only; this object is the
     /// one holder of all models, so a live model is found iff its tab is open.
     Q_INVOKABLE [[nodiscard]] int indexOfModel(PlaylistModel* model) const;

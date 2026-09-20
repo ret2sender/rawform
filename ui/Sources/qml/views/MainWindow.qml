@@ -355,6 +355,10 @@ ApplicationWindow {
                             onNewPlaylistRequested: playlistTabs.newPlaylist("")
                             onOpenPlaylistRequested: playlistDialogs.openOpenPlaylist()
                             onSavePlaylistRequested: playlistDialogs.openSavePlaylist()
+                            // The active tab; closeTab never leaves zero tabs
+                            // (closing the last one spawns a fresh empty one).
+                            onClosePlaylistRequested:
+                                playlistTabs.closeTab(playlistTabs.currentIndex)
 
                             // With a selection: force-reload those files. With
                             // nothing selected: refresh the whole playlist
@@ -373,6 +377,14 @@ ApplicationWindow {
                             }
 
                             onSettingsRequested: settingsWindow.openSettings()
+
+                            // Transport, the same controller calls the
+                            // PlayerBar buttons make, so the menu, its
+                            // shortcuts, and the buttons can never diverge.
+                            onPlayPauseRequested: audioController.playPauseToggle()
+                            onStopRequested: audioController.stop()
+                            onPreviousRequested: audioController.previous()
+                            onNextRequested: audioController.next()
 
                             onAboutRequested: aboutWindow.openAbout()
 

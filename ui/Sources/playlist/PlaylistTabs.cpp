@@ -648,7 +648,7 @@ void PlaylistTabs::renameTab(int idx, const QString& title) {
 }
 
 int PlaylistTabs::indexOfModel(PlaylistModel* model) const {
-    // Pointer identity (the Ctrl+P playing-track reveal). A null model
+    // Pointer identity (the Ctrl+F playing-track reveal). A null model
     // (e.g. audioController.playingModel after its owning tab closed; the
     // controller holds it through a QPointer) falls out naturally: nothing
     // in m_tabs is null-modeled.

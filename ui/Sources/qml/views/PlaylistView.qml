@@ -168,7 +168,7 @@ Item {
     // a failure is handled. -1 when nothing is pending.
     property int _pendingActivateRow: -1
 
-    // A Ctrl+P reveal parked across a tab switch. When the playing
+    // A Ctrl+F reveal parked across a tab switch. When the playing
     // track lives in ANOTHER tab, the key handler sets this and flips
     // tabs.currentIndex; tableView.onModelChanged consumes it (there, not
     // on root, so the position call always acts on the swapped-in model) once
@@ -388,9 +388,11 @@ Item {
         return root.model.selectedRowList(selectionModel)
     }
 
-    // Arrow-key navigation, owned here (TableView's built-in nav is disabled)
+    // Cursor-key navigation, owned here (TableView's built-in nav is disabled)
     // so it reuses the mouse path's helpers and the SAME _anchorRow.
-    //   delta  : +1 for Down, -1 for Up.
+    //   delta  : rows to move from the current row (+1 Down, -1 Up, a page
+    //            for PgDn / PgUp); from no current row, a positive delta
+    //            lands on the first row and a negative one on the last.
     //   extend : true on Shift, grow the contiguous range from the anchor,
     //            exactly like a Shift+click; false, exclusive select + anchor.
     // The lead row is the current index, which both _selectExclusive and
@@ -400,9 +402,24 @@ Item {
         var n = tableView.rows
         if (n <= 0)
             return
-        var cur = selectionModel.currentIndex
-        var curRow = cur.valid ? cur.row : -1
-        var target = curRow < 0 ? (delta > 0 ? 0 : n - 1) : curRow + delta
+        var curRow = root._currentRow
+        _keyMoveTo(curRow < 0 ? (delta > 0 ? 0 : n - 1) : curRow + delta,
+                   extend)
+    }
+
+    // The shared landing for every cursor key (relative moves above, the
+    // absolute Home / End): clamp the target, select it alone or as a range
+    // from the anchor, and keep it in view without centering (the cursor
+    // keys walk; only the reveal commands center). Decided BEFORE the
+    // position call whether the viewport will move (Contain scrolls exactly
+    // when the row is not fully visible), because a far positionViewAtRow
+    // lands through a deferred rebuild and contentY is not yet updated when
+    // the call returns.
+    function _keyMoveTo(target, extend) {
+        var n = tableView.rows
+        if (n <= 0)
+            return
+        var curRow = root._currentRow
         target = Math.max(0, Math.min(target, n - 1))
         if (extend) {
             if (_anchorRow < 0)
@@ -411,7 +428,32 @@ Item {
         } else {
             _selectExclusive(target)
         }
+        var scrolls = !_rowFullyVisible(target)
         tableView.positionViewAtRow(target, TableView.Contain)
+        if (scrolls)
+            _pulseVerticalScrollBar()
+    }
+
+    // Show the vertical scrollbar the way a wheel scroll does. The stock
+    // ScrollBar is visible while `active`, which its attached property sets
+    // from the flickable's moving state, and only a flick or wheel ever sets
+    // that; a positionViewAtRow or a driven contentY moves the view with the
+    // bar hidden. Pulsing active on, then off a tick later (deferred so the
+    // two edges are separate property changes), applies the bar's visible
+    // state at once and starts its own hold-then-fade on release, so a
+    // keyboard scroll and a wheel scroll look identical. Held keys keep
+    // re-entering the visible state, so the bar stays up until the last
+    // press's fade. Callers pulse only when the viewport actually moves.
+    function _pulseVerticalScrollBar() {
+        vScroll.active = true
+        Qt.callLater(function () { vScroll.active = false })
+    }
+
+    // A PgUp / PgDn step: the fully visible rows less one, so one row of
+    // context carries over between pages (the usual list convention), floored
+    // at one row so a tiny viewport still moves.
+    function _pageRows() {
+        return Math.max(1, Math.floor(tableView.height / root._rowHeight) - 1)
     }
 
     // Shared reveal machinery. Rows are fixed-height (_rowHeight, the
@@ -426,7 +468,7 @@ Item {
     }
 
     // The smooth-centering animation, ONLY for the deliberate
-    // commands (Ctrl+F, the in-tab Ctrl+P, the Enter reveal), where the glide
+    // commands (Ctrl+Shift+F, the in-tab Ctrl+F, the Enter reveal), where the glide
     // from the current view to the target reads as intent. Restores, the
     // launch positioning, and the cross-tab reveal stay INSTANT: they run
     // right after a model swap, where an animation would fly in from an
@@ -461,16 +503,19 @@ Item {
             return
         }
         // The SMOOTH glide keeps the direct contentY math: its three callers
-        // (Ctrl+F, in-tab Ctrl+P, the Enter reveal) run on a settled table by
+        // (Ctrl+Shift+F, in-tab Ctrl+F, the Enter reveal) run on a settled table by
         // construction (a user keypress inside the built view), where a
         // driven contentY is safe and animatable.
         var h = root._rowHeight
         var target = row * h - (tableView.height - h) / 2
         var maxY = Math.max(0, tableView.contentHeight - tableView.height)
         target = Math.max(0, Math.min(target, maxY))
+        if (target === tableView.contentY)
+            return
         centerAnim.from = tableView.contentY
         centerAnim.to = target
         centerAnim.start()
+        _pulseVerticalScrollBar()
     }
 
     // The tab's scroll position as its first visible row, for the
@@ -489,7 +534,7 @@ Item {
     // call guarded or clamped against it at swap time acts on the OUTGOING
     // count: a parked row 5000 clamped against yesterday's 91 restores to the
     // top, and the reveal's row guard bails against a stale or mid-rebuild
-    // zero count (the observed switch-without-centering Ctrl+P, cured by a
+    // zero count (the observed switch-without-centering Ctrl+F, cured by a
     // second press once the rebuild had finished). The intent is therefore
     // applied only when tableView.rows === model.rowCount() (the model is the
     // authority; its count is correct the instant it swaps), attempted once
@@ -599,7 +644,7 @@ Item {
         _applyPendingPosition()
     }
 
-    // The in-tab half of the Ctrl+P reveal: plant the focus row on
+    // The in-tab half of the Ctrl+F reveal: plant the focus row on
     // the playing track (NoUpdate: the outline only, the selection is never
     // touched, the focus-only semantics) and center it. Reads the LIVE
     // playing row so the deferred cross-tab path lands on the track playing
@@ -906,7 +951,7 @@ Item {
         _widthsAcrossColumnRemoval = null
         if (tabs)
             applyWidths(tabs.activeWidths())
-        // The pending Ctrl+P reveal and the per-tab scroll restore
+        // The pending Ctrl+F reveal and the per-tab scroll restore
         // both live in tableView.onModelChanged, NOT here: this handler can
         // run before the TableView's own model binding has propagated
         // (sibling bindings of root.model, unspecified order), and a position
@@ -1367,7 +1412,7 @@ Item {
                         // has definitely swapped at this point), but APPLY it
                         // through _applyPendingPosition, which waits for the
                         // layout's row count to catch up with the model's (see
-                        // the note at the property). A parked Ctrl+P reveal
+                        // the note at the property). A parked Ctrl+F reveal
                         // WINS over the scroll restore (the whole point of the
                         // switch was the reveal); the parking is cleared
                         // consumed or not, so an unrelated switch can never
@@ -1432,28 +1477,54 @@ Item {
                     // after takeoff and every tab "opened at the top" despite a correctly
                     // persisted and parked position. False makes every programmatic
                     // positioning a synchronous jump with no flight to cancel, which is
-                    // also the intended instant feel for the arrows, Ctrl+F, Ctrl+P, and
+                    // also the intended instant feel for the cursor keys, the reveals and
                     // the restores. User flicking is unaffected (animate only governs
                     // positionViewAt* calls).
                     animate: false
 
                     // Keyboard navigation + selection, owned here so it shares
                     // the mouse path's _anchorRow (see the selection note above).
-                    //   Up / Down        -> move current row, select it only
-                    //   Shift+Up / Down   -> grow the range from _anchorRow
+                    // The cursor keys form one list model: each moves the
+                    // current row and selects it alone, and Shift on any of
+                    // them grows the range from _anchorRow instead.
+                    //   Up / Down          -> one row
+                    //   PgUp / PgDn        -> one page (_pageRows)
+                    //   Home / End         -> the first / last row
+                    // Shift+Home / End with no current row is a no-op (the
+                    // range would have no start); the plain keys land on the
+                    // edge row, as Up / Down do from nothing.
                     // Ctrl/Cmd+A selects all; Delete/Backspace removes the
                     // selection (Backspace is the "Delete" key on macOS).
                     // Enter also reveals an off-screen current row;
-                    // Ctrl/Cmd+F centers the selected tracks' area;
-                    // Ctrl/Cmd+P reveals the playing track, switching to its
-                    // owning tab first when needed.
+                    // Ctrl/Cmd+F reveals the playing track, switching to its
+                    // owning tab first when needed;
+                    // Ctrl/Cmd+Shift+F centers the selected tracks' area.
+                    // Keys that have a menu entry (the transport set, the
+                    // playlist file commands, Settings) are NOT here: their
+                    // menu items own them (see ThemedMenuItem's shortcut).
                     Keys.onPressed: function (event) {
                         var shift = (event.modifiers & Qt.ShiftModifier) !== 0
+                        var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+                                   || (Qt.platform.os === "osx"
+                                       && (event.modifiers & Qt.MetaModifier) !== 0)
                         if (event.key === Qt.Key_Down) {
                             root._keyMoveCurrent(1, shift)
                             event.accepted = true
                         } else if (event.key === Qt.Key_Up) {
                             root._keyMoveCurrent(-1, shift)
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_PageDown) {
+                            root._keyMoveCurrent(root._pageRows(), shift)
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_PageUp) {
+                            root._keyMoveCurrent(-root._pageRows(), shift)
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Home
+                                   || event.key === Qt.Key_End) {
+                            var edge = event.key === Qt.Key_Home
+                                     ? 0 : tableView.rows - 1
+                            if (!shift || root._currentRow >= 0)
+                                root._keyMoveTo(edge, shift)
                             event.accepted = true
                         } else if ((event.key === Qt.Key_Return
                                     || event.key === Qt.Key_Enter)
@@ -1481,16 +1552,10 @@ Item {
                                     root._centerRow(ci.row, true)
                             }
                             event.accepted = true
-                        } else if (event.key === Qt.Key_A
-                                && (event.modifiers & Qt.ControlModifier
-                                    || (Qt.platform.os === "osx"
-                                        && event.modifiers & Qt.MetaModifier))) {
+                        } else if (event.key === Qt.Key_A && ctrl) {
                             root._selectAll()
                             event.accepted = true
-                        } else if (event.key === Qt.Key_F
-                                && (event.modifiers & Qt.ControlModifier
-                                    || (Qt.platform.os === "osx"
-                                        && event.modifiers & Qt.MetaModifier))) {
+                        } else if (event.key === Qt.Key_F && ctrl && shift) {
                             // Center the selected tracks' area: the
                             // MIDPOINT of the selection's bounding range, so a
                             // scattered selection centers on its span, not its
@@ -1512,10 +1577,7 @@ Item {
                                 root._centerRow(root._currentRow, true)
                             }
                             event.accepted = true
-                        } else if (event.key === Qt.Key_P
-                                && (event.modifiers & Qt.ControlModifier
-                                    || (Qt.platform.os === "osx"
-                                        && event.modifiers & Qt.MetaModifier))) {
+                        } else if (event.key === Qt.Key_F && ctrl) {
                             // Reveal the playing track. In this tab:
                             // plant the focus row on it and center
                             // (_revealPlayingHere). In another tab: park the
@@ -1561,7 +1623,8 @@ Item {
                     }
                     rowHeightProvider: function (/*row*/) {
                         return root._rowHeight
-                    }                    ScrollBar.vertical: ScrollBar { id: vScroll }
+                    }
+                    ScrollBar.vertical: ScrollBar { id: vScroll }
                     ScrollBar.horizontal: ScrollBar { id: hScroll }
 
                     delegate: Rectangle {

@@ -20,10 +20,10 @@
 
 // ThemedMenuBar.qml
 //
-// The main window's menu bar: File, Edit, View and Help labels in a Row, each
-// with a themed drop-down (ThemedMenu) opened through the host window's
-// openMenu so the popup is positioned under its label, and an Alt+letter
-// shortcut that toggles it.
+// The main window's menu bar: File, Edit, View, Playback and Help labels in
+// a Row, each with a themed drop-down (ThemedMenu) opened through the host
+// window's openMenu so the popup is positioned under its label, and an
+// Alt+letter shortcut that toggles it.
 //
 // Everything the bar can DO is a signal (addFilesRequested, settingsRequested,
 // aboutRequested, ...); the host owns the doing. The bar holds no reference
@@ -31,6 +31,12 @@
 // wiring reads in one place at the host. The only host member it touches is
 // openMenu, resolved through the Window attached property rather than an
 // ancestor id.
+//
+// A command's keyboard shortcut is declared on its menu item (see
+// ThemedMenuItem's `shortcut`): the item owns the trigger and the hint, so a
+// key that reaches the host does so through the same signal as a click on the
+// row. Keys with no menu entry (the playlist cursor and reveal keys) live in
+// PlaylistView instead.
 
 pragma ComponentBehavior: Bound
 
@@ -60,10 +66,15 @@ Rectangle {
     signal newPlaylistRequested()
     signal openPlaylistRequested()
     signal savePlaylistRequested()
+    signal closePlaylistRequested()
     signal reloadSelectedRequested()
     signal removeUnavailableRequested()
     signal settingsRequested()
     signal saveColumnLayoutRequested()
+    signal playPauseRequested()
+    signal stopRequested()
+    signal previousRequested()
+    signal nextRequested()
     signal aboutRequested()
 
     Row {
@@ -120,15 +131,25 @@ Rectangle {
                 MenuSeparator {}
                 ThemedMenuItem {
                     text: "New Playlist"
+                    shortcut: "Ctrl+N"
                     onTriggered: root.newPlaylistRequested()
                 }
                 ThemedMenuItem {
                     text: "Open playlist…"
+                    shortcut: "Ctrl+O"
                     onTriggered: root.openPlaylistRequested()
                 }
                 ThemedMenuItem {
                     text: "Save playlist…"
+                    shortcut: "Ctrl+S"
                     onTriggered: root.savePlaylistRequested()
+                }
+                ThemedMenuItem {
+                    // Closes the active tab; the host owns the tab manager,
+                    // which never leaves zero tabs.
+                    text: "Close playlist"
+                    shortcut: "Ctrl+W"
+                    onTriggered: root.closePlaylistRequested()
                 }
             }
         }
@@ -186,6 +207,7 @@ Rectangle {
                 MenuSeparator {}
                 ThemedMenuItem {
                     text: "Settings\u2026"
+                    shortcut: "Ctrl+P"
                     onTriggered: root.settingsRequested()
                 }
             }
@@ -244,6 +266,79 @@ Rectangle {
                 ThemedMenuItem {
                     text: "Save Column Layout"
                     onTriggered: root.saveColumnLayoutRequested()
+                }
+            }
+        }
+
+        Text {
+            id: playbackMenuLabel
+            color: playbackMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
+            font.family: Theme.uiFont
+            font.pixelSize: 12
+            font.weight: Font.Bold
+            text: "<u>P</u>layback"
+
+            HoverHandler { id: playbackMenuHover }
+
+            Shortcut {
+                context: Qt.ApplicationShortcut
+                sequence: "Alt+P"
+
+                onActivated: playbackMenu.visible
+                    ? playbackMenu.close()
+                    : root.hostWindow.openMenu(playbackMenuLabel, playbackMenu)
+            }
+
+            TapHandler {
+                property bool wasOpenOnPress: false
+
+                onPressedChanged: {
+                    if (pressed)
+                        wasOpenOnPress = playbackMenu.visible
+                }
+
+                onTapped: {
+                    if (wasOpenOnPress)
+                        playbackMenu.close()
+                    else
+                        root.hostWindow.openMenu(playbackMenuLabel, playbackMenu)
+                }
+            }
+
+            ThemedMenu {
+                id: playbackMenu
+
+                // The transport commands, each a twin of a PlayerBar button.
+                // None needs an enabled binding: the controller treats every
+                // one as a state-aware no-op where it does not apply.
+                ThemedMenuItem {
+                    text: "Play / Pause"
+                    shortcut: "Space"
+                    onTriggered: root.playPauseRequested()
+                }
+                ThemedMenuItem {
+                    // The backtick key left of 1 on a US layout; the alias
+                    // makes the shifted tilde on the same key work too.
+                    text: "Stop"
+                    shortcut: "Ctrl+`"
+                    shortcutAliases: ["Ctrl+~"]
+                    onTriggered: root.stopRequested()
+                }
+                MenuSeparator {}
+                ThemedMenuItem {
+                    // The < and > keycaps are the shifted comma and period
+                    // on a US layout; the aliases accept the unshifted key
+                    // so Ctrl plus the keycap works with or without Shift.
+                    text: "Previous"
+                    shortcut: "Ctrl+<"
+                    shortcutAliases: ["Ctrl+,"]
+                    onTriggered: root.previousRequested()
+                }
+                ThemedMenuItem {
+                    text: "Next"
+                    shortcut: "Ctrl+>"
+                    shortcutAliases: ["Ctrl+."]
+                    onTriggered: root.nextRequested()
                 }
             }
         }
