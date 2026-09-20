@@ -100,6 +100,12 @@ Item {
     // __lastClickedIndex. Updated on every click.
     property int _anchorRow: -1
 
+    // How far one Left / Right press moves playback. Five seconds is the
+    // common player default: small enough to land inside a passage, large
+    // enough that crossing a track takes dozens of presses, not hundreds. The
+    // step accumulates across a held key in the controller (seekBy).
+    readonly property real seekStepSeconds: 5
+
     // --- Column reorder drag state -----------------------------------------
     // The model owns the authoritative column order (a permutation over the
     // schema); these are purely the transient gesture state for the header
@@ -1499,6 +1505,10 @@ Item {
                     // Ctrl/Cmd+F reveals the playing track, switching to its
                     // owning tab first when needed;
                     // Ctrl/Cmd+Shift+F centers the selected tracks' area.
+                    // Left / Right (no Ctrl) seek playback by seekStepSeconds;
+                    // the accumulation and rate limiting of a held key live in
+                    // the controller, which also makes them no-ops with no
+                    // seekable track.
                     // Keys that have a menu entry (the transport set, the
                     // playlist file commands, Settings) are NOT here: their
                     // menu items own them (see ThemedMenuItem's shortcut).
@@ -1518,6 +1528,12 @@ Item {
                             event.accepted = true
                         } else if (event.key === Qt.Key_PageUp) {
                             root._keyMoveCurrent(-root._pageRows(), shift)
+                            event.accepted = true
+                        } else if ((event.key === Qt.Key_Right
+                                    || event.key === Qt.Key_Left) && !ctrl) {
+                            audioController.seekBy(event.key === Qt.Key_Right
+                                                   ? root.seekStepSeconds
+                                                   : -root.seekStepSeconds)
                             event.accepted = true
                         } else if (event.key === Qt.Key_Home
                                    || event.key === Qt.Key_End) {

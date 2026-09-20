@@ -66,7 +66,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <cmath>   // std::pow for the volume taper
+#include <cmath>   // std::pow for the volume taper, std::abs for the seek landing
 #include <memory>
 #include <optional>
 #include <string>
@@ -95,6 +95,20 @@ QString rateLedgerPath() {
 
 // The debounce window for coalescing a volume drag's many ticks into one write.
 constexpr int kPersistDebounceMs = 300;
+
+// Relative (keyboard) seeking, see seekBy. The throttle is the shortest spacing
+// between two engine seeks from a held key: each one is a ring flush and
+// re-prime, so 150 ms keeps a held Right at 6 to 7 seeks a second rather than
+// one per auto-repeat, while the accumulated target still advances by a full
+// step per repeat. The tolerance is how close a position report must land to
+// the committed target to count as the seek having arrived (a tick that was
+// already in flight before the command reports the OLD spot, a full step away);
+// it mirrors the scrubber's own landing window. The backstop bounds how long
+// the latch can hold if the landing is never observed (a slow seek, a report
+// coalesced away), the same 600 ms the scrubber uses.
+constexpr int    kSeekRepeatThrottleMs      = 150;
+constexpr double kSeekLandToleranceSeconds  = 0.5;
+constexpr int    kSeekLandBackstopMs        = 600;
 
 // How far into a track the Previous button switches from "step back a track" to
 // "restart the current track". Within the first few seconds Previous goes to the
@@ -386,6 +400,28 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
     connect(&m_volumePersistTimer, &QTimer::timeout,
             this, &AudioController::persistPlaybackSettingsNow);
     loadPlaybackSettings();
+
+    // Relative seeking (see seekBy). The throttle's timeout is the trailing
+    // edge: if presses accumulated past the committed target during the window,
+    // commit once more (which opens the next window); otherwise the window
+    // simply closes and the next press commits immediately again. The backstop
+    // drops a latch whose landing never showed up, but only when no commit is
+    // still owed (the throttle is shorter, so an owed commit always runs first
+    // and re-arms this).
+    m_seekThrottle.setSingleShot(true);
+    m_seekThrottle.setInterval(kSeekRepeatThrottleMs);
+    connect(&m_seekThrottle, &QTimer::timeout, this, [this] {
+        if (m_seekOwed) {
+            commitSeek();
+        }
+    });
+    m_seekLandBackstop.setSingleShot(true);
+    m_seekLandBackstop.setInterval(kSeekLandBackstopMs);
+    connect(&m_seekLandBackstop, &QTimer::timeout, this, [this] {
+        if (!m_seekOwed) {
+            resetSeekLatch();
+        }
+    });
 }
 
 // Out-of-line so the unique_ptr to the (here-complete) EngineListenerBridge can
@@ -566,6 +602,8 @@ void AudioController::applyState(int s) {
         // even though the engine won't push a position tick while Stopped.
         m_positionSeconds = 0.0;
         emit positionChanged();
+        // Nothing to land on any more: a keyboard seek in flight is void.
+        resetSeekLatch();
         // Drop the live bitrate so the format line reverts to the nominal while
         // stopped (and shows the nominal, not a stale live value, on the next
         // resume until the first tick refreshes it). The device outcome drops
@@ -609,6 +647,7 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
     m_seekable        = f.seekable;
     m_durationSeconds = f.durationSeconds;
     m_positionSeconds = 0.0;  // a fresh track starts at 0 until the first tick
+    resetSeekLatch();         // a keyboard seek targeted the PREVIOUS track
     m_liveBitrateKbps = 0;    // show the new track's nominal until the first tick
     m_deviceRateHz     = f.deviceRateHz;   // device outcome, sampled with this track
     m_outputBitPerfect = f.bitPerfect;
@@ -628,6 +667,15 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
 void AudioController::applyPosition(double seconds, int liveBitrateKbps) {
     m_positionSeconds = seconds;
     emit positionChanged();
+
+    // The keyboard-seek landing: the committed target has been reached and no
+    // further commit is owed, so the next step may measure from the live
+    // position again. A report still owed a commit keeps the latch (the
+    // accumulated target is ahead of where this landed).
+    if (m_seekTarget && !m_seekOwed
+        && std::abs(seconds - m_seekCommitted) <= kSeekLandToleranceSeconds) {
+        resetSeekLatch();
+    }
 
     // Refresh the format line only when the live figure actually moves,
     // so a steady CBR/PCM stream does not re-evaluate the binding every tick.
@@ -1009,7 +1057,56 @@ void AudioController::previous() {
     playAt(m_playingModel.data(), row > 0 ? row - 1 : 0);
 }
 
-void AudioController::seekSeconds(double seconds) { m_engine.seek(seconds); }
+void AudioController::seekSeconds(double seconds) {
+    resetSeekLatch();  // the scrubber overrides any keyboard target in flight
+    m_engine.seek(seconds);
+}
+
+void AudioController::seekBy(double deltaSeconds) {
+    // The engine ignores a seek while Stopped and refuses one on an unseekable
+    // source; bail here so no latch is ever armed for a seek that cannot land.
+    if (m_state == Stopped || !m_seekable) {
+        return;
+    }
+
+    // Step from the target in flight when there is one (the position readout
+    // is stale until it lands), else from the live position. Clamp to the
+    // track; a target at the end is a legitimate seek that lets the engine's
+    // finished path advance, exactly like a scrub to the end.
+    const double base   = m_seekTarget ? *m_seekTarget : m_positionSeconds;
+    double       target = base + deltaSeconds;
+    if (target < 0.0) {
+        target = 0.0;
+    }
+    if (m_durationSeconds > 0.0 && target > m_durationSeconds) {
+        target = m_durationSeconds;
+    }
+    m_seekTarget = target;
+    m_seekOwed   = true;
+
+    // Leading edge: nothing throttling, so this press seeks now. Inside a
+    // window the target just accumulated; the window's timeout commits it.
+    if (!m_seekThrottle.isActive()) {
+        commitSeek();
+    }
+}
+
+void AudioController::commitSeek() {
+    m_seekCommitted = *m_seekTarget;
+    m_seekOwed      = false;
+    m_engine.seek(m_seekCommitted);
+    m_seekThrottle.start();
+    m_seekLandBackstop.start();
+}
+
+// Deliberately leaves the throttle running: it spaces PRESSES, so a seek that
+// lands inside its window must not reopen the leading edge for the next
+// auto-repeat, or a fast-landing engine would be back to one seek per repeat.
+void AudioController::resetSeekLatch() {
+    m_seekTarget.reset();
+    m_seekOwed = false;
+    m_seekLandBackstop.stop();
+}
 
 // ===========================================================================
 // Master volume

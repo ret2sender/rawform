@@ -92,6 +92,7 @@
 
 #include <cstddef>  // copyScopeMono's frame-count type
 #include <memory>
+#include <optional>  // the in-flight keyboard seek target
 
 namespace rawform {
 
@@ -390,8 +391,29 @@ public slots:
     void previous();
 
     /// Reposition the current track. The scrubber that drives this interactively
-    /// is the view's concern; the engine call lands here.
+    /// is the view's concern; the engine call lands here. An absolute seek also
+    /// drops any relative seek still in flight (see seekBy), so the next step
+    /// key measures from where the scrubber put playback, not from a stale
+    /// keyboard target.
     void seekSeconds(double seconds);
+
+    /// Reposition RELATIVE to where playback is heading, for the keyboard step
+    /// keys. Two facts make this more than positionSeconds + delta. The engine
+    /// seek is asynchronous, so positionSeconds keeps reporting the OLD spot
+    /// until the engine has processed the command; and a held key auto-repeats
+    /// at 25 to 30 presses a second, each of which would otherwise compute the
+    /// same stale target and cost a full ring flush and re-prime. So the
+    /// controller keeps the target of the seek in flight and steps from THAT
+    /// while it has not landed (the latch clears when a position report lands
+    /// within tolerance of the committed target, or on a backstop timer), and
+    /// commits at most one engine seek per throttle window: the first press
+    /// seeks at once, presses inside the window accumulate into the target,
+    /// and the window's end commits the accumulated target if it moved. The
+    /// target clamps to [0, duration]; reaching the end lets the engine's own
+    /// finished path run, as a scrub to the end does. A no-op while Stopped or
+    /// on an unseekable source. Playing or Paused both work; a Paused seek stays
+    /// Paused at the new spot.
+    void seekBy(double deltaSeconds);
 
     /// Master volume. setVolume takes the 0..1 slider fraction, clamps it, applies
     /// the power-law taper, pushes the resulting linear gain to the engine, and
@@ -540,6 +562,12 @@ private:
     void schedulePlaybackPersist();   ///< (re)arm the debounce timer
     void flushPlaybackSettings();     ///< write immediately if a persist is pending
 
+    /// Relative-seek plumbing (see seekBy). commitSeek sends the accumulated
+    /// target to the engine and opens a throttle window; resetSeekLatch drops the
+    /// whole in-flight state (track change, Stopped, an absolute seek).
+    void commitSeek();
+    void resetSeekLatch();
+
     /// Playing-model structural reactions (cursor self-heals; we re-derive the
     /// tail and refresh the highlight).
     void onPlayingRowsChanged();
@@ -585,6 +613,22 @@ private:
     /// / destruction) still call recomputeLookahead() directly, which cancels any
     /// pending coalesce so nothing double-posts.
     QTimer m_lookaheadCoalesce;
+
+    /// Relative-seek state (see seekBy). m_seekTarget is the accumulated target
+    /// while a keyboard seek is in flight, the base the next step adds to;
+    /// nullopt when nothing is pending, so a step measures from the live
+    /// position. m_seekOwed says the target moved since the last commit (a
+    /// flag, not a value comparison: a Right then Left inside one window nets
+    /// back to the committed value and must still commit). m_seekCommitted is
+    /// the value most recently sent to the engine, the one a position report
+    /// can land on. The throttle timer is the commit window and outlives a
+    /// landing on purpose (it rate-limits presses, not seeks); the backstop
+    /// clears a latch whose landing was never observed.
+    std::optional<double> m_seekTarget;
+    bool                  m_seekOwed      = false;
+    double                m_seekCommitted = 0.0;
+    QTimer                m_seekThrottle;
+    QTimer                m_seekLandBackstop;
 
     /// Published now-playing snapshot (GUI thread only).
     int     m_state            = Stopped;
