@@ -28,6 +28,10 @@
 // truth, see `store` below) and drive the modified-from-default accent dot
 // and the right-click "Reset to default", exactly as the sibling panes do.
 //
+// Each row is a label and a control in a RowLayout; every label takes the width
+// of the widest one (labelColumnWidth), so the controls line up in a second
+// column while each row stays one item with its own right-click reset area.
+//
 // The four rows are consumed by MetadataEditor. They only affect
 // MP3 files; every other format stays on the generic tag write path, which is
 // why they live on a format-named sub-page rather than the Tagging root.
@@ -68,6 +72,18 @@ Item {
     // and instantiates anywhere.
     property SettingsStore store: null
     property string uiFont: Theme.uiFont
+
+    // The label column is as wide as the widest label, so every row's control
+    // starts at the same x. A label's implicit width is constant (its modified
+    // dot hides by opacity and keeps its slot), so the column does not move when
+    // a dot appears.
+    readonly property real labelColumnWidth: Math.max(id3v2VersionLabel.implicitWidth,
+                                                      id3v1Label.implicitWidth,
+                                                      apeLabel.implicitWidth,
+                                                      encodingLabel.implicitWidth)
+
+    // The gap between the label column and the control column.
+    readonly property int columnGutter: 24
 
     // Shared right-click reset menu, same shape as the sibling panes.
     ThemedMenu {
@@ -118,18 +134,29 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "ID3v2 version"
-                modified: pane.settings && pane.settings.id3v2Version !== pane.store.id3v2VersionDefault
-            }
+            // Fills the row rather than taking only a width, so the layout's
+            // default vertical centering works against the full row height.
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            SegmentSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                labels: ["ID3v2.3", "ID3v2.4"]
-                segWidth: 72
-                value: pane.settings ? pane.settings.id3v2Version : 0
-                onPicked: function (v) { if (pane.settings) pane.settings.id3v2Version = v }
+                SettingsRowLabel {
+                    id: id3v2VersionLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "ID3v2 version"
+                    modified: pane.settings && pane.settings.id3v2Version !== pane.store.id3v2VersionDefault
+                }
+
+                SegmentSelect {
+                    labels: ["ID3v2.3", "ID3v2.4"]
+                    segWidth: 72
+                    value: pane.settings ? pane.settings.id3v2Version : 0
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.id3v2Version = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -161,18 +188,27 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "ID3v1 tag"
-                modified: pane.settings && pane.settings.id3v1Mode !== pane.store.id3v1ModeDefault
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            SegmentSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                labels: ["Write", "Preserve", "Strip"]
-                segWidth: 68
-                value: pane.settings ? pane.settings.id3v1Mode : 0
-                onPicked: function (v) { if (pane.settings) pane.settings.id3v1Mode = v }
+                SettingsRowLabel {
+                    id: id3v1Label
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "ID3v1 tag"
+                    modified: pane.settings && pane.settings.id3v1Mode !== pane.store.id3v1ModeDefault
+                }
+
+                SegmentSelect {
+                    labels: ["Write", "Preserve", "Strip"]
+                    segWidth: 68
+                    value: pane.settings ? pane.settings.id3v1Mode : 0
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.id3v1Mode = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -209,18 +245,27 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "APEv2 tag"
-                modified: pane.settings && pane.settings.apeMode !== pane.store.apeModeDefault
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            SegmentSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                labels: ["Preserve", "Strip"]
-                segWidth: 68
-                value: pane.settings ? pane.settings.apeMode : 0
-                onPicked: function (v) { if (pane.settings) pane.settings.apeMode = v }
+                SettingsRowLabel {
+                    id: apeLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "APEv2 tag"
+                    modified: pane.settings && pane.settings.apeMode !== pane.store.apeModeDefault
+                }
+
+                SegmentSelect {
+                    labels: ["Preserve", "Strip"]
+                    segWidth: 68
+                    value: pane.settings ? pane.settings.apeMode : 0
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.apeMode = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -241,18 +286,27 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Text encoding"
-                modified: pane.settings && pane.settings.id3v2Encoding !== pane.store.id3v2EncodingDefault
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            SegmentSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                labels: ["Latin-1", "UTF-16", "UTF-8"]
-                segWidth: 62
-                value: pane.settings ? pane.settings.id3v2Encoding : 1
-                onPicked: function (v) { if (pane.settings) pane.settings.id3v2Encoding = v }
+                SettingsRowLabel {
+                    id: encodingLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Text encoding"
+                    modified: pane.settings && pane.settings.id3v2Encoding !== pane.store.id3v2EncodingDefault
+                }
+
+                SegmentSelect {
+                    labels: ["Latin-1", "UTF-16", "UTF-8"]
+                    segWidth: 62
+                    value: pane.settings ? pane.settings.id3v2Encoding : 1
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.id3v2Encoding = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -282,33 +336,6 @@ Item {
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // Label plus modified-from-default dot, matching the sibling panes.
-    // -----------------------------------------------------------------------
-    component RowLabel: Row {
-        property string text: ""
-        property bool modified: false
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: parent.text
-            color: Theme.textSecondary
-            font.family: pane.uiFont
-            font.pixelSize: 12
-        }
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: parent.modified
-            width: 6
-            height: 6
-            radius: 3
-            color: Theme.accentSoft
-        }
     }
 
     // -----------------------------------------------------------------------

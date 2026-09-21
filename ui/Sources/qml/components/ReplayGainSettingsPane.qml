@@ -28,11 +28,16 @@
 // "Reset to default" that sets it back.
 //
 // Rows are written out explicitly (mode, two pre-amps, clip prevention, and the
-// scan skip-existing toggle) rather than through a slotted
-// row component, which keeps the chrome and the injected control cleanly separate
-// without fighting QML's default-property rules. The controls themselves
-// (segmented mode, dB steppers, a toggle) are local inline components, styled to
-// the app rather than native, so the whole page stays one file.
+// scan skip-existing toggle) rather than through a slotted row component, which
+// keeps the chrome and the injected control cleanly separate without fighting
+// QML's default-property rules. Each row is a label and a control in a RowLayout;
+// every label takes the width of the widest one (labelColumnWidth), so the
+// controls line up in a second column while each row stays one item with its own
+// right-click area.
+//
+// The label and the switch are shared components (SettingsRowLabel, ThemedSwitch).
+// The controls only this page uses (segmented mode, dB steppers) are local inline
+// components, styled to the app rather than native.
 //
 // The right-click reset MouseArea is the LOWEST child of each row and accepts only
 // the right button, so the control above handles its own left interaction and
@@ -48,7 +53,8 @@ import com.rawform.app
 Item {
     id: pane
 
-    // The window's staged edit object: { mode, preampDb, untaggedPreampDb, clip }.
+    // The window's staged edit object:
+    // { mode, preampDb, untaggedPreampDb, clip, skipExisting }.
     property StagedSettings settings: null
 
     // The AudioController whose replayGain*Default constants are the reset
@@ -56,6 +62,19 @@ Item {
     // the host rather than read as an ambient global.
     property AudioController controller: null
     property string uiFont: Theme.uiFont
+
+    // The label column is as wide as the widest label, so every row's control
+    // starts at the same x. A label's implicit width is constant (its modified
+    // dot hides by opacity and keeps its slot), so the column does not move when
+    // a dot appears.
+    readonly property real labelColumnWidth: Math.max(modeLabel.implicitWidth,
+                                                      preampLabel.implicitWidth,
+                                                      untaggedPreampLabel.implicitWidth,
+                                                      clipLabel.implicitWidth,
+                                                      skipExistingLabel.implicitWidth)
+
+    // The gap between the label column and the control column.
+    readonly property int columnGutter: 24
 
     function _near(a, b) { return Math.abs(a - b) < 1e-9 }
 
@@ -109,16 +128,28 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Mode"
-                modified: pane.settings && pane.settings.mode !== pane.controller.replayGainModeDefault
-            }
+            // Fills the row rather than taking only a width, so the layout's
+            // default vertical centering works against the full row height
+            // whatever the control's own height.
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            ModeSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                value: pane.settings ? pane.settings.mode : 0
-                onPicked: function (v) { if (pane.settings) pane.settings.mode = v }
+                SettingsRowLabel {
+                    id: modeLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Mode"
+                    modified: pane.settings && pane.settings.mode !== pane.controller.replayGainModeDefault
+                }
+
+                ModeSelect {
+                    value: pane.settings ? pane.settings.mode : 0
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.mode = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -138,17 +169,26 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Pre-amp (tagged)"
-                modified: pane.settings && !pane._near(pane.settings.preampDb,
-                                                       pane.controller.replayGainPreampDbDefault)
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            DbField {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                value: pane.settings ? pane.settings.preampDb : 0
-                onMoved: function (v) { if (pane.settings) pane.settings.preampDb = v }
+                SettingsRowLabel {
+                    id: preampLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Pre-amp (tagged)"
+                    modified: pane.settings && !pane._near(pane.settings.preampDb,
+                                                           pane.controller.replayGainPreampDbDefault)
+                }
+
+                DbField {
+                    value: pane.settings ? pane.settings.preampDb : 0
+                    onMoved: function (v) {
+                        if (pane.settings) pane.settings.preampDb = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -168,17 +208,26 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Pre-amp (untagged)"
-                modified: pane.settings && !pane._near(pane.settings.untaggedPreampDb,
-                                                       pane.controller.replayGainUntaggedPreampDbDefault)
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            DbField {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                value: pane.settings ? pane.settings.untaggedPreampDb : 0
-                onMoved: function (v) { if (pane.settings) pane.settings.untaggedPreampDb = v }
+                SettingsRowLabel {
+                    id: untaggedPreampLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Pre-amp (untagged)"
+                    modified: pane.settings && !pane._near(pane.settings.untaggedPreampDb,
+                                                           pane.controller.replayGainUntaggedPreampDbDefault)
+                }
+
+                DbField {
+                    value: pane.settings ? pane.settings.untaggedPreampDb : 0
+                    onMoved: function (v) {
+                        if (pane.settings) pane.settings.untaggedPreampDb = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -198,16 +247,23 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Prevent clipping"
-                modified: pane.settings && pane.settings.clip !== pane.controller.replayGainClipPreventionDefault
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            Toggle {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                checked: pane.settings ? pane.settings.clip : true
-                onToggled: if (pane.settings) pane.settings.clip = !pane.settings.clip
+                SettingsRowLabel {
+                    id: clipLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Prevent clipping"
+                    modified: pane.settings && pane.settings.clip !== pane.controller.replayGainClipPreventionDefault
+                }
+
+                ThemedSwitch {
+                    checked: pane.settings ? pane.settings.clip : true
+                    onToggled: if (pane.settings) pane.settings.clip = checked
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -230,47 +286,27 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Skip files with existing info when scanning"
-                modified: pane.settings && pane.settings.skipExisting !== pane.controller.replayGainScanSkipExistingDefault
-            }
+            RowLayout {
+                anchors.fill: parent
+                spacing: pane.columnGutter
 
-            Toggle {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                checked: pane.settings ? pane.settings.skipExisting : false
-                onToggled: if (pane.settings) pane.settings.skipExisting = !pane.settings.skipExisting
+                SettingsRowLabel {
+                    id: skipExistingLabel
+                    Layout.preferredWidth: pane.labelColumnWidth
+                    text: "Skip files with existing info when scanning"
+                    modified: pane.settings && pane.settings.skipExisting !== pane.controller.replayGainScanSkipExistingDefault
+                }
+
+                ThemedSwitch {
+                    checked: pane.settings ? pane.settings.skipExisting : false
+                    onToggled: if (pane.settings) pane.settings.skipExisting = checked
+                }
+
+                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // The label plus modified-from-default dot, left-aligned in a row.
-    // -----------------------------------------------------------------------
-    component RowLabel: Row {
-        property string text: ""
-        property bool modified: false
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: parent.text
-            color: Theme.textSecondary
-            font.family: pane.uiFont
-            font.pixelSize: 12
-        }
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: parent.modified
-            width: 6
-            height: 6
-            radius: 3
-            color: Theme.accentSoft
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -406,29 +442,5 @@ Item {
             glyph: "+"
             onBumped: dbf._commit(dbf.value + dbf.step)
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // A pill toggle.
-    // -----------------------------------------------------------------------
-    component Toggle: Rectangle {
-        id: tg
-        property bool checked: false
-        signal toggled()
-        width: 42
-        height: 22
-        radius: 11
-        color: checked ? Theme.accentSoft : Theme.border
-
-        Rectangle {
-            width: 18
-            height: 18
-            radius: 9
-            color: Theme.surfacePage
-            anchors.verticalCenter: parent.verticalCenter
-            x: tg.checked ? tg.width - width - 2 : 2
-            Behavior on x { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
-        }
-        TapHandler { onTapped: tg.toggled() }
     }
 }

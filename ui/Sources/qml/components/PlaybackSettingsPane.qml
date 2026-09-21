@@ -164,91 +164,92 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Output device"
-                modified: pane.settings && pane.settings.outputDeviceId !== pane.controller.outputDeviceIdDefault
-            }
+            RowLayout {
+                width: parent.width
+                spacing: 8
 
-            ComboBox {
-                id: deviceCombo
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 260
-                // The Basic style's implicit height is taller than the row;
-                // explicit height plus zeroed insets, the CustomColumnsWindow
-                // combo's hard-won sizing (see the notes there).
-                height: 24
-                topInset: 0
-                bottomInset: 0
-                model: pane.deviceModelWithStaged
-                textRole: "name"
-                font.family: pane.uiFont
-                font.pixelSize: 12
-                currentIndex: pane.deviceIndexOf(
-                                  pane.settings ? pane.settings.outputDeviceId : "")
-                onActivated: function (index) {
-                    if (pane.settings)
-                        pane.settings.outputDeviceId = pane.deviceModelWithStaged[index].id
+                SettingsRowLabel {
+                    text: "Output device"
+                    modified: pane.settings && pane.settings.outputDeviceId !== pane.controller.outputDeviceIdDefault
                 }
-                // Basic's default contentItem reserves vertical padding a 24 px
-                // control has no room for; a plain Text sits flush. Device
-                // names can be long, so elide right, which the fixed-label
-                // column combo deliberately avoided.
-                contentItem: Text {
-                    id: deviceComboLabel
-                    leftPadding: 6
-                    rightPadding: 4
-                    text: deviceCombo.displayText
-                    font: deviceCombo.font
-                    color: Theme.textPrimary
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
-                }
+                ComboBox {
+                    id: deviceCombo
+                    Layout.fillWidth: true
+                    topInset: 0
+                    bottomInset: 0
+                    model: pane.deviceModelWithStaged
+                    textRole: "name"
+                    font.family: pane.uiFont
+                    font.pixelSize: 12
+                    currentIndex: pane.deviceIndexOf(
+                        pane.settings ? pane.settings.outputDeviceId : "")
+                    onActivated: function (index) {
+                        if (pane.settings)
+                            pane.settings.outputDeviceId = pane.deviceModelWithStaged[index].id
+                    }
 
-                // Full-name tooltip: device names routinely outrun the 260 px
-                // box, and the elide can eat exactly the informative tail
-                // ("(not connected)"). Shown only when the label is genuinely
-                // truncated and the popup is closed; a short delay so casual
-                // mouse travel does not flicker it. Hand-styled on the
-                // ThemedMenu palette (Basic's default tooltip chrome would be
-                // off-theme).
-                hoverEnabled: true  // deterministic hovered, independent of style hints
-                Timer {
-                    id: deviceTipDelay
-                    interval: 600
-                    onTriggered: deviceTip.visible = true
-                }
-                onHoveredChanged: {
-                    if (hovered && deviceComboLabel.truncated && !popup.visible) {
-                        deviceTipDelay.start()
-                    } else {
-                        deviceTipDelay.stop()
-                        deviceTip.visible = false
-                    }
-                }
-                ToolTip {
-                    id: deviceTip
-                    visible: false
-                    text: deviceCombo.displayText
-                    // A Popup cannot leave the window's overlay, and a floating
-                    // tooltip WINDOW could not be positioned under Wayland
-                    // (a documented dead end), so the full name is shown by wrapping
-                    // instead of escaping: cap the width to the pane and let
-                    // the text run to as many lines as it needs.
-                    width: Math.min(implicitWidth, pane.width - 16)
-                    x: deviceCombo.width - width  // right-align to the box, staying in-window
-                    y: deviceCombo.height + 4
-                    contentItem: Text {
-                        text: deviceTip.text
-                        font.family: pane.uiFont
-                        font.pixelSize: 12
-                        color: Theme.textPrimary
-                        wrapMode: Text.Wrap
-                    }
                     background: Rectangle {
-                        color: Theme.surfacePage
-                        border.color: Theme.border
-                        border.width: 1
+                        radius: 4
+                        color: Theme.rowEven
+                    }
+
+                    contentItem: Text {
+                        id: deviceComboLabel
+                        leftPadding: 6
+                        rightPadding: 4
+                        text: deviceCombo.displayText
+                        font: deviceCombo.font
+                        color: Theme.textPrimary
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // Full-name tooltip: device names routinely outrun the 260 px
+                    // box, and the elide can eat exactly the informative tail
+                    // ("(not connected)"). Shown only when the label is genuinely
+                    // truncated and the popup is closed; a short delay so casual
+                    // mouse travel does not flicker it. Hand-styled on the
+                    // ThemedMenu palette (Basic's default tooltip chrome would be
+                    // off-theme).
+                    hoverEnabled: true  // deterministic hovered, independent of style hints
+                    Timer {
+                        id: deviceTipDelay
+                        interval: 600
+                        onTriggered: deviceTip.visible = true
+                    }
+                    onHoveredChanged: {
+                        if (hovered && deviceComboLabel.truncated && !popup.visible) {
+                            deviceTipDelay.start()
+                        } else {
+                            deviceTipDelay.stop()
+                            deviceTip.visible = false
+                        }
+                    }
+                    ToolTip {
+                        id: deviceTip
+                        visible: false
+                        text: deviceCombo.displayText
+                        // A Popup cannot leave the window's overlay, and a floating
+                        // tooltip WINDOW could not be positioned under Wayland
+                        // (a documented dead end), so the full name is shown by wrapping
+                        // instead of escaping: cap the width to the pane and let
+                        // the text run to as many lines as it needs.
+                        width: Math.min(implicitWidth, pane.width - 16)
+                        x: deviceCombo.width - width  // right-align to the box, staying in-window
+                        y: deviceCombo.height + 4
+                        contentItem: Text {
+                            text: deviceTip.text
+                            font.family: pane.uiFont
+                            font.pixelSize: 12
+                            color: Theme.textPrimary
+                            wrapMode: Text.Wrap
+                        }
+                        background: Rectangle {
+                            color: Theme.surfacePage
+                            border.color: Theme.border
+                            border.width: 1
+                            radius: 4
+                        }
                     }
                 }
             }
@@ -287,17 +288,21 @@ Item {
                     resetMenu.popup()
                 }
             }
+            RowLayout {
+                width: parent.width
+                spacing: 8
 
-            RowLabel {
-                text: "Bit-perfect output (switch device sample rate)"
-                modified: pane.settings && pane.settings.bitPerfect !== pane.controller.bitPerfectDefault
-            }
+                SettingsRowLabel {
+                    text: "Bit-perfect output (switch device sample rate)"
+                    modified: pane.settings && pane.settings.bitPerfect !== pane.controller.bitPerfectDefault
+                }
 
-            Toggle {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                checked: pane.settings ? pane.settings.bitPerfect : true
-                onToggled: if (pane.settings) pane.settings.bitPerfect = !pane.settings.bitPerfect
+                ThemedSwitch {
+                    checked: pane.settings ? pane.settings.bitPerfect : true
+                    onToggled: if (pane.settings) pane.settings.bitPerfect = !pane.settings.bitPerfect
+                }
+
+                Item { Layout.fillWidth: true }  // Spacer to push everything to the left
             }
         }
 
@@ -320,56 +325,5 @@ Item {
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // Label plus modified-from-default dot, matching the sibling panes.
-    // -----------------------------------------------------------------------
-    component RowLabel: Row {
-        property string text: ""
-        property bool modified: false
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: parent.text
-            color: Theme.textSecondary
-            font.family: pane.uiFont
-            font.pixelSize: 12
-        }
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: parent.modified
-            width: 6
-            height: 6
-            radius: 3
-            color: Theme.accentSoft
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // A pill toggle, the same control the ReplayGain pane uses.
-    // -----------------------------------------------------------------------
-    component Toggle: Rectangle {
-        id: tg
-        property bool checked: false
-        signal toggled()
-        width: 42
-        height: 22
-        radius: 11
-        color: checked ? Theme.accentSoft : Theme.border
-
-        Rectangle {
-            width: 18
-            height: 18
-            radius: 9
-            color: Theme.surfacePage
-            anchors.verticalCenter: parent.verticalCenter
-            x: tg.checked ? tg.width - width - 2 : 2
-            Behavior on x { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
-        }
-        TapHandler { onTapped: tg.toggled() }
     }
 }

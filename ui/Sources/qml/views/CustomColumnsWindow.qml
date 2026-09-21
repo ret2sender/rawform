@@ -638,6 +638,8 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56
+                bottomLeftRadius: 8
+                bottomRightRadius: 8
                 color: Theme.headerBand
 
                 RowLayout {

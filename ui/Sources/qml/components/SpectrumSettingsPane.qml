@@ -101,16 +101,23 @@ Item {
                 }
             }
 
-            RowLabel {
-                text: "Analyzer source"
-                modified: pane.settings && pane.settings.spectrumSource !== pane.provider.sourceDefault
-            }
+            RowLayout {
+                width: parent.width
+                spacing: 8
 
-            SourceSelect {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                value: pane.settings ? pane.settings.spectrumSource : 0
-                onPicked: function (v) { if (pane.settings) pane.settings.spectrumSource = v }
+                SettingsRowLabel {
+                    text: "Analyzer source"
+                    modified: pane.settings && pane.settings.spectrumSource !== pane.provider.sourceDefault
+                }
+
+                SourceSelect {
+                    value: pane.settings ? pane.settings.spectrumSource : 0
+                    onPicked: function (v) {
+                        if (pane.settings) pane.settings.spectrumSource = v
+                    }
+                }
+
+                Item { Layout.fillWidth: true }  // Spacer to push everything to the left
             }
         }
 
@@ -129,33 +136,6 @@ Item {
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // Label plus modified-from-default dot, matching the ReplayGain pane.
-    // -----------------------------------------------------------------------
-    component RowLabel: Row {
-        property string text: ""
-        property bool modified: false
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: parent.text
-            color: Theme.textSecondary
-            font.family: pane.uiFont
-            font.pixelSize: 12
-        }
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: parent.modified
-            width: 6
-            height: 6
-            radius: 3
-            color: Theme.accentSoft
-        }
     }
 
     // -----------------------------------------------------------------------

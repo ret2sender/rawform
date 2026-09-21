@@ -364,6 +364,12 @@ Window {
                         font.pixelSize: 12
                         placeholderText: "%track_no%-%artist%-%title%"
                         enabled: !renameDialog._applying
+
+                        background: Rectangle {
+                            radius: 4
+                            color: Theme.rowEven
+                        }
+
                         onTextChanged: previewDebounce.restart()
                         onAccepted: renameDialog._refreshPreview()
                         // Replace Qt's stock edit menu with the app-themed one
@@ -377,7 +383,7 @@ Window {
                     Layout.fillWidth: true
                     spacing: 8
                     Text {
-                        text: "Preset"
+                        text: "Preset "
                         color: Theme.textPrimary
                         font.family: renameDialog.uiFont
                         font.pixelSize: 12
@@ -390,6 +396,12 @@ Window {
                         font.pixelSize: 12
                         enabled: !renameDialog._applying
                         textRole: "name"
+
+                        background: Rectangle {
+                            radius: 4
+                            color: Theme.rowEven
+                        }
+
                         model: presetStore.catalog()
                         // Custom content item, three birds: selectByMouse ON
                         // declaratively (the Basic style ships its editor with

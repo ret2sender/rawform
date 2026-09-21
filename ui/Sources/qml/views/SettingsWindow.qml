@@ -72,15 +72,15 @@ Window {
     property Item menuBlurSource: windowBody
 
     title: "Settings"
+    color: "transparent"
+    flags: Qt.Tool | Qt.FramelessWindowHint
     // Size restores from window.yaml's keyed store, else the built-in
     // default; clamped against the minimums here because the store does not
     // know them. Initial values, not live bindings (startup-only read).
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("settings", 580))
-    height: Math.max(minimumHeight, windowGeometry.savedHeight("settings", 440))
-    minimumWidth: 520
-    minimumHeight: 380
-    color: "transparent"
-    flags: Qt.Tool | Qt.FramelessWindowHint
+    minimumHeight: 480
+    minimumWidth: 720
+    height: Math.max(minimumHeight, windowGeometry.savedHeight("settings", 480))
+    width: Math.max(minimumWidth, windowGeometry.savedWidth("settings", 720))
     modality: Qt.NonModal
 
     // Escape closes, byte-identical to Cancel (reseed discards the
@@ -389,6 +389,8 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56
+                bottomLeftRadius: 8
+                bottomRightRadius: 8
                 color: Theme.headerBand
 
                 RowLayout {

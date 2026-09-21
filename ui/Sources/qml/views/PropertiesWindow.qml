@@ -906,6 +906,8 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 52
+                bottomLeftRadius: 8
+                bottomRightRadius: 8
                 color: Theme.headerBand
 
                 FooterButton {

@@ -373,6 +373,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/ReplayGainSettingsPane.qml
         Sources/qml/components/Format.qml
         Sources/qml/components/SeekBar.qml
+        Sources/qml/components/SettingsRowLabel.qml
         Sources/qml/components/SpectrumSettingsPane.qml
         Sources/qml/components/SpectrumView.qml
         Sources/qml/components/StagedSettings.qml
@@ -382,6 +383,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/ThemedMenuBar.qml
         Sources/qml/components/ThemedMenuItem.qml
         Sources/qml/components/ThemedSplitView.qml
+        Sources/qml/components/ThemedSwitch.qml
         Sources/qml/components/TitleBar.qml
         Sources/qml/components/ToolDialogCloseButton.qml
         Sources/qml/components/VolumeSlider.qml
