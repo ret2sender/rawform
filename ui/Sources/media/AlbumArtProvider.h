@@ -33,6 +33,13 @@
 //
 // Returns a null QImage when neither is found (QML shows its placeholder). Runs
 // on the asynchronous QML image-loading path, so the decode never blocks the UI.
+//
+// The requested size is a DECODE bound, not a post-decode resize: the Image
+// binding this provider must set sourceSize (the art frame in MainWindow.qml
+// does), and the provider decodes straight to that bound, aspect preserved,
+// never upscaling. Without a sourceSize the request arrives invalid and the
+// cover decodes at its full pixel dimensions, which for a large embedded JPEG
+// is tens of MB retained per album browsed.
 
 #pragma once
 

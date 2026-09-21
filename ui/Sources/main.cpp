@@ -56,6 +56,12 @@
 #include <QGuiApplication>
 
 #include <ctime>  // tzset
+
+// glibc-only (not ISO C, not POSIX): mallopt, for the allocator tuning below.
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #include <QDebug>
 #include <QIcon>
 #include <QItemSelection>
@@ -92,6 +98,26 @@ int main(int argc, char* argv[]) {
     // concurrent free/strdup pair outright. See the tzset_internal note in
     // utils/SanitizerSuppressions.cpp.
     tzset();
+
+#ifdef __GLIBC__
+    // Pin glibc's mmap threshold at 1 MB, which also switches OFF its dynamic
+    // adjustment (mallopt(3): setting M_MMAP_THRESHOLD disables the dynamic
+    // behavior). Every allocation of 1 MB or more then comes from its own
+    // mapping and is returned to the OS the moment it is freed, in every
+    // thread. Left at the default, the threshold climbs toward 32 MB as large
+    // chunks are freed, after which image-sized transients (a cover decoding
+    // on the QML image-reader thread, a picture block TagLib reads on a pool
+    // worker) are carved from that thread's heap and stay resident after the
+    // free: RSS then grows with every album browsed even though nothing is
+    // live (measured: ~3 to 12 MB per album, plateauing around +240 MB after
+    // fifty). A 1 MB floor keeps the heap for the small-object traffic the
+    // model and the QML engine generate, and only the buffers that would
+    // otherwise pin whole arenas take the mmap round trip. Must run while the
+    // process is still single-threaded, like tzset above: the setting is
+    // global, and the reader and pool threads inherit it. macOS's allocator
+    // has no equivalent residue and no mallopt.
+    mallopt(M_MMAP_THRESHOLD, 1024 * 1024);
+#endif
 
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Basic");

@@ -42,6 +42,12 @@
 #include <algorithm>
 #include <utility>
 
+// glibc-only (not ISO C, not POSIX): malloc_trim, used once per completed scan
+// request; see onScanFinished. Absent on macOS, where the branch compiles out.
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 namespace rawform {
 namespace {
 
@@ -289,6 +295,23 @@ void TrackScanner::onScanFinished() {
         return;
     }
     setScanning(false);
+
+#ifdef __GLIBC__
+    // Give the scan's transient heap back to the OS. readTrack opens every file
+    // through TagLib, which parses eagerly: a FLAC's PICTURE blocks and an ID3v2
+    // APIC are read whole into ByteVectors even though only their presence is
+    // kept. Across the pool that is thousands of multi-MB allocations, freed at
+    // once but spread over one glibc arena per worker thread, and glibc raises
+    // its mmap threshold as large chunks are freed, so later covers land inside
+    // the arenas rather than in their own mappings. Nothing hands those pages
+    // back on its own; RSS then reports the scan's peak, not the live model
+    // (measured: ~50 MB over a cache load of the same 15k tracks). malloc_trim
+    // walks every arena and releases its free pages, mid-heap included, in a
+    // few ms. Once per completed request chain (not per queued handoff), on
+    // the GUI thread, with the pool idle. The macOS allocator has no such
+    // residue and no such call.
+    malloc_trim(0);
+#endif
 }
 
 void TrackScanner::setScanning(bool on) {
