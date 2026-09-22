@@ -175,12 +175,12 @@ Item {
                 ComboBox {
                     id: deviceCombo
                     Layout.fillWidth: true
-                    topInset: 0
                     bottomInset: 0
-                    model: pane.deviceModelWithStaged
+                    topInset: 0
                     textRole: "name"
                     font.family: pane.uiFont
                     font.pixelSize: 12
+                    model: pane.deviceModelWithStaged
                     currentIndex: pane.deviceIndexOf(
                         pane.settings ? pane.settings.outputDeviceId : "")
                     onActivated: function (index) {
@@ -189,17 +189,17 @@ Item {
                     }
 
                     background: Rectangle {
-                        radius: 4
                         color: Theme.rowEven
+                        radius: 4
                     }
 
                     contentItem: Text {
                         id: deviceComboLabel
+                        color: Theme.textPrimary
                         leftPadding: 6
                         rightPadding: 4
                         text: deviceCombo.displayText
                         font: deviceCombo.font
-                        color: Theme.textPrimary
                         elide: Text.ElideRight
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -238,16 +238,16 @@ Item {
                         x: deviceCombo.width - width  // right-align to the box, staying in-window
                         y: deviceCombo.height + 4
                         contentItem: Text {
+                            color: Theme.textPrimary
                             text: deviceTip.text
                             font.family: pane.uiFont
                             font.pixelSize: 12
-                            color: Theme.textPrimary
                             wrapMode: Text.Wrap
                         }
                         background: Rectangle {
-                            color: Theme.surfacePage
                             border.color: Theme.border
                             border.width: 1
+                            color: Theme.surfacePage
                             radius: 4
                         }
                     }

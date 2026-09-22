@@ -392,14 +392,14 @@ Window {
                         id: presetCombo
                         Layout.fillWidth: true
                         editable: true   // the edit text doubles as the save-as name
+                        enabled: !renameDialog._applying
                         font.family: renameDialog.uiFont
                         font.pixelSize: 12
-                        enabled: !renameDialog._applying
                         textRole: "name"
 
                         background: Rectangle {
-                            radius: 4
                             color: Theme.rowEven
+                            radius: 4
                         }
 
                         model: presetStore.catalog()
@@ -414,13 +414,13 @@ Window {
                         // own frame; the TextField's would double-border.
                         contentItem: TextField {
                             id: presetEditor
+                            background: null
+                            enabled: presetCombo.editable
+                            font: presetCombo.font
                             text: presetCombo.editable ? presetCombo.editText
                                                        : presetCombo.displayText
-                            enabled: presetCombo.editable
                             selectByMouse: true
-                            font: presetCombo.font
                             verticalAlignment: Text.AlignVCenter
-                            background: null
                             ContextMenu.menu: EditMenu { editor: presetEditor }
                         }
                         // Selection must repaint through the helper too:
@@ -637,6 +637,8 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 56
+                bottomLeftRadius: 8
+                bottomRightRadius: 8
                 color: Theme.headerBand
 
                 Text {
