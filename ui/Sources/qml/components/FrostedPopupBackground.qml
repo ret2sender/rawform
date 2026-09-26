@@ -34,7 +34,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls.Basic
 import QtQuick.Effects
 import QtQuick.Templates as T
 
