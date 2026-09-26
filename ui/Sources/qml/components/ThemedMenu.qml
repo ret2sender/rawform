@@ -22,11 +22,9 @@
 //
 // The app's popup menu: a QtQuick.Controls Menu restyled to the rawform look
 // and shared by the menu bar, the playlist header and row context menus, and
-// the tool-window footer menus. The background is a frosted slice of the host
-// window: a ShaderEffectSource grabs the pixels of `blurSource` behind the
-// popup, a MultiEffect blurs them and clips them to the rounded rect, and a
-// translucent Theme.surfacePage tint with a 2 px border is drawn sharp on top.
-// The grab region follows the popup on open and on every move or resize.
+// the tool-window footer menus. The background is the shared frosted slice of
+// the host window (FrostedPopupBackground, which ThemedComboBox's dropdown
+// uses too); this file adds the menu's fit-to-content width on top of it.
 //
 // Width is fit-to-content: Qt's Menu never derives a width from its items (its
 // contentItem is a ListView with no implicit width), so `_fitWidth` sums the
@@ -41,7 +39,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Effects
 
 Menu {
     id: root
@@ -110,78 +107,12 @@ Menu {
         NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.InQuad }
     }
 
-    background: Item {
-        id: themedMenuBackground
+    // The menu's own blurSource is forwarded so a call site that sets it keeps
+    // control of the backdrop; the fitted width is the one thing added here.
+    background: FrostedPopupBackground {
+        popup: root
+        blurSource: root.blurSource
         implicitWidth: Math.max(root.menuWidth, root._fitWidth)
-
-        // Grab only the slice of blurSource sitting behind the menu.
-        ShaderEffectSource {
-            id: behind
-            anchors.fill: parent
-            live: true          // see snapshot note below
-            recursive: false    // source is a sibling subtree, so no recursion
-            sourceItem: root.blurSource
-            visible: false      // used only as MultiEffect.source
-
-            function refresh() {
-                if (!root.blurSource)
-                    return
-                const p = root.blurSource.mapFromItem(themedMenuBackground, 0, 0)
-                sourceRect = Qt.rect(p.x, p.y, themedMenuBackground.width, themedMenuBackground.height)
-            }
-        }
-
-        // Blur the grabbed slice and clip it to the rounded rect.
-        MultiEffect {
-            anchors.fill: parent
-            autoPaddingEnabled: false
-            blur: 1.0
-            blurEnabled: true
-            blurMax: 32
-            maskEnabled: true
-            maskSource: maskSrc
-            source: behind
-        }
-
-        // Translucent tint + border, drawn sharp on top of the blur.
-        Rectangle {
-            anchors.fill: parent
-            border.color: Theme.border
-            border.width: 2
-            antialiasing: true
-            color: Theme.surfacePage
-            opacity: 0.80
-            radius: 8
-        }
-
-        // Rounded-rect mask. layer.enabled + visible:false is the standard
-        // texture-provider pattern; the layer FBO still updates because
-        // MultiEffect references it.
-        Item {
-            id: maskSrc
-            anchors.fill: parent
-            layer.enabled: true
-            visible: false
-
-            Rectangle {
-                anchors.fill: parent
-                antialiasing: true
-                radius: 8
-            }
-        }
-
-        // Recompute the grab region whenever the menu appears or resizes.
-        Connections {
-            target: root
-            function onOpened() { behind.refresh() }
-            function onXChanged() { behind.refresh() }
-            function onYChanged() { behind.refresh() }
-        }
-
-        onWidthChanged: behind.refresh()
-        onHeightChanged: behind.refresh()
-
-        Component.onCompleted: behind.refresh()
     }
 
     delegate: ThemedMenuItem { id: menuItem }

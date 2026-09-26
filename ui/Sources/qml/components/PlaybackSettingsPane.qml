@@ -36,8 +36,12 @@
 //
 // The factory default comes from the bound controller (one source of truth,
 // bitPerfectDefault) and drives both the modified-from-default accent dot and
-// the right-click reset, exactly as the sibling panes do. Output device
-// selection lives here too, right below.
+// the right-click reset, exactly as the sibling panes do. Rows are SettingsRow
+// instances sharing one SettingsResetMenu; the labels keep their natural width
+// here (no column), since the device picker fills the row and the two labels
+// differ too much in length for a shared column to read well. Output device
+// selection goes through the shared ThemedComboBox; only the full-name tooltip
+// is local, since it is about device names.
 
 pragma ComponentBehavior: Bound
 
@@ -115,18 +119,7 @@ Item {
     // refreshes on every open; this covers the very first construction).
     Component.onCompleted: if (pane.controller) pane.controller.refreshOutputDevices()
 
-    // Shared right-click reset menu, same shape as the sibling panes.
-    ThemedMenu {
-        id: resetMenu
-        property var doReset: null
-        Action {
-            text: "Reset to default"
-            // The var slot is the mechanism: each row assigns its own reset
-            // closure before popping the menu, and a declared function could
-            // not be reassigned per row.
-            onTriggered: if (resetMenu.doReset) resetMenu.doReset()  // qmllint disable use-proper-function
-        }
-    }
+    SettingsResetMenu { id: resetMenu }
 
     ColumnLayout {
         anchors.fill: parent
@@ -149,107 +142,70 @@ Item {
         }
 
         // ----- Output device -----------------------------------------------
-        Item {
+        SettingsRow {
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Output device"
+            modified: pane.settings && pane.settings.outputDeviceId !== pane.controller.outputDeviceIdDefault
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.outputDeviceId = pane.controller.outputDeviceIdDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.outputDeviceId = pane.controller.outputDeviceIdDefault
-                    }
-                    resetMenu.popup()
+            ThemedComboBox {
+                id: deviceCombo
+                Layout.fillWidth: true
+                textRole: "name"
+                model: pane.deviceModelWithStaged
+                currentIndex: pane.deviceIndexOf(
+                    pane.settings ? pane.settings.outputDeviceId : "")
+                onActivated: function (index) {
+                    if (pane.settings)
+                        pane.settings.outputDeviceId = pane.deviceModelWithStaged[index].id
                 }
-            }
 
-            RowLayout {
-                width: parent.width
-                spacing: 8
-
-                SettingsRowLabel {
-                    text: "Output device"
-                    modified: pane.settings && pane.settings.outputDeviceId !== pane.controller.outputDeviceIdDefault
+                // Full-name tooltip: device names routinely outrun the 260 px
+                // box, and the elide can eat exactly the informative tail
+                // ("(not connected)"). Shown only when the label is genuinely
+                // truncated and the popup is closed; a short delay so casual
+                // mouse travel does not flicker it. Hand-styled on the
+                // ThemedMenu palette (Basic's default tooltip chrome would be
+                // off-theme).
+                hoverEnabled: true  // deterministic hovered, independent of style hints
+                Timer {
+                    id: deviceTipDelay
+                    interval: 600
+                    onTriggered: deviceTip.visible = true
                 }
-                ComboBox {
-                    id: deviceCombo
-                    Layout.fillWidth: true
-                    bottomInset: 0
-                    topInset: 0
-                    textRole: "name"
-                    font.family: pane.uiFont
-                    font.pixelSize: 12
-                    model: pane.deviceModelWithStaged
-                    currentIndex: pane.deviceIndexOf(
-                        pane.settings ? pane.settings.outputDeviceId : "")
-                    onActivated: function (index) {
-                        if (pane.settings)
-                            pane.settings.outputDeviceId = pane.deviceModelWithStaged[index].id
+                onHoveredChanged: {
+                    if (hovered && deviceCombo.displayTruncated && !popup.visible) {
+                        deviceTipDelay.start()
+                    } else {
+                        deviceTipDelay.stop()
+                        deviceTip.visible = false
                     }
-
-                    background: Rectangle {
-                        color: Theme.rowEven
-                        radius: 4
-                    }
-
+                }
+                ToolTip {
+                    id: deviceTip
+                    visible: false
+                    text: deviceCombo.displayText
+                    // A Popup cannot leave the window's overlay, and a floating
+                    // tooltip WINDOW could not be positioned under Wayland
+                    // (a documented dead end), so the full name is shown by wrapping
+                    // instead of escaping: cap the width to the pane and let
+                    // the text run to as many lines as it needs.
+                    width: Math.min(implicitWidth, pane.width - 16)
+                    x: deviceCombo.width - width  // right-align to the box, staying in-window
+                    y: deviceCombo.height + 4
                     contentItem: Text {
-                        id: deviceComboLabel
                         color: Theme.textPrimary
-                        leftPadding: 6
-                        rightPadding: 4
-                        text: deviceCombo.displayText
-                        font: deviceCombo.font
-                        elide: Text.ElideRight
-                        verticalAlignment: Text.AlignVCenter
+                        text: deviceTip.text
+                        font.family: pane.uiFont
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
                     }
-
-                    // Full-name tooltip: device names routinely outrun the 260 px
-                    // box, and the elide can eat exactly the informative tail
-                    // ("(not connected)"). Shown only when the label is genuinely
-                    // truncated and the popup is closed; a short delay so casual
-                    // mouse travel does not flicker it. Hand-styled on the
-                    // ThemedMenu palette (Basic's default tooltip chrome would be
-                    // off-theme).
-                    hoverEnabled: true  // deterministic hovered, independent of style hints
-                    Timer {
-                        id: deviceTipDelay
-                        interval: 600
-                        onTriggered: deviceTip.visible = true
-                    }
-                    onHoveredChanged: {
-                        if (hovered && deviceComboLabel.truncated && !popup.visible) {
-                            deviceTipDelay.start()
-                        } else {
-                            deviceTipDelay.stop()
-                            deviceTip.visible = false
-                        }
-                    }
-                    ToolTip {
-                        id: deviceTip
-                        visible: false
-                        text: deviceCombo.displayText
-                        // A Popup cannot leave the window's overlay, and a floating
-                        // tooltip WINDOW could not be positioned under Wayland
-                        // (a documented dead end), so the full name is shown by wrapping
-                        // instead of escaping: cap the width to the pane and let
-                        // the text run to as many lines as it needs.
-                        width: Math.min(implicitWidth, pane.width - 16)
-                        x: deviceCombo.width - width  // right-align to the box, staying in-window
-                        y: deviceCombo.height + 4
-                        contentItem: Text {
-                            color: Theme.textPrimary
-                            text: deviceTip.text
-                            font.family: pane.uiFont
-                            font.pixelSize: 12
-                            wrapMode: Text.Wrap
-                        }
-                        background: Rectangle {
-                            border.color: Theme.border
-                            border.width: 1
-                            color: Theme.surfacePage
-                            radius: 4
-                        }
+                    background: Rectangle {
+                        border.color: Theme.border
+                        border.width: 1
+                        color: Theme.surfacePage
+                        radius: 4
                     }
                 }
             }
@@ -274,35 +230,16 @@ Item {
         }
 
         // ----- Output rate policy ------------------------------------------
-        Item {
+        SettingsRow {
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Bit-perfect output (switch device sample rate)"
+            modified: pane.settings && pane.settings.bitPerfect !== pane.controller.bitPerfectDefault
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.bitPerfect = pane.controller.bitPerfectDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.bitPerfect = pane.controller.bitPerfectDefault
-                    }
-                    resetMenu.popup()
-                }
-            }
-            RowLayout {
-                width: parent.width
-                spacing: 8
-
-                SettingsRowLabel {
-                    text: "Bit-perfect output (switch device sample rate)"
-                    modified: pane.settings && pane.settings.bitPerfect !== pane.controller.bitPerfectDefault
-                }
-
-                ThemedSwitch {
-                    checked: pane.settings ? pane.settings.bitPerfect : true
-                    onToggled: if (pane.settings) pane.settings.bitPerfect = !pane.settings.bitPerfect
-                }
-
-                Item { Layout.fillWidth: true }  // Spacer to push everything to the left
+            ThemedSwitch {
+                checked: pane.settings ? pane.settings.bitPerfect : true
+                onToggled: if (pane.settings) pane.settings.bitPerfect = checked
             }
         }
 

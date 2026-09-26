@@ -332,8 +332,8 @@ endif()
 # undefined. Must be set BEFORE qt_add_qml_module.
 set_source_files_properties(
         Sources/qml/theme/Theme.qml
-        Sources/qml/components/TitleBarStyle.qml
         Sources/qml/components/Format.qml
+        Sources/qml/components/TitleBarStyle.qml
         PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -372,24 +372,28 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/ReplayGainScanProgress.qml
         Sources/qml/components/ReplayGainSettingsPane.qml
         Sources/qml/components/Format.qml
+        Sources/qml/components/FrostedPopupBackground.qml
         Sources/qml/components/SeekBar.qml
+        Sources/qml/components/SettingsResetMenu.qml
+        Sources/qml/components/SettingsRow.qml
         Sources/qml/components/SettingsRowLabel.qml
         Sources/qml/components/SpectrumSettingsPane.qml
         Sources/qml/components/SpectrumView.qml
         Sources/qml/components/StagedSettings.qml
         Sources/qml/components/StatusLogBar.qml
         Sources/qml/components/TaggingSettingsPane.qml
+        Sources/qml/components/ThemedComboBox.qml
         Sources/qml/components/ThemedMenu.qml
         Sources/qml/components/ThemedMenuBar.qml
         Sources/qml/components/ThemedMenuItem.qml
         Sources/qml/components/ThemedSplitView.qml
         Sources/qml/components/ThemedSwitch.qml
         Sources/qml/components/TitleBar.qml
+        Sources/qml/components/TitleBarControls.qml
+        Sources/qml/components/TitleBarStyle.qml
         Sources/qml/components/ToolDialogCloseButton.qml
         Sources/qml/components/VolumeSlider.qml
         Sources/qml/components/WindowResizeGrips.qml
-        Sources/qml/components/TitleBarControls.qml
-        Sources/qml/components/TitleBarStyle.qml
 )
 
 # ---------------------------------------------------------------------------

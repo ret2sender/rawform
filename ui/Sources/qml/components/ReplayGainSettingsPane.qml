@@ -27,21 +27,15 @@
 // accent dot when the staged value differs from its default, and a right-click
 // "Reset to default" that sets it back.
 //
-// Rows are written out explicitly (mode, two pre-amps, clip prevention, and the
-// scan skip-existing toggle) rather than through a slotted row component, which
-// keeps the chrome and the injected control cleanly separate without fighting
-// QML's default-property rules. Each row is a label and a control in a RowLayout;
-// every label takes the width of the widest one (labelColumnWidth), so the
-// controls line up in a second column while each row stays one item with its own
-// right-click area.
+// Rows are SettingsRow instances (mode, two pre-amps, clip prevention, and the
+// scan skip-existing toggle), each carrying its label, its right-click reset, and
+// the injected control; every label takes the width of the widest one
+// (labelColumnWidth), so the controls line up in a second column. The reset menu
+// is one SettingsResetMenu per pane, pointed at the row that opened it.
 //
-// The label and the switch are shared components (SettingsRowLabel, ThemedSwitch).
-// The controls only this page uses (segmented mode, dB steppers) are local inline
-// components, styled to the app rather than native.
-//
-// The right-click reset MouseArea is the LOWEST child of each row and accepts only
-// the right button, so the control above handles its own left interaction and
-// right clicks fall through to reset.
+// The row, label, switch, and reset menu are shared components. The controls only
+// this page uses (segmented mode, dB steppers) are local inline components, styled
+// to the app rather than native.
 
 pragma ComponentBehavior: Bound
 
@@ -64,33 +58,16 @@ Item {
     property string uiFont: Theme.uiFont
 
     // The label column is as wide as the widest label, so every row's control
-    // starts at the same x. A label's implicit width is constant (its modified
-    // dot hides by opacity and keeps its slot), so the column does not move when
-    // a dot appears.
-    readonly property real labelColumnWidth: Math.max(modeLabel.implicitWidth,
-                                                      preampLabel.implicitWidth,
-                                                      untaggedPreampLabel.implicitWidth,
-                                                      clipLabel.implicitWidth,
-                                                      skipExistingLabel.implicitWidth)
-
-    // The gap between the label column and the control column.
-    readonly property int columnGutter: 24
+    // starts at the same x.
+    readonly property real labelColumnWidth: Math.max(modeRow.labelImplicitWidth,
+                                                      preampRow.labelImplicitWidth,
+                                                      untaggedPreampRow.labelImplicitWidth,
+                                                      clipRow.labelImplicitWidth,
+                                                      skipExistingRow.labelImplicitWidth)
 
     function _near(a, b) { return Math.abs(a - b) < 1e-9 }
 
-    // Shared right-click reset menu. A row sets doReset to its own closure, then
-    // pops this at the cursor.
-    ThemedMenu {
-        id: resetMenu
-        property var doReset: null
-        Action {
-            text: "Reset to default"
-            // The var slot is the mechanism: each row assigns its own reset
-            // closure before popping the menu, and a declared function could
-            // not be reassigned per row.
-            onTriggered: if (resetMenu.doReset) resetMenu.doReset()  // qmllint disable use-proper-function
-        }
-    }
+    SettingsResetMenu { id: resetMenu }
 
     ColumnLayout {
         anchors.fill: parent
@@ -113,157 +90,74 @@ Item {
         }
 
         // ----- Mode --------------------------------------------------------
-        Item {
+        SettingsRow {
+            id: modeRow
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Mode"
+            modified: pane.settings && pane.settings.mode !== pane.controller.replayGainModeDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.mode = pane.controller.replayGainModeDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.mode = pane.controller.replayGainModeDefault
-                    }
-                    resetMenu.popup()
+            ModeSelect {
+                value: pane.settings ? pane.settings.mode : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.mode = v
                 }
-            }
-
-            // Fills the row rather than taking only a width, so the layout's
-            // default vertical centering works against the full row height
-            // whatever the control's own height.
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: modeLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Mode"
-                    modified: pane.settings && pane.settings.mode !== pane.controller.replayGainModeDefault
-                }
-
-                ModeSelect {
-                    value: pane.settings ? pane.settings.mode : 0
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.mode = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
         // ----- Pre-amp for tagged tracks -----------------------------------
-        Item {
+        SettingsRow {
+            id: preampRow
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Pre-amp (tagged)"
+            modified: pane.settings && !pane._near(pane.settings.preampDb,
+                                                   pane.controller.replayGainPreampDbDefault)
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.preampDb = pane.controller.replayGainPreampDbDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.preampDb = pane.controller.replayGainPreampDbDefault
-                    }
-                    resetMenu.popup()
+            DbField {
+                value: pane.settings ? pane.settings.preampDb : 0
+                onMoved: function (v) {
+                    if (pane.settings) pane.settings.preampDb = v
                 }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: preampLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Pre-amp (tagged)"
-                    modified: pane.settings && !pane._near(pane.settings.preampDb,
-                                                           pane.controller.replayGainPreampDbDefault)
-                }
-
-                DbField {
-                    value: pane.settings ? pane.settings.preampDb : 0
-                    onMoved: function (v) {
-                        if (pane.settings) pane.settings.preampDb = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
         // ----- Pre-amp for untagged tracks ---------------------------------
-        Item {
+        SettingsRow {
+            id: untaggedPreampRow
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Pre-amp (untagged)"
+            modified: pane.settings && !pane._near(pane.settings.untaggedPreampDb,
+                                                   pane.controller.replayGainUntaggedPreampDbDefault)
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.untaggedPreampDb = pane.controller.replayGainUntaggedPreampDbDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.untaggedPreampDb = pane.controller.replayGainUntaggedPreampDbDefault
-                    }
-                    resetMenu.popup()
+            DbField {
+                value: pane.settings ? pane.settings.untaggedPreampDb : 0
+                onMoved: function (v) {
+                    if (pane.settings) pane.settings.untaggedPreampDb = v
                 }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: untaggedPreampLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Pre-amp (untagged)"
-                    modified: pane.settings && !pane._near(pane.settings.untaggedPreampDb,
-                                                           pane.controller.replayGainUntaggedPreampDbDefault)
-                }
-
-                DbField {
-                    value: pane.settings ? pane.settings.untaggedPreampDb : 0
-                    onMoved: function (v) {
-                        if (pane.settings) pane.settings.untaggedPreampDb = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
         // ----- Clip prevention ---------------------------------------------
-        Item {
+        SettingsRow {
+            id: clipRow
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Prevent clipping"
+            modified: pane.settings && pane.settings.clip !== pane.controller.replayGainClipPreventionDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.clip = pane.controller.replayGainClipPreventionDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.clip = pane.controller.replayGainClipPreventionDefault
-                    }
-                    resetMenu.popup()
-                }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: clipLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Prevent clipping"
-                    modified: pane.settings && pane.settings.clip !== pane.controller.replayGainClipPreventionDefault
-                }
-
-                ThemedSwitch {
-                    checked: pane.settings ? pane.settings.clip : true
-                    onToggled: if (pane.settings) pane.settings.clip = checked
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
+            ThemedSwitch {
+                checked: pane.settings ? pane.settings.clip : true
+                onToggled: if (pane.settings) pane.settings.clip = checked
             }
         }
 
@@ -271,38 +165,18 @@ Item {
         // Unlike the rows above this one does not affect playback: it tells a
         // ReplayGain scan to leave tracks (or whole albums) that already carry RG
         // info untouched. The scan path reads it before measuring.
-        Item {
+        SettingsRow {
+            id: skipExistingRow
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Skip files with existing info when scanning"
+            modified: pane.settings && pane.settings.skipExisting !== pane.controller.replayGainScanSkipExistingDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.skipExisting = pane.controller.replayGainScanSkipExistingDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.skipExisting = pane.controller.replayGainScanSkipExistingDefault
-                    }
-                    resetMenu.popup()
-                }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: skipExistingLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Skip files with existing info when scanning"
-                    modified: pane.settings && pane.settings.skipExisting !== pane.controller.replayGainScanSkipExistingDefault
-                }
-
-                ThemedSwitch {
-                    checked: pane.settings ? pane.settings.skipExisting : false
-                    onToggled: if (pane.settings) pane.settings.skipExisting = checked
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
+            ThemedSwitch {
+                checked: pane.settings ? pane.settings.skipExisting : false
+                onToggled: if (pane.settings) pane.settings.skipExisting = checked
             }
         }
 

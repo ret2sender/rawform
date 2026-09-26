@@ -28,9 +28,11 @@
 // truth, see `store` below) and drive the modified-from-default accent dot
 // and the right-click "Reset to default", exactly as the sibling panes do.
 //
-// Each row is a label and a control in a RowLayout; every label takes the width
-// of the widest one (labelColumnWidth), so the controls line up in a second
-// column while each row stays one item with its own right-click reset area.
+// Rows are SettingsRow instances, each carrying its label, its right-click
+// reset, and the injected control; every label takes the width of the widest
+// one (labelColumnWidth), so the controls line up in a second column. The
+// reset menu is one SettingsResetMenu per pane, pointed at the row that opened
+// it.
 //
 // The four rows are consumed by MetadataEditor. They only affect
 // MP3 files; every other format stays on the generic tag write path, which is
@@ -74,29 +76,13 @@ Item {
     property string uiFont: Theme.uiFont
 
     // The label column is as wide as the widest label, so every row's control
-    // starts at the same x. A label's implicit width is constant (its modified
-    // dot hides by opacity and keeps its slot), so the column does not move when
-    // a dot appears.
-    readonly property real labelColumnWidth: Math.max(id3v2VersionLabel.implicitWidth,
-                                                      id3v1Label.implicitWidth,
-                                                      apeLabel.implicitWidth,
-                                                      encodingLabel.implicitWidth)
+    // starts at the same x.
+    readonly property real labelColumnWidth: Math.max(id3v2VersionRow.labelImplicitWidth,
+                                                      id3v1Row.labelImplicitWidth,
+                                                      apeRow.labelImplicitWidth,
+                                                      encodingRow.labelImplicitWidth)
 
-    // The gap between the label column and the control column.
-    readonly property int columnGutter: 24
-
-    // Shared right-click reset menu, same shape as the sibling panes.
-    ThemedMenu {
-        id: resetMenu
-        property var doReset: null
-        Action {
-            text: "Reset to default"
-            // The var slot is the mechanism: each row assigns its own reset
-            // closure before popping the menu, and a declared function could
-            // not be reassigned per row.
-            onTriggered: if (resetMenu.doReset) resetMenu.doReset()  // qmllint disable use-proper-function
-        }
-    }
+    SettingsResetMenu { id: resetMenu }
 
     ColumnLayout {
         anchors.fill: parent
@@ -119,44 +105,22 @@ Item {
         }
 
         // ----- ID3v2 version -----------------------------------------------
-        Item {
+        SettingsRow {
+            id: id3v2VersionRow
             Layout.fillWidth: true
-            implicitHeight: 42
+            text: "ID3v2 version"
+            modified: pane.settings && pane.settings.id3v2Version !== pane.store.id3v2VersionDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.id3v2Version = pane.store.id3v2VersionDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.id3v2Version = pane.store.id3v2VersionDefault
-                    }
-                    resetMenu.popup()
+            SegmentSelect {
+                labels: ["ID3v2.3", "ID3v2.4"]
+                segWidth: 72
+                value: pane.settings ? pane.settings.id3v2Version : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.id3v2Version = v
                 }
-            }
-
-            // Fills the row rather than taking only a width, so the layout's
-            // default vertical centering works against the full row height.
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: id3v2VersionLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "ID3v2 version"
-                    modified: pane.settings && pane.settings.id3v2Version !== pane.store.id3v2VersionDefault
-                }
-
-                SegmentSelect {
-                    labels: ["ID3v2.3", "ID3v2.4"]
-                    segWidth: 72
-                    value: pane.settings ? pane.settings.id3v2Version : 0
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.id3v2Version = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -172,43 +136,23 @@ Item {
         }
 
         // ----- ID3v1 -------------------------------------------------------
-        Item {
+        SettingsRow {
+            id: id3v1Row
             Layout.fillWidth: true
             Layout.topMargin: 8
-            implicitHeight: 42
+            text: "ID3v1 tag"
+            modified: pane.settings && pane.settings.id3v1Mode !== pane.store.id3v1ModeDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.id3v1Mode = pane.store.id3v1ModeDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.id3v1Mode = pane.store.id3v1ModeDefault
-                    }
-                    resetMenu.popup()
+            SegmentSelect {
+                labels: ["Write", "Preserve", "Strip"]
+                segWidth: 68
+                value: pane.settings ? pane.settings.id3v1Mode : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.id3v1Mode = v
                 }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: id3v1Label
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "ID3v1 tag"
-                    modified: pane.settings && pane.settings.id3v1Mode !== pane.store.id3v1ModeDefault
-                }
-
-                SegmentSelect {
-                    labels: ["Write", "Preserve", "Strip"]
-                    segWidth: 68
-                    value: pane.settings ? pane.settings.id3v1Mode : 0
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.id3v1Mode = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
@@ -229,84 +173,44 @@ Item {
         }
 
         // ----- APEv2 -------------------------------------------------------
-        Item {
+        SettingsRow {
+            id: apeRow
             Layout.fillWidth: true
             Layout.topMargin: 8
-            implicitHeight: 42
+            text: "APEv2 tag"
+            modified: pane.settings && pane.settings.apeMode !== pane.store.apeModeDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.apeMode = pane.store.apeModeDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.apeMode = pane.store.apeModeDefault
-                    }
-                    resetMenu.popup()
+            SegmentSelect {
+                labels: ["Preserve", "Strip"]
+                segWidth: 68
+                value: pane.settings ? pane.settings.apeMode : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.apeMode = v
                 }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: apeLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "APEv2 tag"
-                    modified: pane.settings && pane.settings.apeMode !== pane.store.apeModeDefault
-                }
-
-                SegmentSelect {
-                    labels: ["Preserve", "Strip"]
-                    segWidth: 68
-                    value: pane.settings ? pane.settings.apeMode : 0
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.apeMode = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 
         // ----- ID3v2 text encoding -----------------------------------------
-        Item {
+        SettingsRow {
+            id: encodingRow
             Layout.fillWidth: true
             Layout.topMargin: 8
-            implicitHeight: 42
+            text: "Text encoding"
+            modified: pane.settings && pane.settings.id3v2Encoding !== pane.store.id3v2EncodingDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.id3v2Encoding = pane.store.id3v2EncodingDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.id3v2Encoding = pane.store.id3v2EncodingDefault
-                    }
-                    resetMenu.popup()
+            SegmentSelect {
+                labels: ["Latin-1", "UTF-16", "UTF-8"]
+                segWidth: 62
+                value: pane.settings ? pane.settings.id3v2Encoding : 1
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.id3v2Encoding = v
                 }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: pane.columnGutter
-
-                SettingsRowLabel {
-                    id: encodingLabel
-                    Layout.preferredWidth: pane.labelColumnWidth
-                    text: "Text encoding"
-                    modified: pane.settings && pane.settings.id3v2Encoding !== pane.store.id3v2EncodingDefault
-                }
-
-                SegmentSelect {
-                    labels: ["Latin-1", "UTF-16", "UTF-8"]
-                    segWidth: 62
-                    value: pane.settings ? pane.settings.id3v2Encoding : 1
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.id3v2Encoding = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // keeps the row's content packed left
             }
         }
 

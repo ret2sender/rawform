@@ -388,22 +388,16 @@ Window {
                         font.family: renameDialog.uiFont
                         font.pixelSize: 12
                     }
-                    ComboBox {
+                    ThemedComboBox {
                         id: presetCombo
                         Layout.fillWidth: true
                         editable: true   // the edit text doubles as the save-as name
                         enabled: !renameDialog._applying
-                        font.family: renameDialog.uiFont
-                        font.pixelSize: 12
                         textRole: "name"
 
-                        background: Rectangle {
-                            color: Theme.rowEven
-                            radius: 4
-                        }
-
                         model: presetStore.catalog()
-                        // Custom content item, three birds: selectByMouse ON
+                        // The editable content item replaces the shared combo's
+                        // read-only label, three birds: selectByMouse ON
                         // declaratively (the Basic style ships its editor with
                         // it off, the drag-select asymmetry against the
                         // pattern field), the themed edit context menu, and no
@@ -411,12 +405,15 @@ Window {
                         // ComboBox auto-syncs editText with a TextInput-based
                         // contentItem, so the one-way text binding here is the
                         // whole wiring. background null: the combo draws its
-                        // own frame; the TextField's would double-border.
+                        // own frame; the TextField's would double-border. The
+                        // rightPadding keeps typed text short of the indicator,
+                        // as the shared label does.
                         contentItem: TextField {
                             id: presetEditor
                             background: null
                             enabled: presetCombo.editable
                             font: presetCombo.font
+                            rightPadding: presetCombo.indicator.width + presetCombo.spacing
                             text: presetCombo.editable ? presetCombo.editText
                                                        : presetCombo.displayText
                             selectByMouse: true

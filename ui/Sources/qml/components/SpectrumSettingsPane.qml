@@ -30,8 +30,9 @@
 // drives both the modified-from-default accent dot and the right-click reset,
 // exactly as the ReplayGain rows do.
 //
-// The selector and the row chrome are local inline components styled to the app, so
-// the whole page stays one file and matches the ReplayGain page visually.
+// The row is a SettingsRow with its own SettingsResetMenu, as on the sibling
+// panes; with a single row there is no label column to align. The selector is a
+// local inline component styled to the app.
 
 pragma ComponentBehavior: Bound
 
@@ -52,18 +53,7 @@ Item {
     property SpectrumProvider provider: null
     property string uiFont: Theme.uiFont
 
-    // Shared right-click reset menu, same shape as the ReplayGain pane.
-    ThemedMenu {
-        id: resetMenu
-        property var doReset: null
-        Action {
-            text: "Reset to default"
-            // The var slot is the mechanism: each row assigns its own reset
-            // closure before popping the menu, and a declared function could
-            // not be reassigned per row.
-            onTriggered: if (resetMenu.doReset) resetMenu.doReset()  // qmllint disable use-proper-function
-        }
-    }
+    SettingsResetMenu { id: resetMenu }
 
     ColumnLayout {
         anchors.fill: parent
@@ -86,38 +76,18 @@ Item {
         }
 
         // ----- Analyzer source ---------------------------------------------
-        Item {
+        SettingsRow {
             Layout.fillWidth: true
-            implicitHeight: 46
+            text: "Analyzer source"
+            modified: pane.settings && pane.settings.spectrumSource !== pane.provider.sourceDefault
+            resetMenu: resetMenu
+            onReset: if (pane.settings) pane.settings.spectrumSource = pane.provider.sourceDefault
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    resetMenu.doReset = function () {
-                        if (pane.settings) pane.settings.spectrumSource = pane.provider.sourceDefault
-                    }
-                    resetMenu.popup()
+            SourceSelect {
+                value: pane.settings ? pane.settings.spectrumSource : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.spectrumSource = v
                 }
-            }
-
-            RowLayout {
-                width: parent.width
-                spacing: 8
-
-                SettingsRowLabel {
-                    text: "Analyzer source"
-                    modified: pane.settings && pane.settings.spectrumSource !== pane.provider.sourceDefault
-                }
-
-                SourceSelect {
-                    value: pane.settings ? pane.settings.spectrumSource : 0
-                    onPicked: function (v) {
-                        if (pane.settings) pane.settings.spectrumSource = v
-                    }
-                }
-
-                Item { Layout.fillWidth: true }  // Spacer to push everything to the left
             }
         }
 
