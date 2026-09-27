@@ -1,4 +1,4 @@
-# rawform
+![](docs/images/rawform_logo.png)
 
 [![CI](https://github.com/ret2sender/rawform/actions/workflows/ci.yml/badge.svg)](https://github.com/ret2sender/rawform/actions/workflows/ci.yml)
 
@@ -278,7 +278,7 @@ dependencies), and anything listed there would be missing on another
 machine.
 
 The `.dmg` is named from `ui/VERSION.txt`, e.g.
-`rawform-1.0.0-macos-arm64.dmg`; non-Release builds get a `-debug` style
+`rawform-<version>-macos-arm64.dmg`; non-Release builds get a `-debug` style
 suffix so they cannot masquerade as releases.
 
 ### Opening an unsigned macOS build
@@ -314,7 +314,7 @@ not on Flathub yet (submission is a separate, future effort), so there is no
 store listing to search for.
 
 ```sh
-flatpak install --user rawform-1.0.0-x86_64.flatpak
+flatpak install --user rawform-<version>-x86_64.flatpak
 flatpak run com.rawform.app
 ```
 

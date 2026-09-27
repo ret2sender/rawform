@@ -5,6 +5,83 @@ All notable changes to rawform are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-26
+
+A keyboard and polish release: transport and playlist commands get menu
+entries and shortcuts, seeking works from the keyboard, the tool windows
+behave more consistently, and two long-session memory problems on Linux are
+fixed.
+
+### Added
+
+- Playback menu with Play / Pause (Space), Stop (Ctrl+`), Previous (Ctrl+<)
+  and Next (Ctrl+>), wired to the same controller calls as the player bar
+  buttons so the menu, its shortcuts, and the buttons cannot diverge.
+- Shortcuts for the playlist file commands: New Playlist (Ctrl+N), Open
+  playlist (Ctrl+O), Save playlist (Ctrl+S), and a new Close playlist entry
+  (Ctrl+W); Settings opens with Ctrl+P. Every shortcut is declared on its
+  menu item and drawn as a right-aligned hint in the platform's native
+  spelling (Cmd on macOS).
+- Keyboard seeking: Left / Right in the playlist step playback by 5 seconds,
+  while playing or paused. A held key accumulates into one throttled seek
+  per window instead of flushing the engine on every auto-repeat, and the
+  step measures from the seek in flight rather than from the stale reported
+  position. A no-op while stopped or on an unseekable source.
+- A step badge above the seek bar's fill tip shows what each keyboard seek
+  actually did ("+5", "-5", or "+3" against the end of the track), compounds
+  across a run of presses ("+15"), and fades away after the last one.
+- Page Up / Page Down and Home / End in the playlist, joining Up / Down as
+  cursor keys; Shift on any of them grows the selection from the anchor row.
+- Double-click on the title bar maximizes or restores the window. On macOS
+  this follows the system's "Double-click a window's title bar to" setting
+  (zoom, minimize, or none) and picks up a change in System Settings without
+  a restart.
+- The Settings and Custom Playlist Columns windows are resizable, with edge
+  grips like the other tool windows; their sizes persist in `window.yaml`.
+
+### Changed
+
+- Playlist reveal shortcuts: Ctrl+F now reveals the playing track, switching
+  to its tab when needed (was Ctrl+P), and Ctrl+Shift+F centers the selected
+  tracks (was Ctrl+F). Ctrl+P is now Settings.
+- Properties window: every transient message (Tools menu and context menu
+  hover hints, the busy label during a write or reload pass, status and
+  failure messages) lands in one log bar between the tab strip and the panes
+  instead of being spread across the panes. The bar sits above the panes so
+  no popup ever covers it.
+- Settings window: larger default and minimum size (720 x 480), and the
+  panes rebuilt on shared row, switch, and combo box components. Combo box
+  dropdowns now carry the same frosted backdrop as the menus.
+- The close "x" of the frameless tool dialogs (Settings, About, Properties,
+  Custom Columns, Rename Files, Edit Value) is one shared component with a
+  single look and hover treatment.
+- Documentation and comment conformance pass over the audio engine and the
+  UI sources; no behavior change.
+- README: the TagLib section notes that Fedora 44 and later ship a
+  qualifying 2.x `taglib-devel`, keeping the pinned source build for older
+  releases; LICENSE is linked from README and THIRD-PARTY-NOTICES; project
+  logo added.
+
+### Fixed
+
+- Playlist vertical scrollbar kept its old extent after removing many tracks
+  (thousands of rows deleted, scrollbar still sized for the original count
+  until a page-sized scroll). The view now re-anchors its viewport once,
+  synchronously, at the end of a bulk removal.
+- Album art memory growth on Linux while browsing across albums. Covers
+  decode straight to the display bound instead of at full size (a 3000x3000
+  embedded JPEG is 36 MB as ARGB32), the art frame holds exactly one decoded
+  cover (pixmap cache off), glibc's mmap threshold is pinned so image-sized
+  transients return to the OS, and the heap is trimmed after each scan so a
+  large library load no longer leaves its peak resident. macOS was not
+  affected.
+- Build: qmlcachegen's generated sources no longer inherit `-Werror`. Their
+  content varies with the Qt version that produced them, and a CI image on a
+  different Qt than the workstation failed on code nobody in the tree wrote.
+- Malformed copyright header in `AppInfo.cpp` / `AppInfo.h`.
+
+[1.1.0]: https://github.com/ret2sender/rawform/releases/tag/v1.1.0
+
 ## [1.0.0] - 2026-09-12
 
 Initial public release. rawform is a foobar2000-inspired desktop audio player
