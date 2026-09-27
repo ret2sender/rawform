@@ -219,10 +219,25 @@ modules:
   - name: ffmpeg
     # buildsystem simple: FFmpeg's configure rejects unknown flags, so the
     # autotools buildsystem's extra standard arguments would fail it.
+    #
+    # --disable-ffnvcodec: FFmpeg's configure autodetects external libraries
+    # from whatever the SDK image ships, and the KDE SDK ships
+    # nv-codec-headers, so left alone the module compiles nvenc/nvdec/cuvid
+    # against a header set this manifest never pinned. The 6.11 SDK is
+    # tracked by branch, and a 2026 snapshot moved its nv-codec-headers past
+    # what n8.0's nvenc.c was written against (a renamed field in
+    # NV_ENC_CLOCK_TIMESTAMP_SET; first observed as release CI failing in
+    # libavcodec/nvenc.o with no manifest change). An audio player has no use
+    # for NVIDIA video encode/decode, so the family is switched off at its
+    # root: nvenc, nvdec, cuvid, and cuda all depend on ffnvcodec and go
+    # with it. The other autodetected video-side libraries (vaapi, vdpau,
+    # vulkan, sdl2, xcb) stay exposed to the same drift; moving to
+    # --disable-autodetect with an explicit allowlist is its own change.
     buildsystem: simple
     build-commands:
       - ./configure --prefix=/app --enable-gpl --enable-version3
         --enable-shared --disable-static --disable-programs --disable-doc
+        --disable-ffnvcodec
       - make -j ${FLATPAK_BUILDER_N_JOBS}
       - make install
     sources:
