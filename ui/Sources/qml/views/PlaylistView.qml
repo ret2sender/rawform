@@ -174,7 +174,7 @@ Item {
     // a failure is handled. -1 when nothing is pending.
     property int _pendingActivateRow: -1
 
-    // A Ctrl+F reveal parked across a tab switch. When the playing
+    // A Ctrl+T reveal parked across a tab switch. When the playing
     // track lives in ANOTHER tab, the key handler sets this and flips
     // tabs.currentIndex; tableView.onModelChanged consumes it (there, not
     // on root, so the position call always acts on the swapped-in model) once
@@ -474,7 +474,7 @@ Item {
     }
 
     // The smooth-centering animation, ONLY for the deliberate
-    // commands (Ctrl+Shift+F, the in-tab Ctrl+F, the Enter reveal), where the glide
+    // commands (Ctrl+Shift+T, the in-tab Ctrl+T, the Enter reveal), where the glide
     // from the current view to the target reads as intent. Restores, the
     // launch positioning, and the cross-tab reveal stay INSTANT: they run
     // right after a model swap, where an animation would fly in from an
@@ -509,7 +509,7 @@ Item {
             return
         }
         // The SMOOTH glide keeps the direct contentY math: its three callers
-        // (Ctrl+Shift+F, in-tab Ctrl+F, the Enter reveal) run on a settled table by
+        // (Ctrl+Shift+T, in-tab Ctrl+T, the Enter reveal) run on a settled table by
         // construction (a user keypress inside the built view), where a
         // driven contentY is safe and animatable.
         var h = root._rowHeight
@@ -540,7 +540,7 @@ Item {
     // call guarded or clamped against it at swap time acts on the OUTGOING
     // count: a parked row 5000 clamped against yesterday's 91 restores to the
     // top, and the reveal's row guard bails against a stale or mid-rebuild
-    // zero count (the observed switch-without-centering Ctrl+F, cured by a
+    // zero count (the observed switch-without-centering Ctrl+T, cured by a
     // second press once the rebuild had finished). The intent is therefore
     // applied only when tableView.rows === model.rowCount() (the model is the
     // authority; its count is correct the instant it swaps), attempted once
@@ -650,7 +650,7 @@ Item {
         _applyPendingPosition()
     }
 
-    // The in-tab half of the Ctrl+F reveal: plant the focus row on
+    // The in-tab half of the Ctrl+T reveal: plant the focus row on
     // the playing track (NoUpdate: the outline only, the selection is never
     // touched, the focus-only semantics) and center it. Reads the LIVE
     // playing row so the deferred cross-tab path lands on the track playing
@@ -665,6 +665,19 @@ Item {
             selectionModel.setCurrentIndex(_rowIndex(r),
                                            ItemSelectionModel.NoUpdate)
         _centerRow(r, smooth)
+    }
+
+    // The Find dialog's reveal: make @p row current (NoUpdate: the outline
+    // only, the selection is the dialog's to set) and glide to it. Public
+    // because the dialog lives in MainWindow; the same shape as the in-tab
+    // half of the playing-track reveal above. Out-of-range rows are ignored.
+    function revealRow(row) {
+        if (row < 0 || row >= tableView.rows)
+            return
+        if (selectionModel)
+            selectionModel.setCurrentIndex(_rowIndex(row),
+                                           ItemSelectionModel.NoUpdate)
+        _centerRow(row, true)
     }
 
     // The public quit-time capture, called by MainWindow.onClosing (the
@@ -957,7 +970,7 @@ Item {
         _widthsAcrossColumnRemoval = null
         if (tabs)
             applyWidths(tabs.activeWidths())
-        // The pending Ctrl+F reveal and the per-tab scroll restore
+        // The pending Ctrl+T reveal and the per-tab scroll restore
         // both live in tableView.onModelChanged, NOT here: this handler can
         // run before the TableView's own model binding has propagated
         // (sibling bindings of root.model, unspecified order), and a position
@@ -1418,7 +1431,7 @@ Item {
                         // has definitely swapped at this point), but APPLY it
                         // through _applyPendingPosition, which waits for the
                         // layout's row count to catch up with the model's (see
-                        // the note at the property). A parked Ctrl+F reveal
+                        // the note at the property). A parked Ctrl+T reveal
                         // WINS over the scroll restore (the whole point of the
                         // switch was the reveal); the parking is cleared
                         // consumed or not, so an unrelated switch can never
@@ -1571,7 +1584,7 @@ Item {
                         } else if (event.key === Qt.Key_A && ctrl) {
                             root._selectAll()
                             event.accepted = true
-                        } else if (event.key === Qt.Key_F && ctrl && shift) {
+                        } else if (event.key === Qt.Key_T && ctrl && shift) {
                             // Center the selected tracks' area: the
                             // MIDPOINT of the selection's bounding range, so a
                             // scattered selection centers on its span, not its
@@ -1593,7 +1606,7 @@ Item {
                                 root._centerRow(root._currentRow, true)
                             }
                             event.accepted = true
-                        } else if (event.key === Qt.Key_F && ctrl) {
+                        } else if (event.key === Qt.Key_T && ctrl) {
                             // Reveal the playing track. In this tab:
                             // plant the focus row on it and center
                             // (_revealPlayingHere). In another tab: park the

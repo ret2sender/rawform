@@ -186,6 +186,17 @@ ApplicationWindow {
         id: settingsWindow
     }
 
+    // The non-modal Find dialog (Edit > Find). Same lifetime rationale as
+    // SettingsWindow: one hide()-reused instance, so the session's last
+    // search text survives a close. It follows the ACTIVE tab through the
+    // two bindings, and reveals rows through the playlist view.
+    FindDialog {
+        id: findDialog
+        model: playlistTabs.activeModel
+        selection: playlistTabs.activeSelection
+        onRevealRow: function (row) { playlistView.revealRow(row) }
+    }
+
     // The non-modal About window (Help > About rawform). Same lifetime
     // rationale as SettingsWindow above; hostWindow lets openAbout()
     // center it over this window at open.
@@ -376,6 +387,7 @@ ApplicationWindow {
                                     playlistTabs.activeModel.removeUnavailableTracks()
                             }
 
+                            onFindRequested: findDialog.open()
                             onSettingsRequested: settingsWindow.openSettings()
 
                             // Transport, the same controller calls the

@@ -67,6 +67,7 @@ Rectangle {
     signal openPlaylistRequested()
     signal savePlaylistRequested()
     signal closePlaylistRequested()
+    signal findRequested()
     signal reloadSelectedRequested()
     signal removeUnavailableRequested()
     signal settingsRequested()
@@ -192,6 +193,12 @@ Rectangle {
             ThemedMenu {
                 id: editMenu
 
+                ThemedMenuItem {
+                    text: "Find\u2026"
+                    shortcut: "Ctrl+F"
+                    onTriggered: root.findRequested()
+                }
+                MenuSeparator {}
                 ThemedMenuItem {
                     // Semantics (selection vs whole playlist) live at the
                     // host handler, which owns the reloader.

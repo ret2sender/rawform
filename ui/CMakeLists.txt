@@ -222,10 +222,16 @@ set(APP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.h
 
+        # presets/: the shared named-preset store (name-keyed { name, pattern }
+        # records + last-used, one YAML file each); RenamePatternStore and
+        # SearchPresetStore are its two file bindings.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/presets/NamedPatternStore.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/presets/NamedPatternStore.h
+
         # rename/: File Operations > Rename To. The pure pattern-to-name
         # pipeline (per-value scene sanitizer + stem finalize + verdict), the
         # off-thread on-disk renamer (QML_ELEMENT; the dialog's write half),
-        # the previewer, and the named-preset store (QML_ELEMENT;
+        # the previewer, and the preset binding (QML_ELEMENT;
         # rename_patterns.yaml).
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenameSanitizer.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenameSanitizer.h
@@ -235,6 +241,17 @@ set(APP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenamePatternStore.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenamePreviewer.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenamePreviewer.h
+
+        # search/: Edit > Find. The pure Filter-box grammar, validation and
+        # per-track match test (Quick-free), the live search session over
+        # one playlist (QML_ELEMENT; the dialog's engine, the filter proxy's
+        # row test), and the preset binding (QML_ELEMENT; search_filters.yaml).
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearchFilter.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearchFilter.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearch.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearch.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/SearchPresetStore.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/SearchPresetStore.h
 
         # metadata/: metadata-pane model + on-disk freshness pass
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/MetadataModel.cpp
@@ -355,6 +372,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/views/PlaylistView.qml
         Sources/qml/views/PropertiesWindow.qml
         Sources/qml/views/RenameFilesDialog.qml
+        Sources/qml/views/FindDialog.qml
         Sources/qml/views/SettingsWindow.qml
         # components/: reusable themed widgets
         Sources/qml/components/AppIcon.qml
@@ -536,6 +554,8 @@ target_include_directories(rawform PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/window
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/presets
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search
         # rawform_audio's PUBLIC include (../audio/include) arrives transitively
         # through the linked target. Its private headers live under src/, so add
         # that path explicitly to reach the sinks (sinks/CoreAudioSink.h,
@@ -631,6 +651,28 @@ if(RAWFORM_BUILD_TESTS)
             yaml-cpp::yaml-cpp
     )
     add_test(NAME rename_sanitizer COMMAND rawform_rename_test)
+
+    # Same recipe for the Find grammar and match test: Quick-free, no model.
+    # PlaylistSearchFilter.cpp renders through PatternEvaluator (which pulls
+    # in ColumnSchema and Formats), hence the same spine plus the unit under
+    # test.
+    add_executable(rawform_search_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaylistSearchFilterTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearchFilter.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/PatternEvaluator.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+    )
+    target_include_directories(rawform_search_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media
+    )
+    target_link_libraries(rawform_search_test PRIVATE
+            Qt6::Core
+            yaml-cpp::yaml-cpp
+    )
+    add_test(NAME playlist_search_filter COMMAND rawform_search_test)
 
     # ------------------------------------------------------------------
     # The .rwfpl playlist-format test: round-trip fidelity, the full

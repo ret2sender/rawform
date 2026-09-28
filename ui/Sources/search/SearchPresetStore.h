@@ -18,13 +18,15 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// RenamePatternStore.h
+// SearchPresetStore.h
 //
-// Saved rename patterns for File Operations > Rename To: named
-// { name, pattern } presets, persisted to rename_patterns.yaml under
-// userConfigDir(). The whole contract (tolerant load, name-keyed upsert,
-// last-used, atomic write-through) is NamedPatternStore's; this type only
-// binds the file name and the banner, and is the QML_ELEMENT the rename
+// Saved Find filters for Edit > Find: named { name, pattern } presets where
+// the pattern is a Filter-box expression (see search/PlaylistSearchFilter.h
+// for the grammar), persisted to search_filters.yaml under userConfigDir().
+// A preset stores the Filter text only, never the String box: a preset is a
+// search SCOPE, not a query. The whole contract (tolerant load, name-keyed
+// upsert, last-used, atomic write-through) is NamedPatternStore's; this type
+// only binds the file name and the banner, and is the QML_ELEMENT the Find
 // dialog instantiates.
 
 #pragma once
@@ -36,14 +38,14 @@
 
 namespace rawform {
 
-class RenamePatternStore : public NamedPatternStore {
+class SearchPresetStore : public NamedPatternStore {
     Q_OBJECT
     QML_ELEMENT
 
 public:
-    /// Loads rename_patterns.yaml immediately (see NamedPatternStore).
-    explicit RenamePatternStore(QObject* parent = nullptr);
-    ~RenamePatternStore() override = default;
+    /// Loads search_filters.yaml immediately (see NamedPatternStore).
+    explicit SearchPresetStore(QObject* parent = nullptr);
+    ~SearchPresetStore() override = default;
 };
 
 } // namespace rawform

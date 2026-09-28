@@ -43,6 +43,7 @@
 
 #include <QList>
 #include <QObject>
+#include <QQmlEngine> // QML_ANONYMOUS
 #include <QString>
 #include <QVariantList>
 
@@ -50,6 +51,11 @@ namespace rawform {
 
 class CustomColumnRegistry : public QObject {
     Q_OBJECT
+    // Not creatable from QML (main.cpp owns the one instance and exposes it as
+    // the `customColumns` context property); registered anonymously so the
+    // instance can be assigned to a typed CustomColumnRegistry* property
+    // (PlaylistSearch::customColumns).
+    QML_ANONYMOUS
 
 public:
     explicit CustomColumnRegistry(QObject* parent = nullptr);

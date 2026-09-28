@@ -47,8 +47,9 @@
 //
 // plus the "rawformart" image provider (AlbumArtProvider, engine-owned). The
 // types QML instantiates itself (the Properties window's models, editors, and
-// scan controller; FileRenamer, RenamePreviewer, RenamePatternStore; AppInfo,
-// Clipboard, WindowFocus) register through QML_ELEMENT and need nothing here.
+// scan controller; FileRenamer, RenamePreviewer, RenamePatternStore;
+// PlaylistSearch, SearchPresetStore; AppInfo, Clipboard, WindowFocus) register
+// through QML_ELEMENT and need nothing here.
 //
 // The one piece of behavior here is the seam that re-aggregates the metadata
 // pane whenever the active tab's selection changes or the active tab switches.

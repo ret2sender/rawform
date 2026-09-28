@@ -405,15 +405,14 @@ Window {
                         // ComboBox auto-syncs editText with a TextInput-based
                         // contentItem, so the one-way text binding here is the
                         // whole wiring. background null: the combo draws its
-                        // own frame; the TextField's would double-border. The
-                        // rightPadding keeps typed text short of the indicator,
-                        // as the shared label does.
+                        // own frame; the TextField's would double-border. No
+                        // padding for the indicator: the shared combo keeps
+                        // the content item short of it.
                         contentItem: TextField {
                             id: presetEditor
                             background: null
                             enabled: presetCombo.editable
                             font: presetCombo.font
-                            rightPadding: presetCombo.indicator.width + presetCombo.spacing
                             text: presetCombo.editable ? presetCombo.editText
                                                        : presetCombo.displayText
                             selectByMouse: true

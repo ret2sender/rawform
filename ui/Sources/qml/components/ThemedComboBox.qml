@@ -28,8 +28,11 @@
 // The content item is the one part callers own, because it is where purpose differs:
 // the default here is a read-only eliding label (a device picker), and an editable
 // caller replaces it with a TextField wired to editText (a preset name that doubles
-// as a save-as field). An override should carry the same rightPadding as the default
-// so its text stops short of the indicator.
+// as a save-as field). The indicator's strip is folded into the control's
+// rightPadding (Basic's own arrangement), so any content item ends short of it and
+// needs no padding of its own. That is load-bearing for an editable override: a
+// TextField laid over the indicator accepts the press that should toggle the popup,
+// and the dropdown reads as dead.
 //
 // Vertical padding is zero and the background's implicit height rules: Basic sizes a
 // ComboBox from max(background, content + padding), and a TextField content item
@@ -57,8 +60,12 @@ ComboBox {
     font.family: Theme.uiFont
     font.pixelSize: 12
     spacing: 6
-    leftPadding: 6
-    rightPadding: 6
+    padding: 6
+    leftPadding: padding
+    // The indicator's width plus the gap, so the content item stops before it (see
+    // the file comment). Guarded like Basic does: the indicator can be null briefly
+    // during construction.
+    rightPadding: padding + (indicator ? indicator.width + spacing : 0)
     topPadding: 0
     bottomPadding: 0
 
@@ -73,7 +80,6 @@ ComboBox {
 
     contentItem: Text {
         id: label
-        rightPadding: control.indicator.width + control.spacing
         text: control.displayText
         font: control.font
         color: control.enabled ? Theme.textPrimary : Theme.textDisabled
@@ -84,7 +90,7 @@ ComboBox {
     // Basic's own arrow asset, recolored; the impl import exists for this and is the
     // one Basic itself uses.
     indicator: ColorImage {
-        x: control.width - width - control.rightPadding
+        x: control.width - width - control.padding
         y: control.topPadding + (control.availableHeight - height) / 2
         color: Theme.textSecondary
         source: "qrc:/qt-project.org/imports/QtQuick/Controls/Basic/images/double-arrow.png"

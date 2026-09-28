@@ -21,7 +21,7 @@
 // YamlFile.h
 //
 // The shared file-IO half of the app's YAML persistence idiom. Each store
-// (SettingsStore, WindowGeometryStore, RenamePatternStore,
+// (SettingsStore, WindowGeometryStore, NamedPatternStore,
 // CustomColumnRegistry, SpectrumProvider, AudioController) keeps its own
 // schema: what to emit, the banner comment, and the tolerant per-key parse.
 // What is shared is only the IO discipline, so every store gets the same
