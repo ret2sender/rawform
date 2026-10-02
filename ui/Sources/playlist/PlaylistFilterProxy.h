@@ -133,6 +133,16 @@ public:
     /// appending is the predictable reading).
     Q_INVOKABLE [[nodiscard]] int mapGapToSource(int gap) const;
 
+    /// The SOURCE row span [first, last] as a proxy-space selection: one
+    /// full-width range per run of contiguous proxy rows (hidden rows split
+    /// a run; a span entirely hidden maps to an empty selection). This is the
+    /// row-aware twin of mapSelectionFromSource, which Qt implements by
+    /// expanding the span to every CELL and emitting one range per cell: a
+    /// 15k-row load selected through it handed select() 120k ranges, froze
+    /// the UI for its merge, and left a selection of 120k fragments behind.
+    /// Unfiltered, this returns the single range the source span is.
+    [[nodiscard]] QItemSelection mapRowSpanFromSource(int first, int last) const;
+
     // --- Column ops, forwarded (column space is shared) --------------------
     Q_INVOKABLE bool moveVisualColumn(int from, int to);
     Q_INVOKABLE [[nodiscard]] int columnAlignment(int column) const;

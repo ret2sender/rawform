@@ -139,6 +139,41 @@ int PlaylistFilterProxy::mapGapToSource(int gap) const {
     return mapRowToSource(gap);
 }
 
+QItemSelection PlaylistFilterProxy::mapRowSpanFromSource(int first, int last) const {
+    QItemSelection out;
+    const int cols = columnCount();
+    if (cols <= 0 || first > last) {
+        return out;
+    }
+    first = std::max(first, 0);
+    last  = std::min(last, m_source->rowCount() - 1);
+    // Walk the source rows once; a hidden row (or a jump in the mapping)
+    // closes the run being built. Proxy rows are monotonic in source rows
+    // (no sorting), so a run is contiguous exactly when each mapped row is
+    // the previous one plus one.
+    int runLo = -1;
+    int runHi = -1;
+    for (int src = first; src <= last; ++src) {
+        const int px = mapRowFromSource(src);
+        if (px < 0) {
+            continue;
+        }
+        if (runLo >= 0 && px == runHi + 1) {
+            runHi = px;
+            continue;
+        }
+        if (runLo >= 0) {
+            out.select(index(runLo, 0), index(runHi, cols - 1));
+        }
+        runLo = px;
+        runHi = px;
+    }
+    if (runLo >= 0) {
+        out.select(index(runLo, 0), index(runHi, cols - 1));
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------------
 // Column ops (forwarded)
 // ---------------------------------------------------------------------------

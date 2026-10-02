@@ -1089,12 +1089,11 @@ void PlaylistTabs::onScanFinished(int added, int skipped) {
     QItemSelectionModel* sel = m_scanTarget.selection;
     if (m && px && sel && m_insertedCount > 0) {
         // The inserted range in SOURCE rows, mapped to the proxy the selection
-        // is bound to; rows a filter hides drop out of the mapped selection.
+        // is bound to as full-width row runs (ONE range unfiltered; rows a
+        // filter hides drop out). Not mapSelectionFromSource: Qt's expands
+        // the span to one range per CELL, which froze a 15k-row load.
         const int last = m_insertedFirst + m_insertedCount - 1;
-        const int cols = m->columnCount();
-        const QModelIndex tl = m->index(m_insertedFirst, 0);
-        const QModelIndex br = m->index(last, cols > 0 ? cols - 1 : 0);
-        sel->select(px->mapSelectionFromSource(QItemSelection(tl, br)),
+        sel->select(px->mapRowSpanFromSource(m_insertedFirst, last),
                     QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         sel->setCurrentIndex(px->mapFromSource(m->index(m_insertedFirst, 0)),
                              QItemSelectionModel::NoUpdate);
