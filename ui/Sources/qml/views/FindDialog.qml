@@ -315,7 +315,7 @@ Window {
                         findDialog._step(!!(event.modifiers & Qt.ShiftModifier))
                         event.accepted = true
                     }
-                    ContextMenu.menu: EditMenu { editor: stringField }
+                    ContextMenu.menu: ThemedEditMenu { editor: stringField }
                 }
 
                 Text {
@@ -340,7 +340,7 @@ Window {
                         border.color: search.filterHasInvalid ? Theme.danger : Theme.accentSoft
                     }
                     onTextChanged: search.filterText = text
-                    ContextMenu.menu: EditMenu { editor: filterField }
+                    ContextMenu.menu: ThemedEditMenu { editor: filterField }
 
                     // The invalid-entry underlines, one per span, drawn in the
                     // field's own coordinates just under the glyph baseline.
@@ -412,7 +412,7 @@ Window {
                                                        : presetCombo.displayText
                             selectByMouse: true
                             verticalAlignment: Text.AlignVCenter
-                            ContextMenu.menu: EditMenu { editor: presetEditor }
+                            ContextMenu.menu: ThemedEditMenu { editor: presetEditor }
                         }
                         onActivated: function (index) {
                             findDialog._setPresetText(presetCombo.textAt(index))
@@ -437,7 +437,7 @@ Window {
                             }
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Load"
                         enabled: presetCombo.editText.length > 0
                                  && presetStore.patternFor(presetCombo.editText).length > 0
@@ -447,7 +447,7 @@ Window {
                             findDialog._flash("Loaded preset '" + presetCombo.editText + "'")
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Save"
                         enabled: presetCombo.editText.trim().length > 0
                                  && filterField.text.length > 0
@@ -457,7 +457,7 @@ Window {
                             findDialog._flash("Saved preset '" + presetCombo.editText.trim() + "'")
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Delete"
                         enabled: presetCombo.editText.length > 0
                                  && presetStore.patternFor(presetCombo.editText).length > 0
@@ -506,7 +506,7 @@ Window {
                     anchors.rightMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Close"
                         onClicked: findDialog.dismiss()
                     }
@@ -521,85 +521,5 @@ Window {
     WindowResizeGrips {
         target: findDialog
         topInset: 40
-    }
-
-    // The app-themed replacement for Qt's stock text-edit context menu
-    // (RenameFilesDialog's component, verbatim).
-    component EditMenu: ThemedMenu {
-        id: editMenu
-        property TextField editor: null
-
-        ThemedMenuItem {
-            text: "Undo"
-            enabled: editMenu.editor !== null && editMenu.editor.canUndo
-            onTriggered: editMenu.editor.undo()
-        }
-        ThemedMenuItem {
-            text: "Redo"
-            enabled: editMenu.editor !== null && editMenu.editor.canRedo
-            onTriggered: editMenu.editor.redo()
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Cut"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.cut()
-        }
-        ThemedMenuItem {
-            text: "Copy"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.copy()
-        }
-        ThemedMenuItem {
-            text: "Paste"
-            enabled: editMenu.editor !== null && editMenu.editor.canPaste
-            onTriggered: editMenu.editor.paste()
-        }
-        ThemedMenuItem {
-            text: "Delete"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.remove(editMenu.editor.selectionStart,
-                                                editMenu.editor.selectionEnd)
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Select All"
-            enabled: editMenu.editor !== null && editMenu.editor.length > 0
-            onTriggered: editMenu.editor.selectAll()
-        }
-    }
-
-    // Same shape as the other tool windows' footer buttons.
-    component FooterButton: Rectangle {
-        id: fbtn
-        property string label: ""
-        property bool accent: false
-        signal clicked()
-
-        implicitWidth: Math.max(72, btnText.implicitWidth + 28)
-        implicitHeight: 30
-        radius: 5
-        color: !enabled ? Theme.surfaceControl
-             : fbtnHover.hovered ? (accent ? Theme.accentButtonHover : Theme.surfaceControlHover)
-             : (accent ? Theme.accentSoft : Theme.buttonFace)
-        border.color: accent ? "transparent" : Theme.border
-        border.width: accent ? 0 : 1
-        opacity: enabled ? 1.0 : 0.5
-
-        Text {
-            id: btnText
-            anchors.centerIn: parent
-            text: fbtn.label
-            color: !fbtn.enabled ? Theme.textDisabled
-                 : fbtn.accent ? Theme.textOnAccent : Theme.textPrimary
-            font.family: findDialog.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-        }
-        HoverHandler { id: fbtnHover }
-        TapHandler { onTapped: if (fbtn.enabled) fbtn.clicked() }
     }
 }

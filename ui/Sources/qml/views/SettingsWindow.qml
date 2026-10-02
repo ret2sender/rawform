@@ -399,16 +399,16 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
 
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Cancel"
                         onClicked: { settingsWindow.reseed(); settingsWindow.dismiss() }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Apply"
                         enabled: settingsWindow.dirty
                         onClicked: settingsWindow.applyStaged()
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "OK"
                         accent: true
                         onClicked: { settingsWindow.applyStaged(); settingsWindow.dismiss() }
@@ -424,37 +424,5 @@ Window {
     WindowResizeGrips {
         target: settingsWindow
         topInset: 40
-    }
-
-    // -----------------------------------------------------------------------
-    // A small themed footer button. accent paints the primary (OK) variant.
-    // -----------------------------------------------------------------------
-    component FooterButton: Rectangle {
-        id: fbtn
-        property string label: ""
-        property bool accent: false
-        signal clicked()
-
-        implicitWidth: Math.max(72, btnText.implicitWidth + 28)
-        implicitHeight: 30
-        radius: 5
-        color: !enabled ? Theme.surfaceControl
-             : fbtnHover.hovered ? (accent ? Theme.accentButtonHover : Theme.surfaceControlHover)
-             : (accent ? Theme.accentSoft : Theme.buttonFace)
-        border.color: accent ? "transparent" : Theme.border
-        border.width: accent ? 0 : 1
-        opacity: enabled ? 1.0 : 0.5
-
-        Text {
-            id: btnText
-            anchors.centerIn: parent
-            text: fbtn.label
-            color: fbtn.accent ? Theme.textOnAccent : Theme.textPrimary
-            font.family: settingsWindow.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-        }
-        HoverHandler { id: fbtnHover }
-        TapHandler { onTapped: if (fbtn.enabled) fbtn.clicked() }
     }
 }

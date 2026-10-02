@@ -403,6 +403,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/StatusLogBar.qml
         Sources/qml/components/TaggingSettingsPane.qml
         Sources/qml/components/ThemedComboBox.qml
+        Sources/qml/components/ThemedEditMenu.qml
         Sources/qml/components/ThemedMenu.qml
         Sources/qml/components/ThemedMenuBar.qml
         Sources/qml/components/ThemedMenuItem.qml
@@ -411,6 +412,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/TitleBar.qml
         Sources/qml/components/TitleBarControls.qml
         Sources/qml/components/TitleBarStyle.qml
+        Sources/qml/components/ToolDialogButton.qml
         Sources/qml/components/ToolDialogCloseButton.qml
         Sources/qml/components/VolumeSlider.qml
         Sources/qml/components/WindowResizeGrips.qml

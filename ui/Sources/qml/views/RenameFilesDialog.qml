@@ -375,7 +375,7 @@ Window {
                         // Replace Qt's stock edit menu with the app-themed one
                         // (the stock one renders in platform style and clashes
                         // with every other rawform menu).
-                        ContextMenu.menu: EditMenu { editor: patternField }
+                        ContextMenu.menu: ThemedEditMenu { editor: patternField }
                     }
                 }
 
@@ -417,7 +417,7 @@ Window {
                                                        : presetCombo.displayText
                             selectByMouse: true
                             verticalAlignment: Text.AlignVCenter
-                            ContextMenu.menu: EditMenu { editor: presetEditor }
+                            ContextMenu.menu: ThemedEditMenu { editor: presetEditor }
                         }
                         // Selection must repaint through the helper too:
                         // with the text binding severed (see _setPresetText),
@@ -448,7 +448,7 @@ Window {
                             }
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Load"
                         enabled: !renameDialog._applying
                                  && presetCombo.editText.length > 0
@@ -463,7 +463,7 @@ Window {
                                 "Loaded preset '" + presetCombo.editText + "'")
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Save"
                         enabled: !renameDialog._applying
                                  && presetCombo.editText.trim().length > 0
@@ -476,7 +476,7 @@ Window {
                                 "Saved preset '" + presetCombo.editText.trim() + "'")
                         }
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Delete"
                         // Only a name that actually resolves to a preset can
                         // be deleted (same existence test Load uses).
@@ -663,17 +663,17 @@ Window {
                     anchors.rightMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Cancel"
                         enabled: !renameDialog._applying
                         onClicked: renameDialog.close()
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Apply"
                         enabled: renameDialog._canApply
                         onClicked: renameDialog._apply(false)
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "OK"
                         accent: true
                         enabled: renameDialog._canApply
@@ -691,91 +691,5 @@ Window {
     WindowResizeGrips {
         target: renameDialog
         topInset: 40
-    }
-
-    // The app-themed replacement for Qt's stock text-edit context menu, shared
-    // by the pattern field and the preset editor. Typed against TextField so
-    // the enabled bindings (canUndo etc) are statically checked. Scoped to
-    // this dialog; the other text fields (Properties, Settings, Custom
-    // Columns) keep Qt's stock edit menu.
-    component EditMenu: ThemedMenu {
-        id: editMenu
-        property TextField editor: null
-
-        ThemedMenuItem {
-            text: "Undo"
-            enabled: editMenu.editor !== null && editMenu.editor.canUndo
-            onTriggered: editMenu.editor.undo()
-        }
-        ThemedMenuItem {
-            text: "Redo"
-            enabled: editMenu.editor !== null && editMenu.editor.canRedo
-            onTriggered: editMenu.editor.redo()
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Cut"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.cut()
-        }
-        ThemedMenuItem {
-            text: "Copy"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.copy()
-        }
-        ThemedMenuItem {
-            text: "Paste"
-            enabled: editMenu.editor !== null && editMenu.editor.canPaste
-            onTriggered: editMenu.editor.paste()
-        }
-        ThemedMenuItem {
-            text: "Delete"
-            enabled: editMenu.editor !== null
-                     && editMenu.editor.selectedText.length > 0
-            onTriggered: editMenu.editor.remove(editMenu.editor.selectionStart,
-                                                editMenu.editor.selectionEnd)
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Select All"
-            enabled: editMenu.editor !== null && editMenu.editor.length > 0
-            onTriggered: editMenu.editor.selectAll()
-        }
-    }
-
-    // Same shape as the other tool windows' footer buttons.
-    component FooterButton: Rectangle {
-        id: fbtn
-        property string label: ""
-        property bool accent: false
-        signal clicked()
-
-        implicitWidth: Math.max(72, btnText.implicitWidth + 28)
-        implicitHeight: 30
-        radius: 5
-        color: !enabled ? Theme.surfaceControl
-             : fbtnHover.hovered ? (accent ? Theme.accentButtonHover : Theme.surfaceControlHover)
-             : (accent ? Theme.accentSoft : Theme.buttonFace)
-        border.color: accent ? "transparent" : Theme.border
-        border.width: accent ? 0 : 1
-        opacity: enabled ? 1.0 : 0.5
-
-        Text {
-            id: btnText
-            anchors.centerIn: parent
-            text: fbtn.label
-            // Disabled accent buttons kept textOnAccent over the disabled
-            // gray face, which vanished (the invisible-OK bug); the disabled
-            // state now overrides the accent text color.
-            color: !fbtn.enabled ? Theme.textDisabled
-                 : fbtn.accent ? Theme.textOnAccent : Theme.textPrimary
-            font.family: renameDialog.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-        }
-        HoverHandler { id: fbtnHover }
-        TapHandler { onTapped: if (fbtn.enabled) fbtn.clicked() }
     }
 }

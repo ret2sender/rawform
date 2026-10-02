@@ -910,7 +910,7 @@ Window {
                 bottomRightRadius: 8
                 color: Theme.headerBand
 
-                FooterButton {
+                ToolDialogButton {
                     id: toolsBtn
                     anchors.left: parent.left
                     anchors.leftMargin: 16
@@ -1024,12 +1024,12 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
 
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Cancel"
                         enabled: !propertiesWindow._applying
                         onClicked: propertiesWindow._cancel()
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "Apply"
                         // The strip flag is an enabler in its own right:
                         // Remove tags on already-blank fields stages nothing in
@@ -1039,7 +1039,7 @@ Window {
                                  && !propertiesWindow._applying
                         onClicked: propertiesWindow._apply(false)
                     }
-                    FooterButton {
+                    ToolDialogButton {
                         label: "OK"
                         accent: true
                         enabled: !propertiesWindow._applying
@@ -1099,34 +1099,5 @@ Window {
     WindowResizeGrips {
         target: propertiesWindow
         topInset: 40
-    }
-
-    component FooterButton: Rectangle {
-        id: fbtn
-        property string label: ""
-        property bool accent: false
-        signal clicked()
-
-        implicitWidth: Math.max(72, btnText.implicitWidth + 28)
-        implicitHeight: 30
-        radius: 5
-        color: !enabled ? Theme.surfaceControl
-             : fbtnHover.hovered ? (accent ? Theme.accentButtonHover : Theme.surfaceControlHover)
-             : (accent ? Theme.accentSoft : Theme.buttonFace)
-        border.color: accent ? "transparent" : Theme.border
-        border.width: accent ? 0 : 1
-        opacity: enabled ? 1.0 : 0.5
-
-        Text {
-            id: btnText
-            anchors.centerIn: parent
-            text: fbtn.label
-            color: fbtn.accent ? Theme.textOnAccent : Theme.textPrimary
-            font.family: propertiesWindow.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-        }
-        HoverHandler { id: fbtnHover }
-        TapHandler { onTapped: if (fbtn.enabled) fbtn.clicked() }
     }
 }
