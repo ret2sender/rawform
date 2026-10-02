@@ -48,7 +48,8 @@
 // ACTIVE POINTERS. activeModel()/activeView()/activeSelection()/activeReloader()
 // expose the current tab's objects; QML binds to them and they change
 // (activeChanged) on every switch. activeSelectionChanged() fires for a
-// selection change OR a switch, so the metadata pane re-aggregates uniformly.
+// selection change OR a switch, so the metadata pane re-aggregates uniformly;
+// it is coalesced to one emission per event-loop turn (see the signal).
 // activeView is the filter proxy the playlist view shows; activeModel stays the
 // source model, which is what every C++ consumer takes.
 //
@@ -347,7 +348,14 @@ signals:
     /// re-binds; main.cpp re-pushes the metadata selection.
     void activeChanged();
     /// The active tab's selection changed OR the active tab switched. The single
-    /// trigger the metadata pane listens to.
+    /// trigger the metadata pane and the art resolver listen to. Coalesced:
+    /// every source arms notifyActiveSelection() and the signal is emitted
+    /// once, on the next event-loop turn. A click and the select-on-finish
+    /// are each a select() AND a setCurrentIndex(), two selection-model
+    /// signals for one gesture, and each emission costs a full re-aggregation
+    /// (measured at 51 ms for a 15k-row select-all), so uncoalesced every
+    /// gesture paid twice. Consumers read the active tab at emission time,
+    /// which is the state they want.
     void activeSelectionChanged();
     /// The active tab's COLUMN LAYOUT changed from C++ (an async .rwfpl load
     /// applied its saved order/widths to the active model). QML re-seeds the
@@ -411,6 +419,9 @@ private:
 
     // Construction / teardown helpers.
     void applyActiveSearch();           ///< m_activeSearch on the active proxy only
+    /// Arm the coalesced activeSelectionChanged (see the signal); a no-op
+    /// while one is already queued.
+    void notifyActiveSelection();
     /// Build model + proxy + selection + reloader + timer and wire them; the
     /// tab is NOT yet inserted.
     Tab* makeTab(const QString& title);
@@ -469,6 +480,7 @@ private:
     QList<Tab*>                 m_tabs;
     int                         m_current = -1;
     QPointer<PlaylistSearch>    m_activeSearch;  ///< see activeSearch
+    bool                        m_selectionNotifyPending = false; ///< see the signal
     ColumnSchema                m_schemaProto;
     const CustomColumnRegistry* m_customColumns = nullptr;
     TrackScanner*               m_scanner = nullptr;

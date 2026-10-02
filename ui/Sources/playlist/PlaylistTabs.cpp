@@ -157,9 +157,10 @@ void PlaylistTabs::setCurrentIndex(int index) {
     emit currentIndexChanged();
     // The bound model/selection/reloader pointers all change together; QML
     // re-binds PlaylistView and the album-art wiring, and the metadata pane
-    // re-aggregates the new tab's selection.
+    // re-aggregates the new tab's selection (coalesced, like every other
+    // source of that signal).
     emit activeChanged();
-    emit activeSelectionChanged();
+    notifyActiveSelection();
     // AFTER the emissions: the Find dialog's search re-binds its model during
     // activeChanged, so by now it describes the incoming tab (its match set
     // is invalidated on the rebind and refilled on its timer). Moving the
@@ -175,6 +176,24 @@ void PlaylistTabs::setActiveSearch(PlaylistSearch* search) {
     m_activeSearch = search;
     applyActiveSearch();
     emit activeSearchChanged();
+}
+
+void PlaylistTabs::notifyActiveSelection() {
+    // A queued call to self rather than a timer: it rides the same event the
+    // selection model's signals are delivered in, so the emission lands
+    // right after the gesture that armed it, and a destroyed receiver drops
+    // its posted event, so no teardown ordering is owed.
+    if (m_selectionNotifyPending) {
+        return;
+    }
+    m_selectionNotifyPending = true;
+    QMetaObject::invokeMethod(
+        this,
+        [this]() {
+            m_selectionNotifyPending = false;
+            emit activeSelectionChanged();
+        },
+        Qt::QueuedConnection);
 }
 
 void PlaylistTabs::applyActiveSearch() {
@@ -260,7 +279,7 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     connect(selection, &QItemSelectionModel::selectionChanged, this,
             [this, model](const QItemSelection&, const QItemSelection&) {
                 if (activeModel() == model)
-                    emit activeSelectionChanged();
+                    notifyActiveSelection();
             });
     // The CURRENT INDEX is selection state too: the art resolver's
     // "valid current index with an empty set counts as a single-row
@@ -272,7 +291,7 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     connect(selection, &QItemSelectionModel::currentChanged, this,
             [this, model](const QModelIndex&, const QModelIndex&) {
                 if (activeModel() == model)
-                    emit activeSelectionChanged();
+                    notifyActiveSelection();
             });
     // A reloader refresh changed row data in place; re-aggregate the pane if
     // this is the active tab (the metadata model snapshots values at selection
@@ -283,7 +302,7 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     connect(reloader, &MetadataReloader::refreshed, this, [this, model]() {
         model->bumpArtEpoch();
         if (activeModel() == model)
-            emit activeSelectionChanged();
+            notifyActiveSelection();
     });
 
     // Keep this tab's PARKED widths positionally aligned across granular
