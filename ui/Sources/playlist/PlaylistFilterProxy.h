@@ -122,6 +122,14 @@ public:
     /// of range.
     Q_INVOKABLE [[nodiscard]] int mapRowFromSource(int sourceRow) const;
 
+    /// A parked SOURCE scroll row as the proxy row to put at the top: the
+    /// first visible row at or after @p sourceRow, the last visible row when
+    /// every row from there on is hidden, -1 when nothing is visible.
+    /// Unfiltered it is the identity, out-of-range values included, so the
+    /// view's own clamp keeps the last word there (PlaylistTabs::
+    /// activeScrollRow's contract).
+    [[nodiscard]] int firstVisibleRowFromSource(int sourceRow) const;
+
     /// mapRowToSource over a list; rows that do not map are dropped, so the
     /// result can be shorter than the input. The dialogs' openFor rows.
     Q_INVOKABLE [[nodiscard]] QList<int> mapRowsToSource(const QList<int>& rows) const;

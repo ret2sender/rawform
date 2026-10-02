@@ -654,7 +654,12 @@ void PlaylistTabs::stashActiveScrollRow(int row) {
     if (m_current < 0 || m_current >= m_tabs.size())
         return;
     Tab* t = m_tabs.at(m_current);
-    const int v = row < 0 ? -1 : row;
+    // The view hands a PROXY row; the parking holds a SOURCE row (what the
+    // SCRL chunk means, since a file knows no filter). The outgoing tab's
+    // proxy is still filtered here (setCurrentIndex moves the search last),
+    // so the map resolves against the filter the user was looking at. An
+    // unmapped row (empty view) parks as "never".
+    const int v = row < 0 ? -1 : t->proxy->mapRowToSource(row);
     if (t->scrollRow == v)
         return;
     t->scrollRow = v;
@@ -664,7 +669,12 @@ void PlaylistTabs::stashActiveScrollRow(int row) {
 int PlaylistTabs::activeScrollRow() const {
     if (m_current < 0 || m_current >= m_tabs.size())
         return -1;
-    return m_tabs.at(m_current)->scrollRow;
+    // The reverse map, against the INCOMING tab's proxy: the parked source
+    // row's proxy row, or the first visible one below it when a filter hides
+    // it. Unfiltered (every launch, and every switch until the moved search's
+    // match pass lands) this is the identity the view has always clamped.
+    const Tab* t = m_tabs.at(m_current);
+    return t->proxy->firstVisibleRowFromSource(t->scrollRow);
 }
 
 void PlaylistTabs::renameTab(int idx, const QString& title) {
@@ -730,11 +740,12 @@ PlaylistDocument PlaylistTabs::snapshotTab(Tab* tab) const {
                          ? tab->proxy->mapRowToSource(
                                tab->selection->currentIndex().row())
                          : -1;
-    // The parked scroll position. The ACTIVE tab's live position is
-    // pushed into this parking by MainWindow.onClosing (like the widths line
-    // there) before the shutdown flush; during the session it is current as
-    // of the last switch-away, which is exactly when this tab's file can be
-    // written with it.
+    // The parked scroll position, a SOURCE row like currentRow (the stash
+    // mapped it). The ACTIVE tab's live position is pushed into this parking
+    // by MainWindow.onClosing (like the widths line there) before the
+    // shutdown flush; during the session it is current as of the last
+    // switch-away, which is exactly when this tab's file can be written with
+    // it.
     doc.scrollRow = tab->scrollRow;
     return doc;
 }

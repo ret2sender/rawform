@@ -752,14 +752,20 @@ Item {
     // The SAVE AS position snapshot, read by PlaylistDialogs and
     // handed to PlaylistStore.save so a saved .rwfpl embeds the live CURR
     // focus row and SCRL scroll position (the store owns neither the
-    // selection nor this view). Public pair for the same encapsulation
-    // reason as stashScrollPosition: the underscore state stays private.
+    // selection nor this view). Both are SOURCE rows: the view's rows are
+    // proxy rows, and a file written under a Find filter must reopen on the
+    // same tracks unfiltered. A current row the filter took away is already
+    // invalid here and writes as -1 ("none"), the same reading the live
+    // file's snapshot takes. Public pair for the same encapsulation reason
+    // as stashScrollPosition: the underscore state stays private.
     function currentFocusRow() {
-        return root._currentRow
+        return (root.model && root._currentRow >= 0)
+            ? root.model.mapRowToSource(root._currentRow) : -1
     }
 
     function currentScrollRow() {
-        return root._firstVisibleRow()
+        var first = root._firstVisibleRow()
+        return (root.model && first >= 0) ? root.model.mapRowToSource(first) : -1
     }
 
     // The launch positioning, corrected after a real-world miss: playlist reads

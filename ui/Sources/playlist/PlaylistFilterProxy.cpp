@@ -120,6 +120,25 @@ int PlaylistFilterProxy::mapRowFromSource(int sourceRow) const {
     return idx.isValid() ? idx.row() : -1;
 }
 
+int PlaylistFilterProxy::firstVisibleRowFromSource(int sourceRow) const {
+    if (!filtering() || sourceRow < 0) {
+        return sourceRow; // identity, and -1 ("never parked") stays -1
+    }
+    // Proxy rows are monotonic in source rows (no sorting), so the first
+    // source row at or after the parked one that maps is the first visible
+    // row below the parked position. A parked row beyond the source (the
+    // file was written against a longer list) starts the walk at the end and
+    // falls through to the last visible row, as the clamp would unfiltered.
+    const int n = m_source->rowCount();
+    for (int src = sourceRow; src < n; ++src) {
+        const int px = mapRowFromSource(src);
+        if (px >= 0) {
+            return px;
+        }
+    }
+    return rowCount() - 1;
+}
+
 QList<int> PlaylistFilterProxy::mapRowsToSource(const QList<int>& rows) const {
     QList<int> out;
     out.reserve(rows.size());

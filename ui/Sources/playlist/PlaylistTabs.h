@@ -100,12 +100,14 @@ class PlaylistTabs : public QAbstractListModel {
     QML_ELEMENT
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
-    Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
+    Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex
+                   NOTIFY currentIndexChanged)
     Q_PROPERTY(PlaylistModel* activeModel READ activeModel NOTIFY activeChanged)
     /// The active tab's filter proxy: what PlaylistView binds to. activeModel
     /// stays the SOURCE model for every source-space consumer.
     Q_PROPERTY(PlaylistFilterProxy* activeView READ activeView NOTIFY activeChanged)
-    Q_PROPERTY(QItemSelectionModel* activeSelection READ activeSelection NOTIFY activeChanged)
+    Q_PROPERTY(QItemSelectionModel* activeSelection READ activeSelection
+                   NOTIFY activeChanged)
     Q_PROPERTY(MetadataReloader* activeReloader READ activeReloader NOTIFY activeChanged)
     /// The Find dialog's search, installed on the ACTIVE tab's proxy and
     /// moved with the active tab; null (the dialog closed) lifts the filter
@@ -116,10 +118,14 @@ class PlaylistTabs : public QAbstractListModel {
 public:
     /// Roles for the tab-bar list delegate.
     enum Roles {
-        TitleRole = Qt::UserRole + 1, ///< QString: the tab label.
-        DirtyRole,                    ///< bool: has unsaved-vs-autosave changes (served; no delegate binds it).
-        ScanningRole,                 ///< bool: a scan is inserting into this tab right now.
-        ScanProgressRole,             ///< double 0..1: that scan's progress (files processed / files total).
+        /// QString: the tab label.
+        TitleRole = Qt::UserRole + 1,
+        /// bool: has unsaved-vs-autosave changes (served; no delegate binds it).
+        DirtyRole,
+        /// bool: a scan is inserting into this tab right now.
+        ScanningRole,
+        /// double 0..1: that scan's progress (files processed / files total).
+        ScanProgressRole,
     };
 
     explicit PlaylistTabs(QObject* parent = nullptr);
@@ -244,9 +250,12 @@ public:
     /// after a switch. Empty if there is no active tab.
     Q_INVOKABLE [[nodiscard]] QVariantList activeWidths() const;
 
-    /// Park / read the active tab's scroll position as its
-    /// first visible row. The stash is called from the SAME
-    /// onActiveAboutToChange hook as the selection detach, while the
+    /// Park / read the active tab's scroll position as its first visible
+    /// row, in the VIEW's rows (proxy rows): the stash maps them to source
+    /// through the tab's proxy and the read maps back, so a position parked
+    /// under one Find filter and restored under another lands on the same
+    /// track (or the first visible one below it). The stash is called from
+    /// the SAME onActiveAboutToChange hook as the selection detach, while the
     /// active pointers still read the OUTGOING tab (the stashActiveWidths
     /// convention), and by MainWindow.onClosing for the active tab at quit;
     /// the read happens after a switch, against the INCOMING tab. Note: a
@@ -368,9 +377,11 @@ private:
         QString              livePath;          ///< the live_playlist/<uuid>.rwfpl
         QString              title;
         QList<int>           widths;            ///< parked column widths (visual order)
-        /// The parked scroll position, as the FIRST VISIBLE ROW
-        /// when the tab was last switched away from (or at quit, for the
-        /// active tab). Persisted to the SCRL chunk; -1 means
+        /// The parked scroll position, as the SOURCE row that was the first
+        /// visible row when the tab was last switched away from (or at quit,
+        /// for the active tab); stashActiveScrollRow / activeScrollRow map
+        /// to and from the view's proxy rows. Persisted to the SCRL chunk
+        /// (a source row, like CURR: the file knows no filter); -1 means
         /// "never parked" and the view leaves the rebuild's natural position
         /// (launch then falls back to centering the CURR focus row).
         /// Row-quantized on purpose: a row realigns exactly after any edit,
@@ -393,20 +404,23 @@ private:
         /// clobber would lose the active tab's position across relaunch. A
         /// default-constructed future waits as a no-op.
         QFuture<void>        lastWrite;
-        bool                 dirty = false;     ///< unsaved-vs-autosave; arms the debounce
-        bool                 suppressAutosave = false; ///< true during a load (avoid re-writing what we just read)
+        bool                 dirty = false; ///< unsaved-vs-autosave; arms the debounce
+        /// True during a load, so the apply never re-writes what was just read.
+        bool                 suppressAutosave = false;
     };
 
     // Construction / teardown helpers.
-    void applyActiveSearch();             ///< m_activeSearch on the active proxy only
-    Tab* makeTab(const QString& title);   ///< build model+sel+reloader+timer, wire them, NOT yet inserted
-    void insertTab(Tab* tab, int at);     ///< begin/endInsertRows + own it
-    void destroyTab(int index);           ///< low-level: remove + delete (no last-tab guard)
+    void applyActiveSearch();           ///< m_activeSearch on the active proxy only
+    /// Build model + proxy + selection + reloader + timer and wire them; the
+    /// tab is NOT yet inserted.
+    Tab* makeTab(const QString& title);
+    void insertTab(Tab* tab, int at);   ///< begin/endInsertRows + own it
+    void destroyTab(int index);         ///< low-level remove + delete, no last-tab guard
 
     // Autosave.
-    void markDirty(Tab* tab);             ///< flag + (re)arm the debounce
-    void writeTabNow(Tab* tab);           ///< snapshot + off-thread atomic write of the live file
-    void writeTabSync(Tab* tab);          ///< snapshot + SYNCHRONOUS atomic write (shutdown flush)
+    void markDirty(Tab* tab);           ///< flag + (re)arm the debounce
+    void writeTabNow(Tab* tab);         ///< snapshot + off-thread atomic write
+    void writeTabSync(Tab* tab);        ///< snapshot + SYNCHRONOUS write (shutdown flush)
 
     /// Build the serializable document from a tab's live state (tracks, column
     /// order from the model, parked widths, title). Shared by the async and
@@ -418,15 +432,17 @@ private:
     void clearDirtyFlag(Tab* tab);
 
     // Loading.
-    void loadInto(Tab* tab, const QString& localPath,
-                  bool materializeCopy, bool adoptStoredTitle); ///< async read -> setTracks + layout + validate
+    /// Async read -> setTracks + layout + validate.
+    void loadInto(Tab* tab, const QString& localPath, bool materializeCopy,
+                  bool adoptStoredTitle);
+    /// Model order + parked widths.
     void applyLayoutToModel(Tab* tab, const QStringList& fieldIds,
-                            const QVariantList& widths); ///< model order + parked widths
+                            const QVariantList& widths);
 
     // Naming / paths.
     [[nodiscard]] QString liveDir() const;            ///< userConfigDir()/live_playlist
     [[nodiscard]] QString makeLivePath() const;       ///< liveDir()/<uuid>.rwfpl
-    [[nodiscard]] QString uniqueGenericTitle() const; ///< "New Playlist" / "New Playlist 2" / ...
+    [[nodiscard]] QString uniqueGenericTitle() const; ///< "New Playlist" / "... 2"
 
     // Session manifest: the ordered list of live-file basenames + the active
     // index, so tab ORDER and the active tab survive a restart (the live files
@@ -456,9 +472,12 @@ private:
     ColumnSchema                m_schemaProto;
     const CustomColumnRegistry* m_customColumns = nullptr;
     TrackScanner*               m_scanner = nullptr;
-    QStringList                 m_defaultFieldIds; ///< new-tab preset order (empty -> schema defaults)
-    QVariantList                m_defaultWidths;   ///< new-tab preset widths (parallel to ids)
-    bool                        m_restoring = false; ///< true during restoreSession (suppresses manifest churn)
+    /// New-tab preset: column order (empty -> schema defaults) and the widths
+    /// parallel to it.
+    QStringList                 m_defaultFieldIds;
+    QVariantList                m_defaultWidths;
+    /// True during restoreSession, which suppresses manifest churn.
+    bool                        m_restoring = false;
 
     // Scanner targets: captured at scanIntoActive() time, popped on scanStarted.
     // QPointer so a closed-tab target degrades to a safe no-op.
@@ -469,7 +488,7 @@ private:
     };
     QList<ScanTarget> m_scanTargets;  ///< FIFO of queued scan destinations
     ScanTarget        m_scanTarget;   ///< the destination of the scan now running
-    int               m_insertCursor = 0;  ///< advancing insert position for the running scan
+    int               m_insertCursor = 0;  ///< advancing insert position, running scan
     int               m_insertedFirst = 0; ///< first row inserted (for select-on-finish)
     int               m_insertedCount = 0; ///< rows inserted so far this scan
 
