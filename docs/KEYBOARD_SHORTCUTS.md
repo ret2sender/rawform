@@ -45,6 +45,7 @@ through MPRIS, which rawform does not expose yet; that is planned.
 | `Ctrl+O` | Open playlist... | Main window |
 | `Ctrl+S` | Save playlist... (save as) | Main window |
 | `Ctrl+W` | Close the active playlist tab. Closing the last tab leaves a fresh empty one | Main window |
+| `Ctrl+F` | Find... (search the active playlist) | Main window |
 | `Ctrl+P` | Settings... (also `Cmd+P` on macOS, not `Cmd+,`) | Main window |
 | `Alt+F` / `Alt+E` / `Alt+V` / `Alt+P` / `Alt+H` | Open (or close) the File / Edit / View / Playback / Help menu | Anywhere in the app |
 
@@ -63,8 +64,8 @@ extends from, or the current row when there is none) instead.
 | `Ctrl+A` | Select all |
 | `Escape` | Clear the selection |
 | `Delete` / `Backspace` | Remove the selected rows from the playlist |
-| `Ctrl+F` | Reveal the playing track: switch to its tab if needed and center it |
-| `Ctrl+Shift+F` | Center the selection (the midpoint of its span; with nothing selected, the current row) |
+| `Ctrl+T` | Reveal the playing track: switch to its tab if needed and center it |
+| `Ctrl+Shift+T` | Center the selection (the midpoint of its span; with nothing selected, the current row) |
 | `Alt+Enter` | Open the Properties window for the selection |
 
 All of these apply while the playlist has focus. A key that scrolls the view

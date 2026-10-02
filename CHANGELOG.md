@@ -5,6 +5,30 @@ All notable changes to rawform are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Edit > Find (Ctrl+F): a live search over the active playlist. The String
+  box is what to find (whitespace-separated terms, all required, matched as
+  case- and accent-insensitive substrings); the Filter box is where to look
+  (':'-separated column titles, custom column names, field ids or %token%
+  patterns; empty searches the visible columns), with invalid entries
+  underlined; Filter expressions save as named presets. The playlist hides
+  every row that does not match while the dialog is open (closing it brings
+  the rows back), and Enter / Shift+Enter step the current row through the
+  hits. Row reorder by drag is unavailable while a search is in force; a
+  drop appends.
+
+### Changed
+
+- The playlist reveal shortcuts moved to make room for Find: Ctrl+T reveals
+  the playing track (was Ctrl+F) and Ctrl+Shift+T centers the selection
+  (was Ctrl+Shift+F).
+- The editable preset combo box (Rename Files) opens its dropdown from the
+  arrow again; the text editor had been laid over the indicator and swallowed
+  the click.
+
 ## [1.1.0] - 2026-09-26
 
 A keyboard and polish release: transport and playlist commands get menu
