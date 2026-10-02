@@ -119,11 +119,7 @@ Item {
                     ? savePlaylistDialog.formatIds[filterIndex]
                     : savePlaylistDialog.formatIds[0]
 
-            // The linter cannot resolve activeModel's PlaylistModel return
-            // type here even though the type is registered; runtime verified.
-            // (Do not start this comment with the word qmllint: any comment
-            // leading with it is parsed as a lint directive.)
-            host.store.model = host.tabs.activeModel  // qmllint disable unresolved-type
+            host.store.model = host.tabs.activeModel
             // The position snapshot rides along, so the saved.rwfpl
             // embeds the live focus row and scroll position and restores them
             // when opened. Read from the view for the same reason the layout

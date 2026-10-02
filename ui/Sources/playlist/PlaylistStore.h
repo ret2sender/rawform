@@ -81,7 +81,8 @@ class PlaylistStore : public QObject {
     /// The playlist this store saves. With tabs, QML binds it to the active
     /// tab's model (playlistTabs.activeModel) so "Save playlist..." always targets
     /// the visible playlist. save() snapshots from whatever model is set here.
-    Q_PROPERTY(PlaylistModel* model READ model WRITE setModel NOTIFY modelChanged)
+    Q_PROPERTY(rawform::PlaylistModel* model READ model WRITE setModel
+                   NOTIFY modelChanged)
 
 public:
     explicit PlaylistStore(PlaylistModel* model, QObject* parent = nullptr);

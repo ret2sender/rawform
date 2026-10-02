@@ -100,21 +100,29 @@ class PlaylistTabs : public QAbstractListModel {
     Q_OBJECT
     QML_ELEMENT
 
+    // Pointer properties to our own types are namespace-qualified on purpose:
+    // moc records a Q_PROPERTY type as written, qmltyperegistrar names the
+    // type `rawform::X`, and qmllint matches the two by string, so an
+    // unqualified `X*` reads as an unknown type at every typed access in QML
+    // ("Type X of property ... not found"). Same convention in every header
+    // that exposes a rawform pointer.
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex
                    NOTIFY currentIndexChanged)
-    Q_PROPERTY(PlaylistModel* activeModel READ activeModel NOTIFY activeChanged)
+    Q_PROPERTY(rawform::PlaylistModel* activeModel READ activeModel NOTIFY activeChanged)
     /// The active tab's filter proxy: what PlaylistView binds to. activeModel
     /// stays the SOURCE model for every source-space consumer.
-    Q_PROPERTY(PlaylistFilterProxy* activeView READ activeView NOTIFY activeChanged)
+    Q_PROPERTY(rawform::PlaylistFilterProxy* activeView READ activeView
+                   NOTIFY activeChanged)
     Q_PROPERTY(QItemSelectionModel* activeSelection READ activeSelection
                    NOTIFY activeChanged)
-    Q_PROPERTY(MetadataReloader* activeReloader READ activeReloader NOTIFY activeChanged)
+    Q_PROPERTY(rawform::MetadataReloader* activeReloader READ activeReloader
+                   NOTIFY activeChanged)
     /// The Find dialog's search, installed on the ACTIVE tab's proxy and
     /// moved with the active tab; null (the dialog closed) lifts the filter
     /// everywhere. Only one tab is ever filtered: the one being searched.
-    Q_PROPERTY(PlaylistSearch* activeSearch READ activeSearch WRITE setActiveSearch
-                   NOTIFY activeSearchChanged)
+    Q_PROPERTY(rawform::PlaylistSearch* activeSearch READ activeSearch
+                   WRITE setActiveSearch NOTIFY activeSearchChanged)
 
 public:
     /// Roles for the tab-bar list delegate.

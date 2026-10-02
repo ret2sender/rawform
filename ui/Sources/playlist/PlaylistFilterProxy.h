@@ -88,7 +88,7 @@ class PlaylistFilterProxy : public QSortFilterProxyModel {
 
     /// The tab's PlaylistModel: the source-space handle the view passes to
     /// source-space consumers (AudioController::playAt, the dialogs' openFor).
-    Q_PROPERTY(PlaylistModel* source READ source CONSTANT)
+    Q_PROPERTY(rawform::PlaylistModel* source READ source CONSTANT)
     /// True while an installed search hides rows (see setSearch). Row reorder
     /// and mid-list drops are refused in this state.
     Q_PROPERTY(bool filtering READ filtering NOTIFY filteringChanged)

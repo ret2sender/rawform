@@ -79,10 +79,11 @@ class PlaylistSearch : public QObject {
 
     /// The playlist searched (the active tab's model). Null is valid: no
     /// matches, diagnostics still computed against an empty tag-key set.
-    Q_PROPERTY(PlaylistModel* model READ model WRITE setModel NOTIFY modelChanged)
+    Q_PROPERTY(rawform::PlaylistModel* model READ model WRITE setModel
+                   NOTIFY modelChanged)
     /// The custom-column registry, for bare-name resolution and the visible
     /// custom columns' patterns. Null is valid (no custom columns).
-    Q_PROPERTY(CustomColumnRegistry* customColumns READ customColumns
+    Q_PROPERTY(rawform::CustomColumnRegistry* customColumns READ customColumns
                    WRITE setCustomColumns NOTIFY customColumnsChanged)
     /// False suspends the O(rows) work: signals only mark what they
     /// invalidate, the haystack cache is released, and `active` reads false.
