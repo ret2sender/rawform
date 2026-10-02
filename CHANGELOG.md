@@ -5,7 +5,11 @@ All notable changes to rawform are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-10-02
+
+A search release: Edit > Find filters the active playlist in place as you
+type, with saved Filter presets, and the reveal shortcuts move to make room
+for it. Three fixes found on the way ride along.
 
 ### Added
 
@@ -28,6 +32,32 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - The editable preset combo box (Rename Files) opens its dropdown from the
   arrow again; the text editor had been laid over the indicator and swallowed
   the click.
+- The metadata pane aggregates once per selection gesture instead of twice.
+  A click (and the select-on-finish after a scan) is a selection change and a
+  current-row change, and each ran a full pass over the selected tracks; the
+  two are now coalesced into one. About 50 ms saved per click on a 15k-row
+  playlist.
+- A closed Find dialog no longer rebuilds its search index as tracks are
+  added to the playlist; the work is deferred until the dialog is shown.
+- The tool dialogs' footer buttons and the themed text-edit context menu are
+  shared components (ToolDialogButton, ThemedEditMenu) instead of per-window
+  copies.
+
+### Fixed
+
+- Properties: the OK label went invisible while an Apply was in flight (the
+  disabled button kept the on-accent text color over the gray face).
+- A playlist saved with Save As while Find was filtering recorded its focus
+  row and scroll position as visible-row numbers; reopening it landed on the
+  wrong tracks. Both are recorded as tracks now, as the live playlist files
+  already did for the focus row.
+- Switching away from a tab while Find was filtering it parked the scroll
+  position as a visible-row number, so switching back under a different
+  filter (or none) landed elsewhere; the parked position is now the track,
+  and restoring under a filter lands on the first visible track at or after
+  it.
+
+[1.2.0]: https://github.com/ret2sender/rawform/releases/tag/v1.2.0
 
 ## [1.1.0] - 2026-09-26
 

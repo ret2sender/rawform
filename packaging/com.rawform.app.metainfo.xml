@@ -65,6 +65,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.2.0" date="2026-10-02">
+      <description>
+        <p>Edit &gt; Find searches the active playlist as you type and hides every row that does not match, with saved Filter presets; the reveal shortcuts move to Ctrl+T and Ctrl+Shift+T.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-09-26">
       <description>
         <p>Keyboard shortcuts for playback and playlist commands, keyboard seeking with an on-screen step indicator, resizable Settings and Custom Columns windows, and fixes for playlist scrollbar sizing and album art memory growth.</p>
