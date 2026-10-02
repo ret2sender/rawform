@@ -64,7 +64,18 @@ Item {
         anchors.fill: parent
         live: true          // the slice tracks whatever moves behind the popup
         recursive: false    // source is a sibling subtree, so no recursion
-        sourceItem: frost.blurSource
+        // The source is attached only while this item itself is in a window.
+        // ShaderEffectSource holds a window reference on its sourceItem, and
+        // that accounting is one-sided when the source is assigned while the
+        // effect has no window of its own yet: it then references the SOURCE's
+        // window, references it again when the effect joins a scene, and
+        // releases only one of the two. The surplus reference is permanent and
+        // keeps the source's window pointer alive past that window's teardown,
+        // which QQuickItemPrivate::derefWindow then dereferences on exit. Gating
+        // on behind.Window.window makes every reference the effect takes one it
+        // also releases (a popup background is built while its blur target is
+        // already on screen, so the ungated binding hits exactly that case).
+        sourceItem: behind.Window.window ? frost.blurSource : null
         visible: false      // used only as MultiEffect.source
 
         function refresh() {

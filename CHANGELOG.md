@@ -9,7 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 A search release: Edit > Find filters the active playlist in place as you
 type, with saved Filter presets, and the reveal shortcuts move to make room
-for it. Three fixes found on the way ride along.
+for it. Four fixes found on the way ride along, among them a crash on exit.
 
 ### Added
 
@@ -45,6 +45,12 @@ for it. Three fixes found on the way ride along.
 
 ### Fixed
 
+- Quitting after any menu had been opened could crash on the way out, on both
+  platforms. The frosted popup backdrop kept one window reference too many on
+  the main window's content (a one-sided count in Qt's ShaderEffectSource when
+  the source is assigned before the effect has a window), so the content was
+  torn down after the window's event delivery had already gone. The backdrop
+  now attaches its source only once it is in a window itself.
 - Properties: the OK label went invisible while an Apply was in flight (the
   disabled button kept the on-accent text color over the gray face).
 - A playlist saved with Save As while Find was filtering recorded its focus
