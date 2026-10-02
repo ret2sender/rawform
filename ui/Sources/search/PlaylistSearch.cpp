@@ -20,11 +20,13 @@
 
 // PlaylistSearch.cpp
 //
-// See the header for the contract and the two cadences. Dirty flags plus one
-// single-shot timer are the whole scheduling story: every model or registry
-// signal marks what it invalidates and arms the timer; the timeout does the
-// expensive work once, in dependency order (tag keys -> parse -> haystacks ->
-// match). Only a Filter edit parses synchronously, for the underline.
+// See the header for the contract, the two cadences and the idle discipline.
+// Dirty flags plus one single-shot timer are the whole scheduling story: every
+// model or registry signal marks what it invalidates and arms the timer; the
+// timeout does the expensive work once, in dependency order (tag keys -> parse
+// -> haystacks -> match). Only a Filter edit parses synchronously, for the
+// underline. Every arm goes through armTimer, which is where `enabled` bites:
+// a disabled search accumulates flags and does nothing until re-enabled.
 
 #include "search/PlaylistSearch.h"
 
@@ -76,7 +78,8 @@ bool PlaylistSearch::filterHasInvalid() const {
 }
 
 bool PlaylistSearch::active() const {
-    return m_model && m_matchesValid && !m_terms.isEmpty() && !m_searchSet.isEmpty();
+    return m_enabled && m_model && m_matchesValid && !m_terms.isEmpty()
+           && !m_searchSet.isEmpty();
 }
 
 int PlaylistSearch::matchCount() const {
@@ -99,10 +102,49 @@ void PlaylistSearch::setModel(PlaylistModel* model) {
     emit modelChanged();
     emit matchesChanged();
     // A new playlist: new tag keys, possibly a new visible-column set, and
-    // every haystack. Parse now so the diagnostics track the new context at
-    // once; the rows follow on the timer.
+    // every haystack. Shown, parse now so the diagnostics track the new
+    // context at once and the rows follow on the timer; hidden, every tab
+    // switch would otherwise pay the O(rows) key pass for an underline nobody
+    // sees, so the work is only flagged and the next enable runs it.
+    if (!m_enabled) {
+        m_tagKeysDirty   = true;
+        m_reparseDirty   = true;
+        m_haystacksDirty = true;
+        return;
+    }
     refreshExtraTagKeys();
     reparse();
+}
+
+void PlaylistSearch::setEnabled(bool enabled) {
+    if (enabled == m_enabled) {
+        return;
+    }
+    const bool wasActive = active();
+    m_enabled            = enabled;
+    emit enabledChanged();
+    if (enabled) {
+        // Whatever went stale while suspended is still flagged; one window
+        // later the timeout consumes the flags in order. Nothing is forced
+        // synchronously: a show must not block on a 15k-row key pass.
+        armTimer();
+        return;
+    }
+    // Suspend: stop the pending pass, release the cache (the haystacks are
+    // the one allocation that scales with the playlist) and invalidate the
+    // match set so accepts() never answers from a cache that no longer
+    // exists. The flags stay as they are, pointing at the resume work.
+    m_coalesce.stop();
+    m_haystacks.clear();
+    m_haystacksDirty = true;
+    m_matches.clear();
+    m_matchesValid = false;
+    // `active` and `matchCount` notify through matchesChanged; it is emitted
+    // only when the readings change, so hiding an idle dialog costs the proxy
+    // no refilter.
+    if (wasActive) {
+        emit matchesChanged();
+    }
 }
 
 void PlaylistSearch::setCustomColumns(CustomColumnRegistry* registry) {
@@ -178,12 +220,12 @@ void PlaylistSearch::rebindModel(PlaylistModel* model) {
         m_tagKeysDirty   = true;
         m_reparseDirty   = true;
         m_haystacksDirty = true;
-        m_coalesce.start();
+        armTimer();
     };
     const auto columnsChanged = [this]() {
         m_reparseDirty   = true;
         m_haystacksDirty = true;
-        m_coalesce.start();
+        armTimer();
     };
     using M = QAbstractItemModel;
     m_modelConnections << connect(model, &M::rowsInserted, this, rowsChanged);
@@ -255,11 +297,17 @@ void PlaylistSearch::reparse() {
 
 void PlaylistSearch::scheduleRebuild() {
     m_haystacksDirty = true;
-    m_coalesce.start();
+    armTimer();
 }
 
 void PlaylistSearch::scheduleRematch() {
-    m_coalesce.start();
+    armTimer();
+}
+
+void PlaylistSearch::armTimer() {
+    if (m_enabled) {
+        m_coalesce.start();
+    }
 }
 
 void PlaylistSearch::onCoalesceTimeout() {
@@ -274,7 +322,11 @@ void PlaylistSearch::onCoalesceTimeout() {
         // below in this same pass, so the re-arm is stopped afterwards.
         reparse();
     }
-    if (m_haystacksDirty) {
+    // With no term to match, the haystacks stay dirty rather than built: a
+    // scan into a watched-but-unsearched playlist would otherwise rebuild
+    // them every window for a match pass that has nothing to do. The first
+    // term arms the timer (setQueryText) and finds the flag still set.
+    if (m_haystacksDirty && !m_terms.isEmpty()) {
         rebuildHaystacks();
     }
     rematch();

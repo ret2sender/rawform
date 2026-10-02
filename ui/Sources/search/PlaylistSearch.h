@@ -35,6 +35,16 @@
 // pass over the cached haystacks; a filter, column, registry or row change
 // rebuilds the haystacks first.
 //
+// Idle discipline. The dialog exists from launch and is bound to the active
+// tab, so without a gate every scan batch would cost a haystack rebuild over
+// a playlist nobody is searching. Two rules keep the idle cost at zero:
+// `enabled` (the dialog binds it to its visibility) suspends the timer, drops
+// the haystack cache and leaves the dirty flags standing until the next show;
+// and while enabled with a blank String, a timeout refreshes the tag keys
+// (the Filter underline needs them on screen) but leaves the haystacks dirty,
+// since nothing would be matched against them. The first typed term rebuilds
+// them, one window later.
+//
 // The search set (R1 default): the Filter's valid entries, or, when the Filter
 // is empty, the model's VISIBLE columns in visual order, native fields as
 // themselves and custom columns as their patterns. A Filter with entries but
@@ -74,6 +84,11 @@ class PlaylistSearch : public QObject {
     /// custom columns' patterns. Null is valid (no custom columns).
     Q_PROPERTY(CustomColumnRegistry* customColumns READ customColumns
                    WRITE setCustomColumns NOTIFY customColumnsChanged)
+    /// False suspends the O(rows) work: signals only mark what they
+    /// invalidate, the haystack cache is released, and `active` reads false.
+    /// True resumes with one coalesced pass over whatever went stale. The
+    /// dialog binds it to its visibility.
+    Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
     /// The String box.
     Q_PROPERTY(QString queryText READ queryText WRITE setQueryText
                    NOTIFY queryTextChanged)
@@ -102,6 +117,7 @@ public:
     [[nodiscard]] CustomColumnRegistry*  customColumns() const {
         return m_registry.data();
     }
+    [[nodiscard]] bool                   enabled() const { return m_enabled; }
     [[nodiscard]] QString                queryText() const { return m_queryText; }
     [[nodiscard]] QString                filterText() const { return m_filterText; }
     [[nodiscard]] QVariantList           entryDiagnostics() const;
@@ -111,6 +127,7 @@ public:
 
     void setModel(PlaylistModel* model);
     void setCustomColumns(CustomColumnRegistry* registry);
+    void setEnabled(bool enabled);
     void setQueryText(const QString& text);
     void setFilterText(const QString& text);
 
@@ -122,6 +139,7 @@ public:
 signals:
     void modelChanged();
     void customColumnsChanged();
+    void enabledChanged();
     void queryTextChanged();
     void filterTextChanged();
     void diagnosticsChanged();
@@ -138,7 +156,12 @@ private:
     /// Arm the coalescing timer for a match pass only (query edits).
     void scheduleRematch();
 
-    /// The timer's slot: rebuild haystacks if flagged, then rematch.
+    /// The one place the timer is started: a no-op while disabled, so every
+    /// invalidation above it only leaves its flag behind.
+    void armTimer();
+
+    /// The timer's slot: tag keys, parse, haystacks (if there are terms to
+    /// match), then rematch, each only when flagged.
     void onCoalesceTimeout();
 
     /// One folded haystack per row over m_searchSet.
@@ -163,6 +186,7 @@ private:
     QList<QMetaObject::Connection> m_modelConnections;
     QList<QMetaObject::Connection> m_registryConnections;
 
+    bool        m_enabled = true;
     QString     m_queryText;
     QString     m_filterText;
     QStringList m_terms;         ///< queryTerms(m_queryText)

@@ -33,7 +33,9 @@
 //
 // The search itself is PlaylistSearch (C++): this file only pushes the two
 // texts in and reacts to matchesChanged. Every O(rows) step is coalesced
-// there (120 ms), so the fields bind their text directly with no timer here.
+// there (120 ms), so the fields bind their text directly with no timer here,
+// and suspended while this window is hidden (enabled follows visible), so a
+// scan into the playlist costs nothing to a Find nobody has open.
 // The Filter parse is synchronous, which is what lets the invalid-entry
 // underline (drawn from entryDiagnostics spans through positionToRectangle)
 // track the typed text exactly.
@@ -113,6 +115,8 @@ Window {
         id: search
         model: findDialog.model
         customColumns: findDialog._registry
+        // Hidden means suspended: the kept texts stay, the row work stops.
+        enabled: findDialog.visible
     }
     // The proxy announces each applied filter AFTER the selection model has
     // remapped, which is when the current row can be placed; the search's
