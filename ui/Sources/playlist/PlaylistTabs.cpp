@@ -160,13 +160,42 @@ void PlaylistTabs::setCurrentIndex(int index) {
     // re-aggregates the new tab's selection.
     emit activeChanged();
     emit activeSelectionChanged();
+    // AFTER the emissions: the Find dialog's search re-binds its model during
+    // activeChanged, so by now it describes the incoming tab (its match set
+    // is invalidated on the rebind and refilled on its timer). Moving the
+    // filter here, last, keeps a stale match set from ever hiding rows of the
+    // wrong playlist.
+    applyActiveSearch();
     writeSessionManifest();
+}
+
+void PlaylistTabs::setActiveSearch(PlaylistSearch* search) {
+    if (search == m_activeSearch.data())
+        return;
+    m_activeSearch = search;
+    applyActiveSearch();
+    emit activeSearchChanged();
+}
+
+void PlaylistTabs::applyActiveSearch() {
+    // Idempotent per tab (setSearch returns early when unchanged), so the
+    // whole list is walked rather than tracking the previous holder.
+    for (int i = 0; i < m_tabs.size(); ++i) {
+        if (PlaylistFilterProxy* px = m_tabs.at(i)->proxy)
+            px->setSearch(i == m_current ? m_activeSearch.data() : nullptr);
+    }
 }
 
 PlaylistModel* PlaylistTabs::activeModel() const {
     if (m_current < 0 || m_current >= m_tabs.size())
         return nullptr;
     return m_tabs.at(m_current)->model;
+}
+
+PlaylistFilterProxy* PlaylistTabs::activeView() const {
+    if (m_current < 0 || m_current >= m_tabs.size())
+        return nullptr;
+    return m_tabs.at(m_current)->proxy;
 }
 
 QItemSelectionModel* PlaylistTabs::activeSelection() const {
@@ -187,14 +216,17 @@ MetadataReloader* PlaylistTabs::activeReloader() const {
 
 PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     // Build the model subtree. The model is parented to `this` so it is owned
-    // even before the tab is inserted; the selection, reloader and autosave
-    // timer are parented to the model so closeTab()'s model->deleteLater()
-    // tears the whole tab down.
+    // even before the tab is inserted; the proxy, reloader and autosave timer
+    // are parented to the model, and the selection to the proxy, so
+    // closeTab()'s model->deleteLater() tears the whole tab down. The
+    // selection is bound to the PROXY (the model the view shows), which is
+    // what makes its rows proxy rows; the reloader maps them back itself.
     auto* model = new PlaylistModel(this);
     model->setSchema(m_schemaProto);          // a private copy per tab
     model->setCustomColumns(m_customColumns); // one shared, read-only registry
 
-    auto* selection = new QItemSelectionModel(model, model);
+    auto* proxy     = new PlaylistFilterProxy(model, model);
+    auto* selection = new QItemSelectionModel(proxy, proxy);
     auto* reloader  = new MetadataReloader(model, selection, model);
 
     auto* autosave = new QTimer(model);
@@ -203,6 +235,7 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
 
     Tab* tab = new Tab;
     tab->model     = model;
+    tab->proxy     = proxy;
     tab->selection = selection;
     tab->reloader  = reloader;
     tab->autosave  = autosave;
@@ -490,6 +523,7 @@ void PlaylistTabs::scanIntoActive(const QList<QUrl>& urls, int at) {
     // it. QPointer-guarded so a closed target degrades to a no-op.
     ScanTarget tgt;
     tgt.model     = activeModel();
+    tgt.proxy     = activeView();
     tgt.selection = activeSelection();
     m_scanTargets.append(tgt);
     m_scanner->scan(urls, at);
@@ -688,9 +722,14 @@ PlaylistDocument PlaylistTabs::snapshotTab(Tab* tab) const {
     doc.widths     = tab->widths;
     doc.title      = tab->title;
     doc.savedAtUtc = QDateTime::currentDateTimeUtc();
-    // The focus row (the remembered last-selected track). -1 for none.
-    doc.currentRow = (tab->selection && tab->selection->currentIndex().isValid())
-                         ? tab->selection->currentIndex().row() : -1;
+    // The focus row (the remembered last-selected track), a SOURCE row: the
+    // selection's current index is a proxy index, mapped back. -1 for none
+    // (including a current row the filter hides, which does not map).
+    doc.currentRow = (tab->selection && tab->proxy
+                      && tab->selection->currentIndex().isValid())
+                         ? tab->proxy->mapRowToSource(
+                               tab->selection->currentIndex().row())
+                         : -1;
     // The parked scroll position. The ACTIVE tab's live position is
     // pushed into this parking by MainWindow.onClosing (like the widths line
     // there) before the shutdown flush; during the session it is current as
@@ -859,9 +898,10 @@ void PlaylistTabs::loadInto(Tab* tab, const QString& localPath,
                 // currentChanged can't mark the tab dirty and rewrite what was
                 // just read.
                 const int cr = res.doc.currentRow;
-                if (t->selection && cr >= 0 && cr < t->model->rowCount())
-                    t->selection->setCurrentIndex(t->model->index(cr, 0),
-                                                  QItemSelectionModel::NoUpdate);
+                if (t->selection && t->proxy && cr >= 0 && cr < t->model->rowCount())
+                    t->selection->setCurrentIndex(
+                        t->proxy->mapFromSource(t->model->index(cr, 0)),
+                        QItemSelectionModel::NoUpdate);
 
                 // The persisted scroll position lands in the same parking
                 // the in-session switches use, so the QML restore path (launch
@@ -1045,15 +1085,19 @@ void PlaylistTabs::onScanFinished(int added, int skipped) {
     qInfo("rawform: scan finished: added %d, skipped %d", added, skipped);
 
     PlaylistModel*       m   = m_scanTarget.model;
+    PlaylistFilterProxy* px  = m_scanTarget.proxy;
     QItemSelectionModel* sel = m_scanTarget.selection;
-    if (m && sel && m_insertedCount > 0) {
+    if (m && px && sel && m_insertedCount > 0) {
+        // The inserted range in SOURCE rows, mapped to the proxy the selection
+        // is bound to; rows a filter hides drop out of the mapped selection.
         const int last = m_insertedFirst + m_insertedCount - 1;
         const int cols = m->columnCount();
         const QModelIndex tl = m->index(m_insertedFirst, 0);
         const QModelIndex br = m->index(last, cols > 0 ? cols - 1 : 0);
-        sel->select(QItemSelection(tl, br),
+        sel->select(px->mapSelectionFromSource(QItemSelection(tl, br)),
                     QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-        sel->setCurrentIndex(m->index(m_insertedFirst, 0), QItemSelectionModel::NoUpdate);
+        sel->setCurrentIndex(px->mapFromSource(m->index(m_insertedFirst, 0)),
+                             QItemSelectionModel::NoUpdate);
     }
     // Retire the bar BEFORE dropping the target (the helper resolves the
     // tab through it). Unfocused tabs hide the underline again; the focused

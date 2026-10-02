@@ -29,7 +29,11 @@
 //
 // OWNERSHIP. Each tab owns, as a private subtree:
 //   - PlaylistModel:       the rows + the column order (m_columns);
-//   - QItemSelectionModel: that tab's selection (parented to its model);
+//   - PlaylistFilterProxy: the row filter the VIEW binds to (parented to its
+//                          model); the selection model is bound to it, so
+//                          selection rows are PROXY rows and every consumer
+//                          that hands rows to the model maps through it;
+//   - QItemSelectionModel: that tab's selection (parented to its proxy);
 //   - MetadataReloader:    that tab's freshness pass (parented to its model).
 //                          One reloader PER tab, never re-pointed: its async
 //                          QFutureWatcher/pending state stays bound to one model
@@ -41,10 +45,12 @@
 // park theirs in Tab::widths, which QML keeps current via stashActiveWidths()
 // (on resize and just before a switch-away).
 //
-// ACTIVE POINTERS. activeModel()/activeSelection()/activeReloader() expose the
-// current tab's objects; QML binds to them and they change (activeChanged) on
-// every switch. activeSelectionChanged() fires for a selection change OR a
-// switch, so the metadata pane re-aggregates uniformly.
+// ACTIVE POINTERS. activeModel()/activeView()/activeSelection()/activeReloader()
+// expose the current tab's objects; QML binds to them and they change
+// (activeChanged) on every switch. activeSelectionChanged() fires for a
+// selection change OR a switch, so the metadata pane re-aggregates uniformly.
+// activeView is the filter proxy the playlist view shows; activeModel stays the
+// source model, which is what every C++ consumer takes.
 //
 // SCANNER SEAM. setScanner() wires the scanner here.
 // scanIntoActive() captures the active model+selection into a FIFO at call time;
@@ -63,6 +69,8 @@
 
 #include "columns/ColumnSchema.h"
 #include "media/TrackData.h"
+#include "playlist/PlaylistFilterProxy.h" // complete type: a Q_PROPERTY pointer
+#include "search/PlaylistSearch.h"         // complete type: a Q_PROPERTY pointer
 
 #include <QAbstractListModel>
 #include <QFuture>
@@ -94,8 +102,16 @@ class PlaylistTabs : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
     Q_PROPERTY(PlaylistModel* activeModel READ activeModel NOTIFY activeChanged)
+    /// The active tab's filter proxy: what PlaylistView binds to. activeModel
+    /// stays the SOURCE model for every source-space consumer.
+    Q_PROPERTY(PlaylistFilterProxy* activeView READ activeView NOTIFY activeChanged)
     Q_PROPERTY(QItemSelectionModel* activeSelection READ activeSelection NOTIFY activeChanged)
     Q_PROPERTY(MetadataReloader* activeReloader READ activeReloader NOTIFY activeChanged)
+    /// The Find dialog's search, installed on the ACTIVE tab's proxy and
+    /// moved with the active tab; null (the dialog closed) lifts the filter
+    /// everywhere. Only one tab is ever filtered: the one being searched.
+    Q_PROPERTY(PlaylistSearch* activeSearch READ activeSearch WRITE setActiveSearch
+                   NOTIFY activeSearchChanged)
 
 public:
     /// Roles for the tab-bar list delegate.
@@ -142,8 +158,13 @@ public:
     void setCurrentIndex(int index);
 
     [[nodiscard]] PlaylistModel*       activeModel() const;
+    [[nodiscard]] PlaylistFilterProxy* activeView() const;
     [[nodiscard]] QItemSelectionModel* activeSelection() const;
     [[nodiscard]] MetadataReloader*    activeReloader() const;
+    [[nodiscard]] PlaylistSearch*      activeSearch() const {
+        return m_activeSearch.data();
+    }
+    void setActiveSearch(PlaylistSearch* search);
 
     // --- Lifecycle (QML) ---------------------------------------------------
 
@@ -304,6 +325,7 @@ public:
 
 signals:
     void countChanged();
+    void activeSearchChanged();
     void currentIndexChanged();
     /// Emitted BEFORE the active tab flips (m_current still points at the
     /// OUTGOING tab). The view detaches the TableView's selection model on
@@ -339,6 +361,7 @@ private:
     /// pointers here are non-owning views into that subtree.
     struct Tab {
         PlaylistModel*       model = nullptr;
+        PlaylistFilterProxy* proxy = nullptr;     ///< the view's model; owns selection
         QItemSelectionModel* selection = nullptr;
         MetadataReloader*    reloader = nullptr;
         QTimer*              autosave = nullptr;
@@ -375,6 +398,7 @@ private:
     };
 
     // Construction / teardown helpers.
+    void applyActiveSearch();             ///< m_activeSearch on the active proxy only
     Tab* makeTab(const QString& title);   ///< build model+sel+reloader+timer, wire them, NOT yet inserted
     void insertTab(Tab* tab, int at);     ///< begin/endInsertRows + own it
     void destroyTab(int index);           ///< low-level: remove + delete (no last-tab guard)
@@ -428,6 +452,7 @@ private:
 
     QList<Tab*>                 m_tabs;
     int                         m_current = -1;
+    QPointer<PlaylistSearch>    m_activeSearch;  ///< see activeSearch
     ColumnSchema                m_schemaProto;
     const CustomColumnRegistry* m_customColumns = nullptr;
     TrackScanner*               m_scanner = nullptr;
@@ -439,6 +464,7 @@ private:
     // QPointer so a closed-tab target degrades to a safe no-op.
     struct ScanTarget {
         QPointer<PlaylistModel>       model;
+        QPointer<PlaylistFilterProxy> proxy;     ///< maps the select-on-finish range
         QPointer<QItemSelectionModel> selection;
     };
     QList<ScanTarget> m_scanTargets;  ///< FIFO of queued scan destinations

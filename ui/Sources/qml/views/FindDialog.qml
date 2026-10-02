@@ -38,12 +38,17 @@
 // underline (drawn from entryDiagnostics spans through positionToRectangle)
 // track the typed text exactly.
 //
-// How a search acts on the playlist: the match set becomes the selection and
-// the current row is revealed (revealRow -> the host's PlaylistView), so the
-// playlist itself shows the hits, with no second list. Enter steps the
-// current row to the next match, Shift+Enter to the previous. A blank String,
-// or a Filter with no valid entry, is no search at all and leaves the
-// selection alone; a search with zero hits clears it.
+// How a search acts on the playlist: while this dialog is shown, its search
+// is installed as playlistTabs.activeSearch, and the active tab's
+// PlaylistFilterProxy hides every row that does not match, so the playlist
+// itself shows the hits, with no second list. When a filter lands
+// (view.filterApplied) the current row is placed on the first visible row if
+// the filter hid it, and revealed (revealRow -> the host's PlaylistView);
+// Enter steps the current row down through the visible rows, Shift+Enter up,
+// wrapping. A blank String, or a Filter with no valid entry, is no search at
+// all and every row shows; a search with zero hits shows an empty playlist.
+// Closing the dialog lifts the filter (activeSearch goes null); the texts
+// stay for the next open.
 
 // qmllint disable unqualified
 // Wiring layer: this file reaches the C++ context properties (windowGeometry,
@@ -64,9 +69,12 @@ Window {
 
     property string uiFont: Theme.uiFont
 
-    // The searched playlist and its selection: the host binds both to the
-    // active tab, so a tab switch re-runs the search against the new tab.
+    // The searched playlist (its SOURCE model, what the search reads), its
+    // filter proxy (what the view shows; rows below are ITS rows) and its
+    // selection: the host binds all three to the active tab, so a tab switch
+    // re-runs the search against the new tab and moves the filter with it.
     property var model: null
+    property var view: null
     property var selection: null
     // The registry, captured at Window scope: inside the PlaylistSearch block
     // below, an unqualified `customColumns` would resolve to its own property
@@ -105,8 +113,18 @@ Window {
         id: search
         model: findDialog.model
         customColumns: findDialog._registry
-        onMatchesChanged: findDialog._applyMatches()
     }
+    // The proxy announces each applied filter AFTER the selection model has
+    // remapped, which is when the current row can be placed; the search's
+    // own matchesChanged fires before the proxy has re-filtered.
+    Connections {
+        target: findDialog.view
+        function onFilterApplied() { findDialog._onFilterApplied() }
+    }
+
+    // Shown: the active tab filters by this search. Hidden: the filter lifts.
+    // PlaylistTabs moves the search to whichever tab becomes active.
+    onVisibleChanged: playlistTabs.activeSearch = findDialog.visible ? search : null
     SearchPresetStore { id: presetStore }
 
     // --- state -------------------------------------------------------------
@@ -131,8 +149,6 @@ Window {
         requestActivate()
         stringField.forceActiveFocus()
         stringField.selectAll()
-        // A search already typed acts on whatever tab is active now.
-        findDialog._applyMatches()
     }
 
     // The single hide path for Close, the title bar X and Escape.
@@ -150,28 +166,41 @@ Window {
     // accepting it hides the reused instance, and the next open() shows it.
     onClosing: findDialog._saveSize()
 
-    // Push the match set into the playlist (see the file comment). Only while
-    // shown: a hidden dialog must not keep steering the selection.
-    function _applyMatches() {
-        if (!findDialog.visible || !search.active)
-            return
-        var row = search.selectMatches(findDialog.selection)
-        if (row >= 0)
-            findDialog.revealRow(row)
-    }
-
-    // Enter / Shift+Enter: step the current row through the matches.
-    function _step(backward) {
-        if (!search.active || !findDialog.selection)
+    // A filter landed (see the file comment): give the search a current row
+    // to step from when the filter took it away, and reveal it. A current row
+    // that survived the filter is left where it is, so typing one more letter
+    // never yanks the view.
+    function _onFilterApplied() {
+        if (!findDialog.visible || !search.active || !findDialog.view
+                || !findDialog.selection)
             return
         var ci = findDialog.selection.currentIndex
-        var from = (ci && ci.valid) ? ci.row : -1
-        var row = search.nextMatch(from, backward)
-        if (row >= 0) {
-            findDialog.selection.setCurrentIndex(findDialog.model.index(row, 0),
-                                                 ItemSelectionModel.NoUpdate)
-            findDialog.revealRow(row)
-        }
+        if (ci && ci.valid)
+            return
+        if (findDialog.view.rowCount() > 0)
+            findDialog._focusRow(0)
+    }
+
+    // Enter / Shift+Enter: step the current row through the visible rows
+    // (all of them matches while a search is in force), wrapping.
+    function _step(backward) {
+        if (!search.active || !findDialog.view || !findDialog.selection)
+            return
+        var n = findDialog.view.rowCount()
+        if (n <= 0)
+            return
+        var ci = findDialog.selection.currentIndex
+        var cur = (ci && ci.valid) ? ci.row : -1
+        var next = backward ? (cur <= 0 ? n - 1 : cur - 1)
+                            : (cur + 1 >= n ? 0 : cur + 1)
+        findDialog._focusRow(next)
+    }
+
+    // Make proxy row @p row current (NoUpdate: the outline only) and reveal.
+    function _focusRow(row) {
+        findDialog.selection.setCurrentIndex(findDialog.view.index(row, 0),
+                                             ItemSelectionModel.NoUpdate)
+        findDialog.revealRow(row)
     }
 
     // Sets the preset box text through BOTH channels (the contentItem's text

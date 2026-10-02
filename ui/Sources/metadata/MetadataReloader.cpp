@@ -31,6 +31,7 @@
 #include "playlist/PlaylistModel.h"
 #include "media/TrackReader.h"
 
+#include <QAbstractProxyModel>
 #include <QFileInfo>
 #include <QModelIndex>
 #include <QModelIndexList>
@@ -332,11 +333,18 @@ QList<int> MetadataReloader::selectedRowNumbers() const {
     if (!m_selection)
         return rows;
     // selectedRows(0) yields one index per fully-selected row (we always select
-    // with the Rows flag), so these are already distinct.
+    // with the Rows flag), so these are already distinct. The selection model
+    // is bound to the tab's filter proxy, not to m_model, so each index is
+    // mapped back to the SOURCE row every m_model call here expects; a row the
+    // filter hides cannot be selected, so nothing is lost in the mapping.
     const QModelIndexList indexes = m_selection->selectedRows(0);
+    const auto* proxy = qobject_cast<const QAbstractProxyModel*>(m_selection->model());
     rows.reserve(indexes.size());
-    for (const QModelIndex& idx : indexes)
-        rows << idx.row();
+    for (const QModelIndex& idx : indexes) {
+        const QModelIndex src = proxy ? proxy->mapToSource(idx) : idx;
+        if (src.isValid())
+            rows << src.row();
+    }
     std::ranges::sort(rows);
     return rows;
 }

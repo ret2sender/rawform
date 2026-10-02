@@ -56,6 +56,7 @@
 #endif
 
 #include <QAbstractItemModel>
+#include <QAbstractProxyModel>
 #include <QByteArray>
 #include <QFile>
 #include <QFileInfo>
@@ -981,9 +982,15 @@ void AudioController::play() {
         if (m && m->rowCount() > 0) {
             int row = 0;
             if (QItemSelectionModel* sel = m_tabs->activeSelection()) {
+                // The selection is bound to the tab's filter proxy; its
+                // current index maps back to the SOURCE row playAt takes.
                 const QModelIndex ci = sel->currentIndex();
-                if (ci.isValid()) {
-                    row = ci.row();
+                const auto* proxy =
+                    qobject_cast<const QAbstractProxyModel*>(sel->model());
+                const QModelIndex src =
+                    (proxy && ci.isValid()) ? proxy->mapToSource(ci) : ci;
+                if (src.isValid()) {
+                    row = src.row();
                 }
             }
             playAt(m, row);

@@ -268,6 +268,8 @@ set(APP_SOURCES
         # playlist/: playlist model, .rwfpl / .m3u file+store, tab session manager
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFilterProxy.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFilterProxy.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFile.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFile.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFormat.h

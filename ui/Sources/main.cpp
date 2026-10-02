@@ -63,6 +63,7 @@
 #include <malloc.h>
 #endif
 
+#include <QAbstractProxyModel>
 #include <QDebug>
 #include <QIcon>
 #include <QItemSelection>
@@ -232,11 +233,17 @@ int main(int argc, char* argv[]) {
             metadataModel.setSelection(nullptr, {});
             return;
         }
+        // The selection is bound to the tab's filter proxy (activeView); the
+        // pane reads the SOURCE model, so each index is mapped back first.
         const QModelIndexList rows = selection->selectedRows(0);
+        const auto* proxy = qobject_cast<const QAbstractProxyModel*>(selection->model());
         QList<int> rowNumbers;
         rowNumbers.reserve(rows.size());
-        for (const QModelIndex& idx : rows)
-            rowNumbers.push_back(idx.row());
+        for (const QModelIndex& idx : rows) {
+            const QModelIndex src = proxy ? proxy->mapToSource(idx) : idx;
+            if (src.isValid())
+                rowNumbers.push_back(src.row());
+        }
         metadataModel.setSelection(model, rowNumbers);
     };
 

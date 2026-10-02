@@ -99,6 +99,11 @@ ApplicationWindow {
     // into the active tab's parked copy first (the header is QML-owned, so C++
     // can't read it), then force a synchronous write of every dirty tab.
     onClosing: {
+        // Lift any Find filter FIRST (dismiss hides the dialog, which clears
+        // playlistTabs.activeSearch and re-filters synchronously), so the
+        // scroll row stashed below and the current row the flush persists are
+        // unfiltered playlist positions.
+        findDialog.dismiss()
         playlistTabs.stashActiveWidths(playlistView.currentColumnWidths())
         // The scroll twin of the widths line above: push the ACTIVE
         // tab's live position (QML-owned, C++ can't read it) into its parking
@@ -193,6 +198,7 @@ ApplicationWindow {
     FindDialog {
         id: findDialog
         model: playlistTabs.activeModel
+        view: playlistTabs.activeView
         selection: playlistTabs.activeSelection
         onRevealRow: function (row) { playlistView.revealRow(row) }
     }
@@ -476,10 +482,16 @@ ApplicationWindow {
                                 var prow = audioController.playingRow
                                 var prev = pm ? pm.dataRevision : 0
                                 var m = playlistTabs.activeModel
+                                var v = playlistTabs.activeView
                                 var sel = playlistTabs.activeSelection
-                                if (m && sel) {
+                                if (m && v && sel) {
                                     var rev = m.dataRevision
-                                    var fromSelection = m.albumArtSourceForSelection(sel)
+                                    // The selection is bound to the filter
+                                    // proxy (activeView), which maps its rows
+                                    // to the source before resolving; the
+                                    // dataRevision read above keeps the source
+                                    // model's refreshes in the dependency set.
+                                    var fromSelection = v.albumArtSourceForSelection(sel)
                                     if (fromSelection.length > 0)
                                         return fromSelection
                                     // "" is ambiguous: nothing selected, or a
@@ -640,7 +652,10 @@ ApplicationWindow {
                             id: playlistView
                             Layout.fillHeight: true
                             Layout.fillWidth: true
-                            model: playlistTabs.activeModel
+                            // The filter proxy, not the model: the view and
+                            // its selection live in proxy rows (see the
+                            // view's `model` note).
+                            model: playlistTabs.activeView
                             selectionModel: playlistTabs.activeSelection
                             reloader: playlistTabs.activeReloader
                             tabs: playlistTabs

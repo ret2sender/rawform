@@ -42,6 +42,12 @@
 // "custom:<id>" for custom), never by position, so a saved order survives the
 // user editing the schema or custom columns between sessions.
 //
+// SOURCE rows throughout. The view never binds to this model directly: it
+// binds to the tab's PlaylistFilterProxy, and so does the selection model, so
+// the selection-taking helpers live on the proxy and every row this class takes
+// or returns is a source row. Consumers that hold rows across playlist edits
+// use the identity keys (trackKeys / rowsForKeys) rather than positions.
+//
 // I/O-free: it receives a ready ColumnSchema via setSchema() (loaded in
 // main.cpp). Registered into the com.rawform.app QML module via QML_ELEMENT.
 
@@ -52,16 +58,10 @@
 
 #include <QAbstractTableModel>
 #include <QHash>
-#include <QItemSelectionModel> // selectedRowList's parameter type
 #include <QList>
 #include <QQmlEngine>  // QML_ELEMENT / QML_ANONYMOUS macros
 #include <QStringList>
 #include <QVariantList>
-
-// Forward-declared (a plain pointer param on one invokable below). It is a known
-// Qt meta-type, so moc needs only the name here; the full include lives in the
-// .cpp where selectedRows()/currentIndex() are actually called.
-class QItemSelectionModel;
 
 namespace rawform {
 
@@ -74,7 +74,7 @@ class PlaylistModel : public QAbstractTableModel {
     /// Bumped on every in-place row refresh (refreshTrack), so a QML binding can
     /// depend on it to re-evaluate when row data changes underneath it. Used by
     /// the album-art source: dataChanged alone won't re-run a binding whose
-    /// value comes from an invokable (albumArtSourceForSelection /
+    /// value comes from an invokable (albumArtSourceForRows /
     /// albumArtSourceForRow), so a reloaded cover needs this nudge.
     Q_PROPERTY(int dataRevision READ dataRevision NOTIFY dataRevisionChanged)
 
@@ -265,17 +265,6 @@ public:
     /// siblings sharing one physical file). Out-of-range rows are skipped.
     Q_INVOKABLE [[nodiscard]] QVariantList trackKeys(const QVariantList& rows) const;
 
-    /// The selection's distinct row numbers, ascending, straight from the
-    /// selection model's RANGES (the scenario this prevents: QML materializing
-    /// ItemSelectionModel.selectedIndexes, one QModelIndex wrapper per CELL,
-    /// rows x columns JS allocations on a library-sized selection, then
-    /// deduping rows in JS). A QItemSelection is a list of
-    /// rectangular ranges, so the walk here is O(ranges + selected rows) with
-    /// zero per-cell cost, and the bitmap sweep returns the rows already
-    /// sorted and unique. Rows outside the model (a stale selection mid-
-    /// mutation) are clamped away. Null / empty selection returns empty.
-    Q_INVOKABLE [[nodiscard]] QList<int> selectedRowList(QItemSelectionModel* sel) const;
-
     /// Resolve identity keys (as produced by trackKeys) back to CURRENT row
     /// numbers, in key order. Keys whose track has left the playlist are
     /// skipped, so the result may be shorter than the input. Duplicate playlist
@@ -283,31 +272,32 @@ public:
     /// map to N distinct rows while the playlist still holds that many copies.
     Q_INVOKABLE [[nodiscard]] QVariantList rowsForKeys(const QVariantList& keys) const;
 
-    /// The album-art URL to show for a multi-selection, or an empty string when
-    /// the pane should clear to its placeholder. This is the single decision
-    /// point behind the art frame: QML hands us the active tab's selection model
-    /// and binds the frame's source straight to the result.
+    /// The album-art URL to show for a set of SOURCE rows, or an empty string
+    /// when the pane should clear to its placeholder. The single decision
+    /// point behind the art frame; the view's PlaylistFilterProxy maps the
+    /// active tab's selection to source rows and calls this.
     ///
-    /// The pane shows art only when EVERY selected row belongs to the same album,
-    /// so selecting one album shows its cover and selecting across albums clears
-    /// it. "Same album" is decided by a per-row identity key (see albumArtKey in
-    /// the .cpp): the album tag (album title + album artist + year, case-folded)
-    /// when tagged, falling back to the row's folder path when untagged so loose
-    /// untagged files in different folders never collapse to one album. The check
-    /// is pure field/path comparison (no filesystem stat), so a select-all over a
-    /// large playlist stays cheap.
+    /// The pane shows art only when EVERY row belongs to the same album, so
+    /// selecting one album shows its cover and selecting across albums clears
+    /// it. "Same album" is decided by a per-row identity key (see albumArtKey
+    /// in the .cpp): the album tag (album title + album artist + year,
+    /// case-folded) when tagged, falling back to the row's folder path when
+    /// untagged so loose untagged files in different folders never collapse
+    /// to one album. The check is pure field/path comparison (no filesystem
+    /// stat), so a select-all over a large playlist stays cheap.
     ///
-    /// When the selection is uniform, the URL is built for a REPRESENTATIVE row,
-    /// the current/anchor index if it is in the selection and present, else the
-    /// first present selected row, and resolved by AlbumArtProvider exactly as a
-    /// single selection is (sidecar cover first, then the embedded picture). The
-    /// "?v=" staleness tag is folded in so a re-read cover reloads. Returns "" for
-    /// a null/empty selection, a non-uniform selection, or when no representative
-    /// row is present/readable. A null currentIndex with an empty selection set
-    /// is treated as "nothing selected"; a valid currentIndex with an otherwise
-    /// empty set is treated as a single-row selection (so a click that did not
-    /// register as a range selection still shows that row's art).
-    Q_INVOKABLE [[nodiscard]] QString albumArtSourceForSelection(QItemSelectionModel* selection) const;
+    /// When the set is uniform, the URL is built for a REPRESENTATIVE row,
+    /// @p currentRow if it is in the set and present, else the first present
+    /// row, and resolved by AlbumArtProvider exactly as a single selection is
+    /// (sidecar cover first, then the embedded picture). The "?v=" staleness
+    /// tag is folded in so a re-read cover reloads. Returns "" for an empty
+    /// set, a non-uniform set, or when no representative row is
+    /// present/readable. An empty @p rows with a valid @p currentRow is
+    /// treated as a single-row selection (so a click that did not register as
+    /// a range selection still shows that row's art); both empty is "nothing
+    /// selected". C++-only (the proxy is the sole caller).
+    [[nodiscard]] QString albumArtSourceForRows(const QList<int>& rows,
+                                                int currentRow) const;
 
     /// Cover URL for a single row, resolved exactly like a one-row selection
     /// (same provider scheme, same "?v=" staleness tag); "" for an
@@ -317,31 +307,6 @@ public:
     /// dropped m3u, nothing clicked yet), the pane shows the playing track's
     /// cover via playingModel/playingRow instead of clearing.
     Q_INVOKABLE [[nodiscard]] QString albumArtSourceForRow(int row) const;
-
-    /// Select the contiguous row range [lo, hi] in ONE QItemSelectionModel
-    /// operation. This is the multi-row selection entry point (Ctrl+A,
-    /// Shift-click/Shift-arrow ranges); QML must never loop per-row select()
-    /// calls for a range.
-    ///
-    /// Why this exists: a per-row select() loop is quadratic-to-cubic. Each
-    /// call (a) merges another single-row range into the stored QItemSelection,
-    /// Qt does not coalesce adjacent ranges, so after k calls the selection
-    /// holds k fragments and every operation on it scans them; and (b) emits
-    /// selectionChanged, which re-runs the whole downstream pipeline
-    /// (selectedRows() over the fragmented set, the metadata pane's full
-    /// TrackData copy + re-aggregation, the album-art uniformity scan) once per
-    /// row instead of once per gesture. Measured: Ctrl+A over 5000 rows took
-    /// minutes. This helper builds ONE full-width range, applies it with ONE
-    /// select(), so the stored selection is a single range and the pipeline
-    /// runs exactly once.
-    ///
-    /// @p clearFirst true replaces the selection (ClearAndSelect, still a
-    /// single selectionChanged); false adds the range to it. lo/hi are clamped
-    /// to the model; a fully out-of-range or empty request is a no-op (never a
-    /// clear, so a stray call can't destroy a selection). Does NOT touch the
-    /// current index; the caller owns current/anchor semantics.
-    Q_INVOKABLE void selectRowRange(QItemSelectionModel* selection,
-                                    int lo, int hi, bool clearFirst);
 
     /// Show the column @p fieldId (a native field id, or "custom:<id>") by
     /// APPENDING it as the last visual column, via begin/endInsertColumns. A
@@ -359,7 +324,8 @@ public:
     ///
     /// Note for callers holding a multi-row selection: existing selection
     /// ranges do not cover a freshly appended column, so its cells would render
-    /// unselected; follow up with reselectFullWidth() (one batched op).
+    /// unselected; follow up with the proxy's reselectFullWidth() (one batched
+    /// op).
     Q_INVOKABLE bool showColumn(const QString& fieldId);
 
     /// Hide the visual column bound to @p fieldId, via begin/endRemoveColumns
@@ -392,47 +358,6 @@ public:
     /// own: consumers re-read URLs on their existing triggers (selection, tab
     /// and playing changes; the refresh forwarder in PlaylistTabs).
     void bumpArtEpoch() { ++m_artEpoch; }
-
-    /// Re-assert the CURRENT selection as full-width ranges in ONE select()
-    /// (one selectionChanged; current index and anchor untouched). Needed after
-    /// showColumn(): stored ranges span the pre-insert columns only, so the new
-    /// column's cells read as unselected. Reads the selection's own ranges
-    /// (already coalesced) rather than marshaling per-row indexes, merges
-    /// overlapping/adjacent row spans so the stored selection stays canonical
-    /// (no duplicate rows, which would double-count aggregate fields in the
-    /// metadata pane), and rebuilds each span over columns 0..columnCount()-1.
-    /// No-op for a null/foreign/empty selection.
-    Q_INVOKABLE void reselectFullWidth(QItemSelectionModel* selection);
-
-    /// The Ctrl+select-drag session, a live range APPENDED to the
-    /// selection that existed when the drag began. Three calls form a session:
-    ///
-    ///   beginAdditiveRangeDrag  snapshots the selection's current ranges as
-    ///                           the BASELINE (taken at drag start, after the
-    ///                           press's toggle, so the click's effect is part
-    ///                           of it).
-    ///   updateAdditiveRangeDrag re-applies baseline UNION [lo, hi] (full
-    ///                           width) with ONE ClearAndSelect per call.
-    ///   endAdditiveRangeDrag    closes the session and drops the snapshot.
-    ///
-    /// Why baseline-restore instead of plain additive selects: a naive additive live
-    /// range never shrinks when the drag reverses, so its feedback lies. Rebuilding
-    /// baseline-plus-range every move makes reversal truthful: rows the range no longer
-    /// covers drop out unless the baseline holds them. Doing that rebuild here, as one
-    /// merged QItemSelection and one select(), keeps the
-    /// one-selectionChanged-per-row-change discipline; a QML per-row loop would fragment
-    /// the stored selection and re-run the downstream pipeline per row (see
-    /// selectRowRange).
-    ///
-    /// The snapshot's ranges hold persistent indexes, so it survives
-    /// incidental model remaps. Same wrong-model refusal as selectRowRange;
-    /// update additionally refuses when no session is open, so a stray call
-    /// can never collapse the selection to just the range. None of the three
-    /// touch the current index; the caller owns current/anchor semantics.
-    Q_INVOKABLE void beginAdditiveRangeDrag(QItemSelectionModel* selection);
-    Q_INVOKABLE void updateAdditiveRangeDrag(QItemSelectionModel* selection,
-                                             int lo, int hi);
-    Q_INVOKABLE void endAdditiveRangeDrag();
 
 private:
     /// Render one track's value for a native field. The two composites
@@ -517,13 +442,6 @@ private:
     /// seedWidthForField(); fields absent here fall back to kDefaultColumnWidth.
     QHash<int, int>  m_seedWidths;
     QList<TrackData> m_tracks;
-    /// The additive-drag baseline (the selection as it stood at drag
-    /// start) and the session gate. The gate exists so updateAdditiveRangeDrag
-    /// outside a session is a refusal, not a selection-clobbering ClearAndSelect
-    /// against an empty baseline. QItemSelectionRange holds persistent indexes,
-    /// so the snapshot tracks incidental row remaps on its own.
-    QItemSelection   m_additiveDragBase;
-    bool             m_additiveDragActive = false;
     int              m_dataRevision = 0;
     /// See bumpArtEpoch(). Folded into every art URL's "?v=" tag.
     int              m_artEpoch = 0;

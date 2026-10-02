@@ -31,9 +31,6 @@
 #include "columns/ColumnSchema.h" // fieldFromString, isCustomFieldId, customIdFromFieldId
 
 #include <QAbstractItemModel>
-#include <QItemSelection>
-#include <QItemSelectionModel>
-#include <QModelIndex>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -79,7 +76,7 @@ bool PlaylistSearch::filterHasInvalid() const {
 }
 
 bool PlaylistSearch::active() const {
-    return m_model && !m_terms.isEmpty() && !m_searchSet.isEmpty();
+    return m_model && m_matchesValid && !m_terms.isEmpty() && !m_searchSet.isEmpty();
 }
 
 int PlaylistSearch::matchCount() const {
@@ -95,7 +92,12 @@ void PlaylistSearch::setModel(PlaylistModel* model) {
         return;
     }
     rebindModel(model);
+    // The match set describes the OLD model until the next pass; until then
+    // the search is not in force (active() false), so the proxy passes every
+    // row of the new playlist rather than hiding by stale row numbers.
+    m_matchesValid = false;
     emit modelChanged();
+    emit matchesChanged();
     // A new playlist: new tag keys, possibly a new visible-column set, and
     // every haystack. Parse now so the diagnostics track the new context at
     // once; the rows follow on the timer.
@@ -152,60 +154,6 @@ bool PlaylistSearch::accepts(int row) const {
         return false;
     }
     return std::ranges::binary_search(m_matches, row);
-}
-
-int PlaylistSearch::selectMatches(QItemSelectionModel* selection) const {
-    if (!selection || !m_model || selection->model() != m_model.data()) {
-        return -1;
-    }
-    if (!active()) {
-        return -1;
-    }
-    if (m_matches.isEmpty()) {
-        selection->clearSelection();
-        return -1;
-    }
-
-    // Contiguous runs of matching rows become full-width ranges, so the
-    // stored selection is as compact as the match set allows and the whole
-    // application is one selectionChanged.
-    const int cols = std::max(1, m_model->columnCount());
-    QItemSelection sel;
-    qsizetype i = 0;
-    while (i < m_matches.size()) {
-        const int lo = m_matches.at(i);
-        int       hi = lo;
-        while (i + 1 < m_matches.size() && m_matches.at(i + 1) == hi + 1) {
-            ++i;
-            ++hi;
-        }
-        sel.select(m_model->index(lo, 0), m_model->index(hi, cols - 1));
-        ++i;
-    }
-    selection->select(sel, QItemSelectionModel::ClearAndSelect);
-    // The focus row: the current row when it still matches (typing one more
-    // letter, or a row refresh, must not throw the user back to the first
-    // hit they had stepped away from with Enter), else the first match.
-    const QModelIndex ci   = selection->currentIndex();
-    const bool        keep = ci.isValid()
-                             && std::ranges::binary_search(m_matches, ci.row());
-    const int focus = keep ? ci.row() : m_matches.first();
-    selection->setCurrentIndex(m_model->index(focus, 0), QItemSelectionModel::NoUpdate);
-    return focus;
-}
-
-int PlaylistSearch::nextMatch(int fromRow, bool backward) const {
-    if (!active() || m_matches.isEmpty()) {
-        return -1;
-    }
-    if (backward) {
-        // The last match strictly below fromRow, else wrap to the last one.
-        const auto it = std::ranges::lower_bound(m_matches, fromRow);
-        return it == m_matches.begin() ? m_matches.last() : *(it - 1);
-    }
-    // The first match strictly above fromRow, else wrap to the first one.
-    const auto it = std::ranges::upper_bound(m_matches, fromRow);
-    return it == m_matches.end() ? m_matches.first() : *it;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +297,7 @@ void PlaylistSearch::rebuildHaystacks() {
 
 void PlaylistSearch::rematch() {
     m_matches.clear();
+    m_matchesValid = true;
     if (active()) {
         const qsizetype n = std::min<qsizetype>(m_haystacks.size(), m_model->rowCount());
         for (qsizetype r = 0; r < n; ++r) {

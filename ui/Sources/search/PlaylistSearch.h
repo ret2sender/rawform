@@ -42,9 +42,8 @@
 // force" (`active` false), never "nothing matches": a half-typed filter must
 // not empty the playlist.
 //
-// Selection application (selectMatches / nextMatch) is how the dialog acts on
-// the playlist until the filter proxy hides rows; the proxy will read
-// accepts(row) against the same cache, so the per-row work is not repeated.
+// The tab's PlaylistFilterProxy reads accepts(row) to decide visibility; the
+// dialog only steps the current row through the rows that remain.
 
 #pragma once
 
@@ -61,8 +60,6 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
-
-class QItemSelectionModel;
 
 namespace rawform {
 
@@ -90,7 +87,9 @@ class PlaylistSearch : public QObject {
     /// True when at least one Filter entry is invalid (the danger tint).
     Q_PROPERTY(bool filterHasInvalid READ filterHasInvalid NOTIFY diagnosticsChanged)
     /// True while a search is in force: the query has at least one term AND
-    /// the search set is non-empty. False means the playlist is untouched.
+    /// the search set is non-empty AND the match set describes the current
+    /// model (a rebind invalidates it until the next match pass). False
+    /// means the playlist is untouched.
     Q_PROPERTY(bool active READ active NOTIFY matchesChanged)
     /// The number of matching rows (0 when not active).
     Q_PROPERTY(int matchCount READ matchCount NOTIFY matchesChanged)
@@ -115,24 +114,10 @@ public:
     void setQueryText(const QString& text);
     void setFilterText(const QString& text);
 
-    /// True when @p row matches the search in force. False for every row when
-    /// not active, and for an out-of-range row. The filter proxy's hook.
+    /// True when SOURCE row @p row matches the search in force. False for
+    /// every row when not active, and for an out-of-range row. The filter
+    /// proxy's filterAcceptsRow.
     [[nodiscard]] bool accepts(int row) const;
-
-    /// Make the match set the playlist's selection, in ONE select() (full-width
-    /// ranges over the contiguous runs, ClearAndSelect), and make a match
-    /// current (NoUpdate): the current row if it still matches, else the
-    /// first match. Returns that row, or -1 when nothing matched (the
-    /// selection is then cleared, so a search with no hits reads as such) or
-    /// when @p selection is null or belongs to another model (refused,
-    /// nothing changed). No-op (-1) when not active: an empty query never
-    /// disturbs a selection the user made.
-    Q_INVOKABLE int selectMatches(QItemSelectionModel* selection) const;
-
-    /// The matching row after @p fromRow (before it when @p backward),
-    /// wrapping around the playlist; -1 when there are no matches. A
-    /// @p fromRow outside the playlist starts from the ends.
-    [[nodiscard]] Q_INVOKABLE int nextMatch(int fromRow, bool backward) const;
 
 signals:
     void modelChanged();
@@ -187,6 +172,9 @@ private:
     QList<search::Searchable>     m_searchSet;
     QList<QString>                m_haystacks;  ///< one per model row, folded
     QList<int>                    m_matches;    ///< ascending rows
+    /// False from a model rebind until the next match pass: the rows in
+    /// m_matches belong to the previous model until then.
+    bool                          m_matchesValid = false;
 
     /// The coalescing timer and what its next timeout must redo, in
     /// dependency order (see onCoalesceTimeout).

@@ -76,8 +76,69 @@ Item {
             ? selectionModel.currentIndex.row : -1
 
     // The model is created in C++ and assigned from MainWindow so this view
-    // stays reusable; tab switching swaps the model underneath it.
-    property PlaylistModel model
+    // stays reusable; tab switching swaps the model underneath it. It is the
+    // active tab's PlaylistFilterProxy, NOT its PlaylistModel: every row this
+    // view reads or hands to `model` is a PROXY row, and the source-space
+    // consumers (audioController.playAt, the dialogs' openFor, the drop
+    // position) get model.source plus a row mapped through it. The proxy
+    // re-exports the invokables and signals this view uses, so the rest of the
+    // file reads as it did against the model.
+    property PlaylistFilterProxy model
+
+    // Bumped on the proxy's layoutChanged (a filter applied or lifted, a row
+    // move): the one event that re-maps every source row to a new proxy row
+    // without any property the bindings below could observe.
+    property int _filterRevision: 0
+    Connections {
+        target: root.model
+        function onLayoutChanged() {
+            root._filterRevision++
+            centerAnim.stop()
+            // A re-filter arrives as layoutChanged with a DIFFERENT row count.
+            // TableView answers layoutChanged with a viewport-only rebuild,
+            // which (a) recomputes contentHeight only for rowsInserted /
+            // rowsRemoved / modelReset, so the scrollbar and the wheel would
+            // keep the previous extent, and (b) keeps the current top row
+            // clamped to the new count but at its OLD pixel position, so
+            // when the old top row is beyond the new count the last row is
+            // laid out rows deep into now-empty space and the viewport reads
+            // blank until a scroll re-lays it out (Qt's calculateTopLeft,
+            // the "keep the current top left" branch). Two steps, in order:
+            //
+            //   1. When the old top row cannot survive, ask for a rebuild
+            //      that recomputes the top-left from row 0 (positionViewAtRow
+            //      queues the PositionViewAtRow option, which calculateTopLeft
+            //      takes over the keep branch). A list that shrank below the
+            //      viewport lands at its top.
+            //   2. Force the layout now, which also carries the recompute of
+            //      contentHeight; the queued options merge into this one
+            //      immediate rebuild. Then clamp contentY for the case the
+            //      top row survived but the viewport now overhangs the end
+            //      (forceLayout is synchronous, so nothing pending overrides
+            //      the write; the _centerRow instant-path caveat is about a
+            //      rebuild still queued).
+            var n = root.model ? root.model.rowCount() : 0
+            if (n > 0 && tableView.topRow >= n)
+                tableView.positionViewAtRow(0, TableView.AlignTop)
+            tableView.forceLayout()
+            var maxY = Math.max(0, tableView.contentHeight - tableView.height)
+            if (tableView.contentY > maxY)
+                tableView.contentY = maxY
+        }
+    }
+
+    // The playing track's PROXY row in this view, -1 when playback follows
+    // another playlist, nothing plays, or the filter hides the playing row.
+    // The single place the source-space cursor becomes a view row: the
+    // delegates' green marker, the reveals and the activation check all
+    // compare against this. Re-evaluates on playingChanged (the controller's
+    // row/model notify), on the model swap, and on _filterRevision.
+    readonly property int _playingViewRow: {
+        void root._filterRevision
+        if (!root.model || audioController.playingModel !== root.model.source)
+            return -1
+        return root.model.mapRowFromSource(audioController.playingRow)
+    }
 
     // The playlist session manager (PlaylistTabs, created in C++, assigned from
     // MainWindow). The body DropArea hands dropped URLs to it in ONE call
@@ -306,8 +367,7 @@ Item {
         target: audioController
         function onTrackChanged() {
             if (root._pendingActivateRow >= 0
-                    && audioController.playingModel === root.model
-                    && audioController.playingRow === root._pendingActivateRow)
+                    && root._playingViewRow === root._pendingActivateRow)
                 root._pendingActivateRow = -1
         }
         function onErrorOccurred(message) {
@@ -612,9 +672,8 @@ Item {
         } else {
             var cr
             if (_pendingPositionMode === 2) {
-                cr = audioController.playingRow
-                if (audioController.playingModel !== model
-                        || cr < 0 || cr >= want) {
+                cr = root._playingViewRow
+                if (cr < 0 || cr >= want) {
                     _resetPendingPosition()
                     return
                 }
@@ -658,10 +717,10 @@ Item {
     // true only for the direct in-tab keypress; the cross-tab consumption
     // passes false (see the centerAnim note).
     function _revealPlayingHere(smooth) {
-        var r = audioController.playingRow
+        var r = root._playingViewRow
         if (r < 0 || r >= tableView.rows)
             return
-        if (selectionModel && audioController.playingModel === root.model)
+        if (selectionModel)
             selectionModel.setCurrentIndex(_rowIndex(r),
                                            ItemSelectionModel.NoUpdate)
         _centerRow(r, smooth)
@@ -1181,7 +1240,15 @@ Item {
                     // columnCount and headerData (titles below come from `display`),
                     // so it always has realized columns, which is what lets the
                     // built-in resize and setColumnWidth work even with zero rows.
-                    model: root.model
+                    //
+                    // The SOURCE model, not the proxy: HorizontalHeaderView only
+                    // treats a QAbstractTableModel as a headerable model (Qt's
+                    // asTableModel check in setModelImpl); given a
+                    // QSortFilterProxyModel it renders the whole model as a
+                    // table of header cells and swallows the body. Column space
+                    // is shared between the two, so headerData, columnCount and
+                    // every column signal read the same from either.
+                    model: root.model ? root.model.source : null
                     width: parent.width
 
                     // A synced header would scroll in lockstep with the body for
@@ -1444,7 +1511,7 @@ Item {
                         // half needs.
                         if (root._pendingRevealRow >= 0) {
                             root._pendingPositionMode =
-                                (model && audioController.playingModel === model)
+                                (model && audioController.playingModel === model.source)
                                     ? 2 : 0
                             root._pendingPositionRow = -1
                             root._pendingRevealRow = -1
@@ -1576,7 +1643,8 @@ Item {
                                    ? root.selectionModel.currentIndex : null
                             if (ci && ci.valid && root.model) {
                                 root._pendingActivateRow = ci.row
-                                audioController.playAt(root.model, ci.row)
+                                audioController.playAt(root.model.source,
+                                                       root.model.mapRowToSource(ci.row))
                                 if (!root._rowFullyVisible(ci.row))
                                     root._centerRow(ci.row, true)
                             }
@@ -1618,7 +1686,7 @@ Item {
                             var pm = audioController.playingModel
                             var pr = audioController.playingRow
                             if (pm && pr >= 0) {
-                                if (pm === root.model) {
+                                if (pm === root.model.source) {
                                     root._revealPlayingHere(true)
                                 } else if (root.tabs) {
                                     var ti = root.tabs.indexOfModel(pm)
@@ -1680,14 +1748,14 @@ Item {
                         required property bool current
 
                         // True when this is the engine's now-playing row AND this
-                        // view's model is the one playback is following. The
-                        // model-identity term matters: the same playlist can be
-                        // open in another tab, and only the playing one lights up.
-                        // Re-evaluates on the controller's playingChanged and on
-                        // delegate recycle (row is a required property).
+                        // view's model is the one playback is following (the
+                        // model-identity term lives in _playingViewRow: the same
+                        // playlist can be open in another tab, and only the
+                        // playing one lights up). Re-evaluates on the
+                        // controller's playingChanged, on a filter change and
+                        // on delegate recycle (row is a required property).
                         readonly property bool isPlayingRow:
-                            audioController.playingModel === root.model
-                            && audioController.playingRow === cell.row
+                            root._playingViewRow === cell.row
 
                         // Base zebra striping; selection tint takes precedence.
                         readonly property color _stripe: (row % 2 === 0) ? Theme.rowEven : Theme.rowOdd
@@ -2228,7 +2296,8 @@ Item {
                     root._selectExclusive(rr)
                     if (root.model) {
                         root._pendingActivateRow = rr
-                        audioController.playAt(root.model, rr)
+                        audioController.playAt(root.model.source,
+                                               root.model.mapRowToSource(rr))
                     }
                 }
 
@@ -2427,7 +2496,11 @@ Item {
                         // help for that reason. The invoke-argument conversion
                         // is the one decode this drop pays; the .rwfpl/scanner
                         // split lives in PlaylistTabs::dropUrlsIntoActive.
-                        var n = root.tabs.dropUrlsIntoActive(drop.urls, at)
+                        // The gap is a PROXY boundary; PlaylistTabs inserts in
+                        // source rows, so it is mapped (the end, while a
+                        // filter is active).
+                        var n = root.tabs.dropUrlsIntoActive(
+                                    drop.urls, root.model.mapGapToSource(at))
                         drop.accept(Qt.CopyAction)
                         if (root.log)
                             root.log.append("info", "drop: " + n
@@ -2732,7 +2805,9 @@ Item {
             win.y = host.y + Math.max(0, Math.round((host.height - win.height) / 2)) + off
         }
         root._propertiesSpawnCount++
-        win.openFor(root.model, rows)
+        // The dialogs live in SOURCE space (their C++ models take a
+        // PlaylistModel*), so the selection's proxy rows are mapped.
+        win.openFor(root.model.source, root.model.mapRowsToSource(rows))
     }
 
     // The Rename Files dialog factory ("File Operations > Rename to...").
@@ -2764,6 +2839,6 @@ Item {
             win.y = host.y + Math.max(0, Math.round((host.height - win.height) / 2)) + off
         }
         root._propertiesSpawnCount++
-        win.openFor(root.model, rows)
+        win.openFor(root.model.source, root.model.mapRowsToSource(rows))
     }
 }

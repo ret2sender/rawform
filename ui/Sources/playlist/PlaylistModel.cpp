@@ -31,7 +31,6 @@
 #include "columns/PatternEvaluator.h"     // renderFieldValue + evaluatePattern
 #include "media/ReplayGainTags.h"         // shared REPLAYGAIN_* parse + format
 
-#include <QItemSelectionModel> // selectedRows / currentIndex for album-art selection
 #include <QLatin1Char>
 #include <QPair> // (path, subsong) identity key in rowsForKeys
 #include <QSet>
@@ -41,7 +40,6 @@
 
 #include <algorithm> // std::ranges::sort / unique / rotate, std::max
 #include <utility> // std::move
-#include <vector> // selectedRowList's dedupe/sort bitmap
 
 namespace rawform {
 
@@ -694,36 +692,6 @@ QVariantList PlaylistModel::replayGainRows(const QVariantList& rows) const {
     return out;
 }
 
-QList<int> PlaylistModel::selectedRowList(QItemSelectionModel* sel) const {
-    // Range walk + bitmap sweep (see the header): never per-cell. The bitmap
-    // doubles as the dedupe and the sort, since the sweep emits ascending.
-    QList<int> out;
-    if (!sel)
-        return out;
-    const QItemSelection ranges = sel->selection();
-    if (ranges.isEmpty())
-        return out;
-    const int n = static_cast<int>(m_tracks.size());
-    std::vector<bool> mark(static_cast<size_t>(n), false);
-    int selected = 0;
-    for (const QItemSelectionRange& r : ranges) {
-        const int top = std::max(0, r.top());
-        const int bottom = std::min(n - 1, r.bottom());
-        for (int i = top; i <= bottom; ++i) {
-            if (!mark[static_cast<size_t>(i)]) {
-                mark[static_cast<size_t>(i)] = true;
-                ++selected;
-            }
-        }
-    }
-    out.reserve(selected);
-    for (int i = 0; i < n; ++i) {
-        if (mark[static_cast<size_t>(i)])
-            out.push_back(i);
-    }
-    return out;
-}
-
 QVariantList PlaylistModel::trackKeys(const QVariantList& rows) const {
     // One { path, subsong } map per valid row, input order preserved. This is
     // the durable identity the Properties window snapshots on open: paths
@@ -813,39 +781,34 @@ QString albumArtKey(const TrackData& t) {
 
 } // namespace
 
-QString PlaylistModel::albumArtSourceForSelection(QItemSelectionModel* selection) const {
-    if (!selection)
-        return {};
-
-    // The selected rows, one index per row (column 0). A valid current index with
-    // an EMPTY set is treated as a single-row selection, so a click that did not
-    // register as a range selection still shows that row's art; a null current
-    // index with an empty set is "nothing selected" and clears the pane.
-    QModelIndexList rowIdx = selection->selectedRows(0);
-    if (rowIdx.isEmpty()) {
-        const QModelIndex cur = selection->currentIndex();
-        if (!cur.isValid())
+QString PlaylistModel::albumArtSourceForRows(const QList<int>& rows,
+                                             int currentRow) const {
+    // An EMPTY set with a valid current row is treated as a single-row
+    // selection, so a click that did not register as a range selection still
+    // shows that row's art; both empty is "nothing selected" and clears the
+    // pane.
+    QList<int> set = rows;
+    if (set.isEmpty()) {
+        if (currentRow < 0) {
             return {};
-        rowIdx.append(cur.sibling(cur.row(), 0));
+        }
+        set.append(currentRow);
     }
 
     // Decide uniformity and pick a representative in one pass. The representative
-    // is the current/anchor row when it is part of the selection and present,
-    // else the first present selected row. "Present" gates on the row's
-    // availability so a missing file never drives the art (it would only resolve
-    // to the placeholder anyway).
-    const QModelIndex curIdx = selection->currentIndex();
-    const int currentRow     = curIdx.isValid() ? curIdx.row() : -1;
-
+    // is the current/anchor row when it is part of the set and present, else
+    // the first present row. "Present" gates on the row's availability so a
+    // missing file never drives the art (it would only resolve to the
+    // placeholder anyway).
     QString sharedKey;
     bool    haveKey        = false;
     int     representative = -1;
     int     firstPresent   = -1;
 
-    for (const QModelIndex& idx : rowIdx) {
-        const int row = idx.row();
-        if (row < 0 || row >= m_tracks.size())
+    for (const int row : set) {
+        if (row < 0 || row >= m_tracks.size()) {
             continue;
+        }
         const TrackData& t = m_tracks.at(row);
 
         const QString key = albumArtKey(t);
@@ -853,24 +816,29 @@ QString PlaylistModel::albumArtSourceForSelection(QItemSelectionModel* selection
             sharedKey = key;
             haveKey   = true;
         } else if (key != sharedKey) {
-            // Two albums in the selection: clear the pane.
+            // Two albums in the set: clear the pane.
             return {};
         }
 
         if (t.available) {
-            if (firstPresent < 0)
+            if (firstPresent < 0) {
                 firstPresent = row;
-            if (row == currentRow)
+            }
+            if (row == currentRow) {
                 representative = row;
+            }
         }
     }
 
-    if (!haveKey)
-        return {};                  // selection held only out-of-range rows
-    if (representative < 0)
+    if (!haveKey) {
+        return {};                  // the set held only out-of-range rows
+    }
+    if (representative < 0) {
         representative = firstPresent;
-    if (representative < 0)
+    }
+    if (representative < 0) {
         return {};                  // uniform album, but no present file to show
+    }
 
     // Resolve exactly as a single selection does: the provider tries the sidecar
     // cover first, then the embedded picture, keyed by the file path; the "?v="
@@ -902,91 +870,6 @@ QString PlaylistModel::albumArtSourceForRow(int row) const {
     if (!m_tracks.at(row).available)
         return {}; // a missing file only resolves to the placeholder anyway
     return artUrlForRow(row);
-}
-
-void PlaylistModel::selectRowRange(QItemSelectionModel* selection,
-                                   int lo, int hi, bool clearFirst) {
-    // Guard the wiring, not just the arguments: selecting THIS model's indexes
-    // on a selection model bound to a DIFFERENT model (a stale QML binding
-    // mid tab-switch) would corrupt that model's selection, so it is refused
-    // outright rather than "best effort".
-    if (!selection || selection->model() != this)
-        return;
-
-    const int rows = static_cast<int>(m_tracks.size());
-    const int cols = columnCount();
-    if (rows <= 0 || cols <= 0)
-        return;
-    if (lo > hi)
-        std::swap(lo, hi);
-    lo = std::max(lo, 0);
-    hi = std::min(hi, rows - 1);
-    if (lo > hi)
-        return; // fully out of range: a no-op, never an implicit clear
-
-    // ONE full-width range, applied with ONE select(). Spanning every column
-    // explicitly (instead of the Rows flag on a column-0 range) keeps the
-    // STORED selection in the shape per-row selects produce, so per-cell
-    // `selected` reads in the view and selectedIndexes() consumers (delete,
-    // drag-block detection) are undisturbed, while the selection model holds a
-    // single range and emits a single selectionChanged. That single emission
-    // is the whole point: the metadata pane re-aggregation and the album-art
-    // scan run once per GESTURE, not once per row (a per-row loop is
-    // quadratic; observed at minutes for 5000 rows).
-    const QItemSelection sel(index(lo, 0), index(hi, cols - 1));
-    selection->select(sel, clearFirst ? QItemSelectionModel::ClearAndSelect
-                                      : QItemSelectionModel::Select);
-}
-
-void PlaylistModel::beginAdditiveRangeDrag(QItemSelectionModel* selection) {
-    // Same wrong-model refusal as selectRowRange: snapshotting a foreign
-    // model's selection would seed the session with indexes select() below
-    // silently drops, so the baseline would lie.
-    if (!selection || selection->model() != this)
-        return;
-    m_additiveDragBase   = selection->selection();
-    m_additiveDragActive = true;
-}
-
-void PlaylistModel::updateAdditiveRangeDrag(QItemSelectionModel* selection,
-                                            int lo, int hi) {
-    if (!selection || selection->model() != this)
-        return;
-    // No open session: refuse. Applying against an empty baseline would be a
-    // ClearAndSelect down to just the range, destroying the selection this
-    // gesture exists to preserve.
-    if (!m_additiveDragActive)
-        return;
-
-    const int rows = static_cast<int>(m_tracks.size());
-    const int cols = columnCount();
-    if (rows <= 0 || cols <= 0)
-        return;
-    if (lo > hi)
-        std::swap(lo, hi);
-    lo = std::max(lo, 0);
-    hi = std::min(hi, rows - 1);
-    if (lo > hi)
-        return; // fully out of range: a no-op, same contract as selectRowRange
-
-    // Baseline UNION range, applied as ONE ClearAndSelect. merge() with
-    // Select is the union operator: it splits/dedupes overlapping ranges, so
-    // a drag sweeping across baseline rows never stores duplicate rows (which
-    // would double-count in selectedRows() consumers, e.g. the metadata
-    // pane's aggregate fields). One select() means one selectionChanged per
-    // ROW CHANGE of the drag, the same batching discipline as selectRowRange.
-    QItemSelection out = m_additiveDragBase;
-    out.merge(QItemSelection(index(lo, 0), index(hi, cols - 1)),
-              QItemSelectionModel::Select);
-    selection->select(out, QItemSelectionModel::ClearAndSelect);
-}
-
-void PlaylistModel::endAdditiveRangeDrag() {
-    // Drop the snapshot, not just the gate: its ranges hold persistent
-    // indexes the model would otherwise keep updating on every row change
-    // for as long as the (invisible) baseline lingered.
-    m_additiveDragBase   = QItemSelection();
-    m_additiveDragActive = false;
 }
 
 bool PlaylistModel::showColumn(const QString& fieldId) {
@@ -1072,52 +955,6 @@ bool PlaylistModel::isColumnShown(const QString& fieldId) const {
         if (columnFieldId(c) == fieldId)
             return true;
     return false;
-}
-
-void PlaylistModel::reselectFullWidth(QItemSelectionModel* selection) {
-    if (!selection || selection->model() != this)
-        return; // same wrong-model refusal as selectRowRange
-    const int cols = columnCount();
-    if (cols <= 0)
-        return;
-
-    const QItemSelection cur = selection->selection();
-    if (cur.isEmpty())
-        return;
-
-    // Collect the selected ROW spans and merge overlapping/adjacent ones. The
-    // stored ranges are normally disjoint (QItemSelectionModel maintains that
-    // through merge), but this helper must not rely on it: hand-built overlaps
-    // passed straight to select() would be stored as-is, and duplicate rows
-    // then double-count in selectedRows() consumers (the metadata pane's
-    // aggregate fields, e.g. Total size).
-    QList<std::pair<int, int>> spans;
-    spans.reserve(static_cast<int>(cur.size()));
-    for (const QItemSelectionRange& r : cur) {
-        if (r.isValid())
-            spans.append({ r.top(), r.bottom() });
-    }
-    if (spans.isEmpty())
-        return;
-    std::ranges::sort(spans);
-
-    QItemSelection full;
-    int top = spans.first().first;
-    int bot = spans.first().second;
-    for (qsizetype i = 1; i < spans.size(); ++i) {
-        const auto& s = spans.at(i);
-        if (s.first <= bot + 1) { // overlapping or adjacent: extend the span
-            bot = std::max(bot, s.second);
-            continue;
-        }
-        full.append(QItemSelectionRange(index(top, 0), index(bot, cols - 1)));
-        top = s.first;
-        bot = s.second;
-    }
-    full.append(QItemSelectionRange(index(top, 0), index(bot, cols - 1)));
-
-    // ONE replace, one selectionChanged; current index and anchor untouched.
-    selection->select(full, QItemSelectionModel::ClearAndSelect);
 }
 
 QString PlaylistModel::renderField(const TrackData& t, ColumnField field) {
