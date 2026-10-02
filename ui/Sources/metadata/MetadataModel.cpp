@@ -527,34 +527,32 @@ QString MetadataModel::joinDeduped(FieldId id, const QString& sep) const {
     // Precondition: at least two tracks selected (single selection is handled in
     // aggregatedValue, which returns the per-track value untouched).
     //
-    // First decide whether this is a MIX: collect the per-track values, noting
-    // whether any track carries the tag at all. If NONE do, the field is blank
-    // for the whole selection (so always-on rows show empty and conditional rows
-    // hide); we do NOT manufacture a lone "(unknown)". If SOME do, the tracks
-    // that lack it contribute the literal "(unknown)" placeholder.
-    QStringList raw;
-    raw.reserve(static_cast<qsizetype>(m_selection.size()));
+    // ONE pass, de-duping as it goes (first-seen order, "(unknown)" standing in
+    // for a missing value), with two exits that keep a library-sized
+    // selection cheap:
+    //   - the distinct-value cap: the kMaxDistinctValues + 1-th distinct value
+    //     settles the result as the capped list plus the truncation marker, so a
+    //     field that differs per track (Title, File name, Track #) stops after a
+    //     couple of dozen rows instead of hashing every one of them;
+    //   - the MIX rule: a selection where NO track carries the tag is blank for
+    //     the whole field (always-on rows show empty, conditional rows hide; no
+    //     lone "(unknown)" is manufactured), which only a full scan can decide,
+    //     so a field nobody tags costs one cheap pass and nothing else.
+    // Exactly kMaxDistinctValues distinct values show in full (no ellipsis).
+    // Reaching the cap implies at least kMaxDistinctValues - 1 real values, so
+    // the early return never has to re-check the mix rule. (The former shape
+    // materialized every per-track value into a list first, then de-duped it:
+    // for a 15k-row select-all that was a 15k-string list per Join field.)
+    constexpr int kMaxDistinctValues = 20;
+    static const QString kUnknown = QStringLiteral("(unknown)");
+    QStringList ordered;
+    QSet<QString> seen;
     bool anyPresent = false;
     for (const TrackData& t : m_selection) {
         const QString v = fieldValue(t, id);
         if (!v.isEmpty())
             anyPresent = true;
-        raw.push_back(v);
-    }
-    if (!anyPresent)
-        return {};
-
-    // De-dupe preserving first-seen order, substituting "(unknown)" for the gaps,
-    // and cap the distinct count so a large mixed selection cannot build an
-    // unreadable, slow-to-shape megastring. Exactly kMaxDistinctValues with no
-    // further distinct value shows in full (no ellipsis); one more triggers the
-    // truncation marker.
-    constexpr int kMaxDistinctValues = 20;
-    static const QString kUnknown = QStringLiteral("(unknown)");
-    QStringList ordered;
-    QSet<QString> seen;
-    for (const QString& v : raw) {
-        const QString disp = v.isEmpty() ? kUnknown : v;
+        const QString& disp = v.isEmpty() ? kUnknown : v;
         if (seen.contains(disp))
             continue;
         if (ordered.size() == kMaxDistinctValues)
@@ -562,6 +560,8 @@ QString MetadataModel::joinDeduped(FieldId id, const QString& sep) const {
         seen.insert(disp);
         ordered.push_back(disp);
     }
+    if (!anyPresent)
+        return {};
     return ordered.join(sep);
 }
 
@@ -607,16 +607,27 @@ void MetadataModel::rebuildValueCache() {
     // Distinct-value counts for the two path fields only, used solely to decide
     // their Name label ("File name" vs "File names", "Folder name" vs "Folder
     // names"). Counting distinct values, not selection size, is what keeps two
-    // files in one folder on the singular "Folder name".
+    // files in one folder on the singular "Folder name". Only "more than one"
+    // is ever read, so the count saturates at 2: the first value that differs
+    // from the first one seen ends the pass (a 15k-row select-all otherwise
+    // built a 15k-entry set of file names to answer a yes/no).
     m_distinctCount.clear();
     for (const FieldId id : { FieldId::FileName, FieldId::FolderName }) {
-        QSet<QString> distinct;
+        QString first;
+        int     distinct = 0;
         for (const TrackData& t : m_selection) {
             const QString v = fieldValue(t, id);
-            if (!v.isEmpty())
-                distinct.insert(v);
+            if (v.isEmpty())
+                continue;
+            if (distinct == 0) {
+                first    = v;
+                distinct = 1;
+            } else if (v != first) {
+                distinct = 2;
+                break;
+            }
         }
-        m_distinctCount.insert(id, static_cast<int>(distinct.size()));
+        m_distinctCount.insert(id, distinct);
     }
 }
 

@@ -605,10 +605,11 @@ unset(_rawform_qmlcache_sources)
 #   cmake --build <dir> --target rawform_pattern_test
 #   ctest --test-dir <dir>
 #
-# The pattern-evaluator test is Quick-free: it links only Qt6::Core + yaml-cpp
-# (pulled in by ColumnSchema.cpp) and the source files under test (plus the
-# shared Formats helpers they call), so it builds and runs without standing
-# up the GUI.
+# The pattern-evaluator test is Quick-free: it links only Qt6::Core and the
+# source files under test (plus the shared Formats helpers they call), so it
+# builds and runs without standing up the GUI. No yaml-cpp: ColumnSchema.cpp
+# is pure code (the YAML stores are CustomColumnRegistry and the preset
+# stores, none of which these tests compile).
 # ---------------------------------------------------------------------------
 option(RAWFORM_BUILD_TESTS "Build rawform unit tests" OFF)
 if(RAWFORM_BUILD_TESTS)
@@ -627,7 +628,6 @@ if(RAWFORM_BUILD_TESTS)
     )
     target_link_libraries(rawform_pattern_test PRIVATE
             Qt6::Core
-            yaml-cpp::yaml-cpp
     )
     add_test(NAME pattern_evaluator COMMAND rawform_pattern_test)
 
@@ -650,7 +650,6 @@ if(RAWFORM_BUILD_TESTS)
     )
     target_link_libraries(rawform_rename_test PRIVATE
             Qt6::Core
-            yaml-cpp::yaml-cpp
     )
     add_test(NAME rename_sanitizer COMMAND rawform_rename_test)
 
@@ -672,7 +671,6 @@ if(RAWFORM_BUILD_TESTS)
     )
     target_link_libraries(rawform_search_test PRIVATE
             Qt6::Core
-            yaml-cpp::yaml-cpp
     )
     add_test(NAME playlist_search_filter COMMAND rawform_search_test)
 

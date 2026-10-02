@@ -23,10 +23,9 @@
 // Standalone unit test for the rename-name pipeline.
 //
 // Same shape and constraints as PatternEvaluatorTest.cpp: Qt-Quick-FREE,
-// linking Qt6::Core + yaml-cpp (transitively via ColumnSchema.cpp) plus the
-// three sources under test. No model, no view, no TagLib, NO FILESYSTEM: the
-// pipeline is pure strings, and the on-disk half (FileRenamer) has its own
-// concerns.
+// linking Qt6::Core plus the three sources under test. No model, no view, no
+// TagLib, no yaml-cpp, NO FILESYSTEM: the pipeline is pure strings, and the
+// on-disk half (FileRenamer) has its own concerns.
 //
 // Build via the CMake switch:
 //     cmake -B build -DRAWFORM_BUILD_TESTS=ON

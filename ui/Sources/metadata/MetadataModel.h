@@ -265,7 +265,9 @@ private:
     /// values become "(unknown)" only when the selection is a MIX; an all-missing
     /// field returns empty so conditional rows still hide. The distinct values
     /// are capped (a huge selection cannot build an unreadable, slow-to-shape
-    /// megastring); past the cap a trailing ellipsis marks the truncation.
+    /// megastring); past the cap a trailing ellipsis marks the truncation, and
+    /// the pass stops there, which is what keeps a select-all over a library
+    /// cheap for the fields that differ per track.
     [[nodiscard]] QString joinDeduped(FieldId id, const QString& sep) const;
 
     /// Aggregate a field across the current selection. Single selection returns
@@ -282,7 +284,7 @@ private:
     QList<Row>       m_rows;       ///< currently visible subset (varies per sel.)
     QList<TrackData> m_selection;  ///< current selected tracks (values source)
     QHash<FieldId, QString> m_valueCache;    ///< aggregated value per field
-    QHash<FieldId, int>     m_distinctCount;  ///< distinct values, path fields only
+    QHash<FieldId, int>     m_distinctCount;  ///< path fields only; saturates at 2
     bool m_detailsMode = false;    ///< true = Location + General only (no Metadata, no Items Selected)
 };
 

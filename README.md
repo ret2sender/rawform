@@ -44,6 +44,16 @@ Right-clicking a playlist's column header manages columns, including custom
 columns defined with a `%pattern%` syntax in the Custom
 Columns window. Column layout is persisted per playlist.
 
+**Find** (Edit > Find, `Ctrl+F`) searches the active playlist as you type and
+hides every row that does not match. The String box takes whitespace-separated
+terms, all of which must occur, matched as case- and accent-insensitive
+substrings. The Filter box says where to look: `:`-separated column titles,
+custom column names, field ids, or `%pattern%` expressions in the custom
+column syntax (`Artist:Album:%composer%`); left empty, the visible columns are
+searched. Invalid entries are underlined. Filter expressions can be saved as
+named presets. Enter and Shift+Enter step through the matches; closing the
+dialog shows every row again.
+
 Selecting tracks and opening **Properties** shows a non-modal
 window (metadata, ReplayGain, Location panes); several can be open
 at once, and tag edits are written back through TagLib. The Tools menu offers
@@ -73,9 +83,10 @@ the Flatpak sandbox the same paths resolve to
 | `settings.yaml` | Tagging preferences (the MP3/ID3 write settings) |
 | `playback.yaml` | Master volume and mute, ReplayGain settings, output rate policy, output device selection |
 | `spectrum.yaml` | Spectrum-view preferences (analyzer source) |
-| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename To, Settings, Custom Playlist Columns) |
+| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename To, Settings, Custom Playlist Columns, Find) |
 | `playlist_custom_columns.yaml` | Custom column definitions |
 | `rename_patterns.yaml` | Saved Rename To pattern presets |
+| `search_filters.yaml` | Saved Find filter presets |
 | `columns.rwftp` | Default playlist column layout |
 | `live_playlist/*.rwfpl` | One live copy per open playlist tab |
 | `live_playlist/.session` | Tab order and active tab |

@@ -22,10 +22,9 @@
 //
 // Standalone unit test for the custom-column pattern evaluator.
 //
-// Deliberately Qt-Quick-FREE: it links only Qt6::Core + yaml-cpp (the latter is
-// pulled in transitively by ColumnSchema.cpp, whose fieldFromString the
-// evaluator calls) plus PatternEvaluator.cpp + ColumnSchema.cpp. No model, no
-// view, no TagLib.
+// Deliberately Qt-Quick-FREE: it links only Qt6::Core plus PatternEvaluator.cpp,
+// ColumnSchema.cpp (fieldFromString, which the evaluator calls) and Formats.cpp.
+// No model, no view, no TagLib, no yaml-cpp.
 //
 // Build it via the optional CMake switch:
 //     cmake -B build -DRAWFORM_BUILD_TESTS=ON
@@ -39,7 +38,7 @@
 //         Sources/columns/ColumnSchema.cpp \
 //         Sources/utils/Formats.cpp \
 //         -I Sources -I Sources/columns -I Sources/media \
-//         $(pkg-config --cflags --libs Qt6Core yaml-cpp) \
+//         $(pkg-config --cflags --libs Qt6Core) \
 //         -o pattern_test && ./pattern_test
 //
 // Exits non-zero if any check fails (so it doubles as a CI gate).
