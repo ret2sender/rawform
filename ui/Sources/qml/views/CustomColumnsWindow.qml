@@ -158,16 +158,22 @@ Window {
     // The single hide path for Close, the title bar X and Escape. This is a
     // hide()-reused instance, so onClosing never fires for any of them and
     // the size save has to ride the hide itself. Edits are live, so there is
-    // nothing to revert on the way out.
+    // nothing to revert on the way out. The trim follows the hide: a hidden
+    // window releases its swapchain and platform surface even though the
+    // instance lives on (see HeapTrim.h).
     function dismiss() {
         _saveSize()
         hide()
+        HeapTrim.trimSoon()
     }
 
     // A window-manager close request bypasses the in-window paths above;
-    // save the size the same way. Accepting the close hides the reused
-    // instance, and the next openManager() shows it again.
-    onClosing: customColumnsWindow._saveSize()
+    // save the size and trim the same way. Accepting the close hides the
+    // reused instance, and the next openManager() shows it again.
+    onClosing: {
+        customColumnsWindow._saveSize()
+        HeapTrim.trimSoon()
+    }
 
     function refresh() {
         rows = (typeof customColumns !== "undefined" && customColumns)

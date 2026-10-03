@@ -172,6 +172,9 @@ set(APP_SOURCES
         # C++ and is listed here for IDE indexing.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/MacOSStyling.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Clipboard.h
+        # Post-teardown heap trim for the tool windows (glibc malloc_trim);
+        # header-only QML singleton, listed so the type registrar scans it.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/HeapTrim.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/AppInfo.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/AppInfo.cpp
         # Shared YAML file IO (atomic QSaveFile persist + tolerant read),

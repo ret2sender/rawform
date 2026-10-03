@@ -220,6 +220,9 @@ Window {
                                     propertiesWindow.width,
                                     propertiesWindow.height)
         propertiesWindow.destroy()
+        // Hand the freed heap pages back once the deferred delete has run;
+        // this window is the heaviest tool window to tear down (see HeapTrim.h).
+        HeapTrim.trimSoon()
     }
 
     function _closeWindow() {

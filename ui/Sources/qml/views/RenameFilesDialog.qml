@@ -290,6 +290,9 @@ Window {
             windowGeometry.saveSize("rename",
                                     renameDialog.width, renameDialog.height)
         renameDialog.destroy()
+        // Hand the freed heap pages back once the deferred delete has run
+        // (see HeapTrim.h).
+        HeapTrim.trimSoon()
     }
 
     // ThemedMenu resolves its blur backdrop through the hosting window's
