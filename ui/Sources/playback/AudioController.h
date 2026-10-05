@@ -51,9 +51,23 @@
 // is untouchable through any of this; only what-plays-next changes.
 //
 // QUEUE SHAPE. The "what plays next" derivation in recomputeLookahead() is
-// queue-prefix ++ organic-tail; an explicit cross-playlist play queue (an "Add
-// to queue" command and a queue view) is outside this controller's contract,
-// so the prefix is empty and only the organic tail exists.
+// queue-prefix ++ organic-tail. The prefix is the PlaybackQueue (the explicit,
+// cross-playlist "Add to Playback Queue" list, a PlaylistModel of its own shown
+// as the Playback Queue tab); the tail is the rows after the cursor. A queued
+// track therefore always plays before the next row down. When the engine
+// advances INTO the queue (applyTrack sees the queue head's path with no
+// explicit start pending) the entry is culled (cull on start: nothing in the
+// queue is ever "playing") and the cursor moves to the entry's ORIGIN, the
+// row it was queued from, so once the queue drains playback continues after
+// that row in that playlist, the foobar2000 rule. An origin that is gone
+// (tab closed, row deleted, or an entry that never had one) falls back to a
+// path lookup in the origin model and then in every open playlist, and
+// failing that the cursor detaches: the remaining queue still plays (the
+// prefix does not depend on the cursor), and after it playback stops.
+// Only the explicit play gesture on a normal playlist (playAt from a
+// double-click / Enter) flushes the queue; Next takes the queue head first,
+// Previous is organic, Stop keeps the queue, and a double-click INSIDE the
+// queue jumps the line (everything above the clicked entry is skipped).
 //
 // Master volume lands here: the volume property below is the
 // UI source of truth, the power-law percentage->gain taper and the mute live in
@@ -78,6 +92,7 @@
 // the full definition must be visible. (PlaylistTabs, used only as a plain
 // pointer in no Q_PROPERTY, stays forward-declared below.)
 #include "media/ReplayGainTags.h"  // replaygain::Values member (the playing track's RG snapshot)
+#include "playback/PlaybackQueue.h" // PlaybackQueue::Origin in a private signature
 #include "playlist/PlaylistModel.h"
 
 #include <QList>
@@ -261,9 +276,17 @@ public:
     AudioController(const AudioController&)            = delete;
     AudioController& operator=(const AudioController&) = delete;
 
-    /// The session manager, used only as the fallback source when play() is hit
-    /// from Stopped with nothing ever played (start the active tab). Non-owning.
+    /// The session manager: the fallback source when play() is hit from
+    /// Stopped with nothing ever played (start the active tab), and the set of
+    /// open playlists the queue's origin recovery searches. Non-owning.
     void setPlaylistTabs(PlaylistTabs* tabs);
+
+    /// The playback queue, the prefix of the lookahead (see QUEUE SHAPE). Its
+    /// model's structural signals arm the coalesced lookahead rebuild, so a
+    /// reorder or removal in the queue tab reaches the engine like an edit of
+    /// the playing playlist does. Non-owning; call once before the first
+    /// play().
+    void setPlaybackQueue(PlaybackQueue* queue);
 
     // --- property reads ----------------------------------------------------
     [[nodiscard]] int     state() const { return m_state; }
@@ -346,16 +369,22 @@ public:
 public slots:
     // --- transport (invokable from QML) ------------------------------------
 
-    /// Make @p model the playing playlist and @p row its current track, and play
-    /// that track immediately (the double-click / Enter gesture). Seeds the engine
-    /// with the organic tail after @p row, then cuts/starts via playNow. A no-op
-    /// for a null model or an out-of-range/empty-path row.
+    /// The explicit play gesture (double-click / Enter). On a normal playlist:
+    /// FLUSH the playback queue, make @p model the playing playlist and @p row
+    /// its current track, and play that track immediately, seeding the engine
+    /// with the organic tail after @p row and cutting/starting via playNow.
+    /// On the QUEUE's model: jump the line, i.e. play entry @p row now, culling
+    /// it and every entry above it, with the cursor resolved to its origin.
+    /// A no-op for a null model or an out-of-range/empty-path row. The
+    /// internal callers (play, next, previous) go through startTrack instead,
+    /// which never flushes.
     void playAt(rawform::PlaylistModel* model, int row);
 
     /// Start or resume. Playing: no-op. Paused: resume in place. Stopped with a
-    /// live cursor: restart the cursor track from 0 (stop is a rewind). Stopped
-    /// with nothing ever played: start the active tab from its current selection,
-    /// else its first row.
+    /// live cursor: restart the cursor track from 0 (stop is a rewind; the
+    /// queue, kept by stop, follows it). Stopped with nothing ever played: the
+    /// queue head when the queue is non-empty, else the active tab from its
+    /// current selection, else its first row.
     void play();
 
     /// Pause without flushing (instant resume). Toggle picks play vs pause.
@@ -382,11 +411,13 @@ public slots:
     /// top, freshly reopened with the new tags.
     bool stopIfPlayingAny(const QStringList& paths);
 
-    /// Organic navigation, computed from the cursor (mirrors the CLI's controller,
-    /// not engine.next(), so the cursor stays authoritative). next past the end
-    /// stops; previous restarts the current track from 0
-    /// once the playback position is at or past the threshold (see the .cpp), and
-    /// steps to the previous row (clamped at row 0) before that.
+    /// Navigation, computed from the queue and the cursor (mirrors the CLI's
+    /// controller, not engine.next(), so the cursor stays authoritative). next
+    /// plays the queue head when the queue is non-empty, else the next row,
+    /// and stops past the end; previous is organic only: it restarts the
+    /// current track from 0 once the playback position is at or past the
+    /// threshold (see the .cpp), and steps to the previous row (clamped at
+    /// row 0) before that.
     void next();
     void previous();
 
@@ -521,8 +552,27 @@ private:
     void setPlayingModel(rawform::PlaylistModel* model);  ///< swap source + rewire signals
     void setCursorRow(int row);                           ///< set cursor + refresh highlight/meta
     void resolveCursorForPath(const QString& path);       ///< predict-then-verify on advance
-    void recomputeLookahead();                            ///< setQueue(organic tail after cursor)
+    void recomputeLookahead();                            ///< setQueue(prefix ++ organic tail)
     void refreshNowPlayingMeta();                         ///< title/artist from the cursor row
+
+    // --- transport body / queue -------------------------------------------
+    /// The start every transport verb shares: make @p model the playing
+    /// playlist, @p row its cursor, re-push the lookahead, and playNow the
+    /// row's path. playAt is this plus the queue flush; play/next/previous
+    /// call this directly so a restart or a step never flushes the queue.
+    void startTrack(rawform::PlaylistModel* model, int row);
+    /// Play queue entry @p index now: cull entries 0..index, resolve the
+    /// cursor to the entry's origin (placeCursorAtOrigin), re-push the
+    /// lookahead, and playNow its path. next() and the queue tab's play
+    /// gesture come here. A no-op out of range.
+    void playQueueEntry(int index);
+    /// The continuation rule for a queued track that just became current:
+    /// the origin row if it still exists, else the first row with the same
+    /// path in the origin model, else in any open playlist (via m_tabs), else
+    /// a detached cursor. @p track is the entry's data, snapshotted so the
+    /// now-playing title/artist and the ReplayGain factor survive the
+    /// detached case (the playlist row is normally their source).
+    void placeCursorAtOrigin(const PlaybackQueue::Origin& origin, const TrackData& track);
 
     // --- master volume + ReplayGain / persistence --------------------------
     /// Resolve the effective LINEAR gain and push it to the engine: the power-law taper
@@ -602,6 +652,7 @@ private:
     rawform::audio::Engine                m_engine;
 
     QPointer<PlaylistTabs>  m_tabs;
+    QPointer<PlaybackQueue> m_queue;  ///< the lookahead prefix; see setPlaybackQueue
 
     QPointer<PlaylistModel> m_playingModel;
     QPersistentModelIndex   m_cursor;            ///< column 0 of m_playingModel
@@ -658,6 +709,16 @@ private:
     QString m_pendingPath;
     QString m_nowPlayingTitle;
     QString m_nowPlayingArtist;
+    /// Now-playing identity for a DETACHED queued track. A queued entry whose
+    /// origin cannot be resolved plays with no cursor, and the title/artist
+    /// normally come from the cursor row, so placeCursorAtOrigin snapshots
+    /// the entry's own data here, keyed by its path; refreshNowPlayingMeta
+    /// uses it while the cursor is invalid and the engine's current track
+    /// matches the key (the same staleness guard the ReplayGain snapshot
+    /// uses). Overwritten by the next detached start; harmless otherwise.
+    QString m_detachedPath;
+    QString m_detachedTitle;
+    QString m_detachedArtist;
 
     /// The device outcome for the current open: the rate the output device is actually
     /// running at and whether that equals the source rate, refreshed from

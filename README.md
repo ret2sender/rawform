@@ -44,6 +44,18 @@ Right-clicking a playlist's column header manages columns, including custom
 columns defined with a `%pattern%` syntax in the Custom
 Columns window. Column layout is persisted per playlist.
 
+The **Playback Queue** is a cross-playlist "play these next" list. Right-click
+tracks in any playlist and choose Add to Playback Queue (`Q`) to append them,
+or Play Next (`Shift+Q`) to put them at the front; queued tracks play before
+the playing playlist's next row, each leaving the queue as it starts, and
+when the queue runs dry playback carries on after the last queued track in
+the playlist it came from. Playback > Show Playback Queue (`Ctrl+Shift+Q`)
+opens the queue as a tab with a teal underline, used like any playlist:
+reorder by drag, remove with Delete, double-click an entry to jump the line.
+Double-clicking a track in a normal playlist clears the queue. The queue's
+column layout has its own preset (View > Save Playback Queue Column Layout
+while the queue tab is active); its contents last for the session.
+
 **Find** (Edit > Find, `Ctrl+F`) searches the active playlist as you type and
 hides every row that does not match. The String box takes whitespace-separated
 terms, all of which must occur, matched as case- and accent-insensitive
@@ -88,8 +100,9 @@ the Flatpak sandbox the same paths resolve to
 | `rename_patterns.yaml` | Saved Rename To pattern presets |
 | `search_filters.yaml` | Saved Find filter presets |
 | `columns.rwftp` | Default playlist column layout |
+| `queue_columns.rwftp` | Playback Queue tab column layout |
 | `live_playlist/*.rwfpl` | One live copy per open playlist tab |
-| `live_playlist/.session` | Tab order and active tab |
+| `live_playlist/.session` | Tab order, active tab, and the Playback Queue tab's position when shown |
 | `rate_ledger.yaml` | CoreAudio rate-debt crash ledger. Exists only transiently on macOS while a session holds a rate change; a crash leaves it behind and the next launch restores the device rate from it. Never appears on Linux. |
 
 `.rwfpl` and `.rwftp` are binary formats (Qt `QDataStream`); the YAML files
@@ -242,6 +255,12 @@ cmake --build build/app
 cmake -S audio -B build/core -DCMAKE_BUILD_TYPE=Release
 cmake --build build/core
 ctest --test-dir build/core
+
+# UI unit tests (opt-in; console binaries, no display needed). The engine's
+# tests are registered in this tree too but not built by it, hence the label.
+cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+cmake --build build/app
+ctest --test-dir build/app -L ui
 ```
 
 ### Build notes

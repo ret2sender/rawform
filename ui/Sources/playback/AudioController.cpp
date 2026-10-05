@@ -436,6 +436,32 @@ AudioController::~AudioController() {
 
 void AudioController::setPlaylistTabs(PlaylistTabs* tabs) { m_tabs = tabs; }
 
+void AudioController::setPlaybackQueue(PlaybackQueue* queue) {
+    if (m_queue.data() == queue) {
+        return;
+    }
+    if (m_queue && m_queue->model()) {
+        QObject::disconnect(m_queue->model(), nullptr, &m_lookaheadCoalesce, nullptr);
+    }
+    m_queue = queue;
+    PlaylistModel* qm = queue ? queue->model() : nullptr;
+    if (qm) {
+        // Every structural change of the queue (an enqueue, a cull, a
+        // Delete in the tab, a drag-reorder, a clear) re-projects the prefix
+        // through the same coalesced rebuild the playing playlist's edits
+        // use, so a burst (a multi-row enqueue is one insert; a clear is one
+        // reset) costs one setQueue. The current track is never disturbed.
+        connect(qm, &QAbstractItemModel::rowsInserted,
+                &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
+        connect(qm, &QAbstractItemModel::rowsRemoved,
+                &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
+        connect(qm, &QAbstractItemModel::rowsMoved,
+                &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
+        connect(qm, &QAbstractItemModel::modelReset,
+                &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
+    }
+}
+
 // Visualization tap forwarders (for SpectrumProvider). Both relay straight to the
 // engine: copyScopeMono returns the latest mono output window from the lock-free
 // tap, and setScopeSource selects which side of the master gain that tap captures
@@ -635,7 +661,8 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
     // track here, and clearing the guard on that would let the subsequent
     // applyError mistake the failure for a mid-playback error and leave the dead
     // cursor in place.
-    if (!m_pendingPath.isEmpty() && f.path == m_pendingPath) {
+    const bool confirmedStart = !m_pendingPath.isEmpty() && f.path == m_pendingPath;
+    if (confirmedStart) {
         m_pendingPath.clear();
     }
 
@@ -653,12 +680,38 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
     m_deviceRateHz     = f.deviceRateHz;   // device outcome, sampled with this track
     m_outputBitPerfect = f.bitPerfect;
 
-    // Move the cursor onto the track that just became current. This handles both
-    // the playAt-initiated start (the cursor is already here) and a gapless
-    // organic advance (the cursor moves one row on), and refreshes the title/
-    // artist from the new row. It is the authoritative confirmation of the
-    // optimistic cursor playAt set.
-    resolveCursorForPath(f.path);
+    // Move the cursor onto the track that just became current. Three cases:
+    //   - an explicit start (startTrack / playQueueEntry) being confirmed: the
+    //     cursor is already where it belongs, resolveCursorForPath keeps it;
+    //   - an engine advance INTO THE QUEUE: the engine's pending list is our
+    //     projection, prefix first, so an unconfirmed track whose path is in
+    //     the queue is the queue head being played (k > 0 only when the
+    //     engine skipped unopenable entries on the way, reported through
+    //     applyError; they are spent too). Cull through it and place the
+    //     cursor at the entry's origin, then re-push the lookahead, because
+    //     the tail now follows the origin row, not the previous cursor;
+    //   - an organic advance (the next row down): the cursor moves one on.
+    // Either way this is the authoritative confirmation of the optimistic
+    // cursor an explicit start set. The one timing caveat: the gapless
+    // stitch pops the engine's next path about one ring (400 ms) before the
+    // audible end, so an enqueue inside that window plays one track late;
+    // the test below simply sees no match and the entry waits its turn.
+    bool placed = false;
+    if (!confirmedStart && m_queue && !f.path.isEmpty()) {
+        const int k = m_queue->firstIndexOfPath(f.path);
+        if (k >= 0) {
+            const PlaybackQueue::Origin origin = m_queue->originAt(k);
+            const TrackData* td = m_queue->trackAt(k);
+            const TrackData track = td ? *td : TrackData{};
+            m_queue->takeFront(k + 1);
+            placeCursorAtOrigin(origin, track);
+            recomputeLookahead();
+            placed = true;
+        }
+    }
+    if (!placed) {
+        resolveCursorForPath(f.path);
+    }
 
     emit trackChanged();
     emit formatSummaryChanged();  // format line's NOTIFY is now separate from trackChanged
@@ -822,17 +875,19 @@ void AudioController::recomputeLookahead() {
     // ever double-posting the queue.
     m_lookaheadCoalesce.stop();
 
-    std::vector<std::string> seq;
-
-    // Queue-prefix ++ organic-tail (see the header): the prefix is empty by
-    // contract, so the sequence is the organic tail alone.
+    // Queue-prefix ++ organic-tail (see the header). The prefix is every
+    // queued entry in queue order; it does not depend on the cursor, which is
+    // what keeps a queue playing through a detached cursor or a closed
+    // playing tab.
+    std::vector<std::string> seq = m_queue ? m_queue->paths()
+                                           : std::vector<std::string>{};
 
     PlaylistModel* m = m_playingModel.data();
     if (m && m_cursor.isValid()) {
         const int start = m_cursor.row() + 1;
         const int n     = m->rowCount();
         if (n > start) {
-            seq.reserve(static_cast<std::size_t>(n - start));
+            seq.reserve(seq.size() + static_cast<std::size_t>(n - start));
         }
         for (int r = start; r < n; ++r) {
             const QString p = m->trackFilePath(r);
@@ -856,6 +911,11 @@ void AudioController::refreshNowPlayingMeta() {
             artist = td->artists.isEmpty() ? QString()
                                            : td->artists.join(QStringLiteral(", "));
         }
+    } else if (!m_detachedPath.isEmpty() && m_detachedPath == m_path) {
+        // No cursor row to read, but the engine's current track is the
+        // detached queued entry whose identity placeCursorAtOrigin kept.
+        title  = m_detachedTitle;
+        artist = m_detachedArtist;
     }
     m_nowPlayingTitle  = title;
     m_nowPlayingArtist = artist;
@@ -885,10 +945,11 @@ void AudioController::onPlayingRowsChanged() {
 }
 
 void AudioController::onPlayingModelReset() {
-    // A reset invalidates the persistent index. Detach the cursor and drain the
-    // queue; the current track finishes and the engine settles to Stopped.
+    // A reset invalidates the persistent index. Detach the cursor and drop the
+    // organic tail; the current track finishes and, with nothing queued, the
+    // engine settles to Stopped.
     m_cursor = QPersistentModelIndex();
-    recomputeLookahead();  // empty tail -> setQueue([])
+    recomputeLookahead();  // empty tail -> setQueue(queue prefix alone)
     refreshNowPlayingMeta();
     emit playingChanged();
     emit trackChanged();
@@ -921,12 +982,13 @@ void AudioController::onPlayingColumnsRemoved() {
 
 void AudioController::onPlayingModelDestroyed() {
     // The playing tab was closed. The current track is NEVER interrupted (the
-    // engine holds its own decoder); we only detach the highlight and drain the
-    // queue so playback stops after the current track unless something is queued.
+    // engine holds its own decoder); we only detach the highlight and drop the
+    // organic tail, so playback stops after the current track unless the
+    // playback queue still holds entries (the prefix survives this).
     m_playingModel = nullptr;
     m_cursor       = QPersistentModelIndex();
     m_playingConnections.clear();  // Qt already dropped them on destruction
-    recomputeLookahead();          // no model -> setQueue([])
+    recomputeLookahead();          // no model -> setQueue(queue prefix alone)
     refreshNowPlayingMeta();
     emit playingChanged();
     emit trackChanged();
@@ -937,6 +999,29 @@ void AudioController::onPlayingModelDestroyed() {
 // ===========================================================================
 
 void AudioController::playAt(PlaylistModel* model, int row) {
+    if (!model) {
+        return;
+    }
+    // The queue tab's own gesture: jump the line. Everything above the
+    // clicked entry was passed over, so it is culled with it.
+    if (m_queue && model == m_queue->model()) {
+        playQueueEntry(row);
+        return;
+    }
+    // An explicit play on a normal playlist is a new intent: the queue is
+    // flushed (the one path that flushes it) and playback follows this
+    // playlist from here. Validated before the flush so a dead click (an
+    // empty-path row) does not cost the queue.
+    if (row < 0 || row >= model->rowCount() || model->trackFilePath(row).isEmpty()) {
+        return;
+    }
+    if (m_queue) {
+        m_queue->clear();
+    }
+    startTrack(model, row);
+}
+
+void AudioController::startTrack(PlaylistModel* model, int row) {
     if (!model || row < 0 || row >= model->rowCount()) {
         return;
     }
@@ -947,7 +1032,7 @@ void AudioController::playAt(PlaylistModel* model, int row) {
 
     setPlayingModel(model);  // switch organic source + rewire structural signals
     setCursorRow(row);       // optimistic; onTrackChanged confirms it
-    recomputeLookahead();    // seed engine pending = organic tail after this row
+    recomputeLookahead();    // seed engine pending = queue prefix ++ tail after this row
 
     // Mark this as a start awaiting confirmation. applyTrack clears it when the
     // engine reports this exact path current; applyError reads it to know a
@@ -959,6 +1044,93 @@ void AudioController::playAt(PlaylistModel* model, int row) {
     m_engine.playNow(path.toStdString());
 }
 
+void AudioController::playQueueEntry(int index) {
+    if (!m_queue || index < 0 || index >= m_queue->count()) {
+        return;
+    }
+    const QString path = m_queue->pathAt(index);
+    if (path.isEmpty()) {
+        return;
+    }
+    // Read the entry before the cull removes it, then cull: this entry is
+    // spent the moment it starts, and the ones above it were skipped.
+    const PlaybackQueue::Origin origin = m_queue->originAt(index);
+    const TrackData* td = m_queue->trackAt(index);
+    const TrackData track = td ? *td : TrackData{};
+    m_queue->takeFront(index + 1);
+
+    placeCursorAtOrigin(origin, track);  // optimistic; applyTrack confirms it
+    recomputeLookahead();                // prefix = the rest, tail after the origin
+    m_pendingPath = path;
+    m_engine.playNow(path.toStdString());
+}
+
+void AudioController::placeCursorAtOrigin(const PlaybackQueue::Origin& origin,
+                                          const TrackData& track) {
+    const QString& path = track.filePath;
+
+    // The first row in @p model whose path matches, -1 for none.
+    const auto rowWithPath = [&path](PlaylistModel* model) {
+        if (!model || path.isEmpty()) {
+            return -1;
+        }
+        const int n = model->rowCount();
+        for (int r = 0; r < n; ++r) {
+            if (model->trackFilePath(r) == path) {
+                return r;
+            }
+        }
+        return -1;
+    };
+
+    PlaylistModel* target = nullptr;
+    int            row    = -1;
+    // 1) The origin row still exists (the persistent index followed every
+    //    edit since the enqueue): continue from there.
+    if (origin.model && origin.index.isValid()) {
+        target = origin.model.data();
+        row    = origin.index.row();
+    }
+    // 2) The origin row was deleted but its playlist is open: the same file
+    //    elsewhere in that playlist is the next best continuation.
+    if (!target && origin.model) {
+        row = rowWithPath(origin.model.data());
+        if (row >= 0) {
+            target = origin.model.data();
+        }
+    }
+    // 3) No origin at all (the tab closed, or an entry that never had one, a
+    //    file dropped straight into the queue tab): any open playlist that
+    //    lists the file, first in strip order.
+    if (!target && m_tabs) {
+        const QList<PlaylistModel*> models = m_tabs->playlistModels();
+        for (PlaylistModel* m : models) {
+            row = rowWithPath(m);
+            if (row >= 0) {
+                target = m;
+                break;
+            }
+        }
+    }
+    if (target) {
+        setPlayingModel(target);
+        setCursorRow(row);
+        return;
+    }
+    // 4) Nowhere to continue from: the track plays with a detached cursor,
+    //    the rest of the queue follows it, and playback stops after the
+    //    queue. Keep the entry's identity for the now-playing line and its
+    //    ReplayGain values for the gain, since no row will supply them.
+    m_detachedPath   = path;
+    m_detachedTitle  = track.title;
+    m_detachedArtist = track.artists.isEmpty()
+                           ? QString()
+                           : track.artists.join(QStringLiteral(", "));
+    m_playingRgValues = replaygain::read(track.extraTags);
+    m_playingRgPath   = path;
+    setCursorRow(-1);
+}
+
 void AudioController::play() {
     if (m_state == Playing) {
         return;
@@ -968,15 +1140,19 @@ void AudioController::play() {
         return;
     }
     // Stopped. A live cursor means a track is loaded/remembered: restart it from
-    // 0 deterministically through playAt (stop is a rewind, so 0 is correct, and
-    // this re-seeds the tail rather than leaning on the engine's remembered-track
-    // replay).
+    // 0 deterministically through startTrack (stop is a rewind, so 0 is correct,
+    // and this re-seeds the lookahead rather than leaning on the engine's
+    // remembered-track replay). The queue, which stop keeps, follows it.
     if (m_playingModel && m_cursor.isValid()) {
-        playAt(m_playingModel.data(), m_cursor.row());
+        startTrack(m_playingModel.data(), m_cursor.row());
         return;
     }
-    // Nothing ever played: start the active tab from its current selection, else
-    // its first row.
+    // Nothing ever played (or a detached end): the queue head when there is
+    // one, else the active tab from its current selection, else its first row.
+    if (m_queue && m_queue->count() > 0) {
+        playQueueEntry(0);
+        return;
+    }
     if (m_tabs) {
         PlaylistModel* m = m_tabs->activeModel();
         if (m && m->rowCount() > 0) {
@@ -993,7 +1169,7 @@ void AudioController::play() {
                     row = src.row();
                 }
             }
-            playAt(m, row);
+            startTrack(m, row);
         }
     }
 }
@@ -1031,12 +1207,19 @@ bool AudioController::stopIfPlayingAny(const QStringList& paths) {
 }
 
 void AudioController::next() {
+    // The queue head outranks the next row, exactly as it does at a natural
+    // advance; and it plays even with no cursor (a detached queued track, or
+    // nothing ever played), which the organic branch cannot.
+    if (m_queue && m_queue->count() > 0) {
+        playQueueEntry(0);
+        return;
+    }
     if (!m_playingModel || !m_cursor.isValid()) {
         return;
     }
     const int target = m_cursor.row() + 1;
     if (target < m_playingModel->rowCount()) {
-        playAt(m_playingModel.data(), target);
+        startTrack(m_playingModel.data(), target);
     } else {
         // Past the end: stop.
         m_engine.stop();
@@ -1055,13 +1238,14 @@ void AudioController::previous() {
     // the latest tick), so a seek forward past the threshold also makes Previous
     // restart, matching how most players behave.
     if (m_positionSeconds >= kPreviousRestartThresholdSeconds) {
-        playAt(m_playingModel.data(), row);  // restart current from 0
+        startTrack(m_playingModel.data(), row);  // restart current from 0
         return;
     }
 
     // Within the threshold: step back one row. Clamp at the first row, where there
-    // is nothing earlier, so Previous there simply restarts row 0.
-    playAt(m_playingModel.data(), row > 0 ? row - 1 : 0);
+    // is nothing earlier, so Previous there simply restarts row 0. Organic
+    // only: the queue is what comes next, never what came before.
+    startTrack(m_playingModel.data(), row > 0 ? row - 1 : 0);
 }
 
 void AudioController::seekSeconds(double seconds) {

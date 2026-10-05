@@ -287,6 +287,11 @@ set(APP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/AudioController.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/AudioController.h
 
+        # playback/: the playback queue (the cross-playlist play-next list
+        # behind the Playback Queue tab; the controller's lookahead prefix)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PlaybackQueue.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PlaybackQueue.h
+
         # playback/: spectrum viewer provider (timer + FFT drive + smoothing)
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumProvider.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumProvider.h
@@ -608,7 +613,16 @@ unset(_rawform_qmlcache_sources)
 # Optional unit tests (OFF by default; the normal app build is unaffected).
 # Enable with -DRAWFORM_BUILD_TESTS=ON, then:
 #   cmake --build <dir> --target rawform_pattern_test
-#   ctest --test-dir <dir>
+#   ctest --test-dir <dir> -L ui
+#
+# Every test registered here carries the `ui` label (rawform_add_ui_test
+# below is the one registration path, so the label cannot be forgotten).
+# The engine tree is pulled in with EXCLUDE_FROM_ALL, so its nine tests are
+# registered in this build too but their binaries are never built by `all`;
+# `-L ui` is how a caller (CI, a developer) runs exactly the tests this tree
+# builds. A label, not a name list, so a test added here is picked up by
+# every caller without touching them (the scenario this fixes: CI selected
+# the UI tests by an anchored name list and ran three of five).
 #
 # The pattern-evaluator test is Quick-free: it links only Qt6::Core and the
 # source files under test (plus the shared Formats helpers they call), so it
@@ -619,6 +633,12 @@ unset(_rawform_qmlcache_sources)
 option(RAWFORM_BUILD_TESTS "Build rawform unit tests" OFF)
 if(RAWFORM_BUILD_TESTS)
     enable_testing()
+
+    # Register a UI test under the `ui` label (see the block header).
+    function(rawform_add_ui_test name target)
+        add_test(NAME ${name} COMMAND ${target})
+        set_tests_properties(${name} PROPERTIES LABELS ui)
+    endfunction()
 
     add_executable(rawform_pattern_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PatternEvaluatorTest.cpp
@@ -634,7 +654,7 @@ if(RAWFORM_BUILD_TESTS)
     target_link_libraries(rawform_pattern_test PRIVATE
             Qt6::Core
     )
-    add_test(NAME pattern_evaluator COMMAND rawform_pattern_test)
+    rawform_add_ui_test(pattern_evaluator rawform_pattern_test)
 
     # Same recipe for the rename-name pipeline: Quick-free, no TagLib,
     # no filesystem. RenameSanitizer.cpp pulls in PatternEvaluator (the
@@ -656,7 +676,7 @@ if(RAWFORM_BUILD_TESTS)
     target_link_libraries(rawform_rename_test PRIVATE
             Qt6::Core
     )
-    add_test(NAME rename_sanitizer COMMAND rawform_rename_test)
+    rawform_add_ui_test(rename_sanitizer rawform_rename_test)
 
     # Same recipe for the Find grammar and match test: Quick-free, no model.
     # PlaylistSearchFilter.cpp renders through PatternEvaluator (which pulls
@@ -677,7 +697,7 @@ if(RAWFORM_BUILD_TESTS)
     target_link_libraries(rawform_search_test PRIVATE
             Qt6::Core
     )
-    add_test(NAME playlist_search_filter COMMAND rawform_search_test)
+    rawform_add_ui_test(playlist_search_filter rawform_search_test)
 
     # ------------------------------------------------------------------
     # The .rwfpl playlist-format test: round-trip fidelity, the full
@@ -696,7 +716,42 @@ if(RAWFORM_BUILD_TESTS)
     target_link_libraries(rawform_playlist_test PRIVATE
             Qt6::Core
     )
-    add_test(NAME playlist_file COMMAND rawform_playlist_test)
+    rawform_add_ui_test(playlist_file rawform_playlist_test)
+
+    # ------------------------------------------------------------------
+    # The playback-queue test: the origin sidecar's alignment with the
+    # queue model through enqueue, enqueue-next, source edits (persistent
+    # index self-healing), reorder, cull, foreign inserts, and resets, plus
+    # the controller-facing queries. The queue IS a PlaylistModel, so this
+    # one links the real model and its spine (schema, pattern evaluator,
+    # custom-column registry with yaml-cpp, no file read) and Qt6::Qml for
+    # the QML_ELEMENT headers. Still Qt-Quick-free and filesystem-free.
+    # ------------------------------------------------------------------
+    add_executable(rawform_queue_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaybackQueueTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PlaybackQueue.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PlaybackQueue.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/PatternEvaluator.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
+    )
+    target_include_directories(rawform_queue_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media
+    )
+    target_link_libraries(rawform_queue_test PRIVATE
+            Qt6::Core
+            Qt6::Qml
+            yaml-cpp::yaml-cpp
+    )
+    rawform_add_ui_test(playback_queue rawform_queue_test)
 endif()
 
 # ---------------------------------------------------------------------------

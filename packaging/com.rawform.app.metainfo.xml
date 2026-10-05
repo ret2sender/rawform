@@ -65,6 +65,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.3.0" date="2026-10-05">
+      <description>
+        <p>Add the Playback Queue (cross-playlist play-next list as a tab), run every UI test in CI by label, and hint shortcuts in the row menu</p>
+      </description>
+    </release>
     <release version="1.2.1" date="2026-10-03">
       <description>
         <p>Trim the heap after a tool window closes (HeapTrim singleton, glibc only)</p>

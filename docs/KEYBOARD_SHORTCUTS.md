@@ -22,10 +22,13 @@ keys: Space types a space, Left/Right move the caret, Ctrl+A/C/V edit text.
 | `Space` | Play / pause. Stopped: starts the active playlist from its selection, else its first row | Main window |
 | `Ctrl+`` (also `Ctrl+~`) | Stop (rewinds; Play restarts the same track) | Main window |
 | `Ctrl+<` (also `Ctrl+,`) | Previous track. Past 5 s into a track it restarts the current track instead, like the button | Main window |
-| `Ctrl+>` (also `Ctrl+.`) | Next track | Main window |
+| `Ctrl+>` (also `Ctrl+.`) | Next track: the queue head when the Playback Queue holds one, else the next row | Main window |
+| `Q` | Add the selected tracks to the end of the Playback Queue | Main window |
+| `Shift+Q` | Play Next: put the selected tracks at the front of the Playback Queue | Main window |
+| `Ctrl+Shift+Q` | Show or hide the Playback Queue tab | Main window |
 | `Right` | Seek forward 5 s | Playlist |
 | `Left` | Seek back 5 s | Playlist |
-| `Enter` | Play the current (focus) row from the start, centering it if it is off screen | Playlist |
+| `Enter` | Play the current (focus) row from the start, centering it if it is off screen. In a playlist this also clears the Playback Queue; in the queue tab it plays that entry now and drops the entries above it | Playlist |
 
 Seek keys repeat while held and compound: each press adds 5 s to the target,
 the engine is asked at most every 150 ms, and a badge above the fill's tip
@@ -63,7 +66,7 @@ extends from, or the current row when there is none) instead.
 | `Shift` + any of the above | Extend the selection to the target. `Shift+Home` / `Shift+End` do nothing when no row is current |
 | `Ctrl+A` | Select all |
 | `Escape` | Clear the selection |
-| `Delete` / `Backspace` | Remove the selected rows from the playlist |
+| `Delete` / `Backspace` | Remove the selected rows from the playlist (in the queue tab: from the queue) |
 | `Ctrl+T` | Reveal the playing track: switch to its tab if needed and center it |
 | `Ctrl+Shift+T` | Center the selection (the midpoint of its span; with nothing selected, the current row) |
 | `Alt+Enter` | Open the Properties window for the selection |
@@ -104,13 +107,16 @@ Not shortcuts, but the pointer equivalents of the keys above.
 
 Playlist rows: click selects; `Ctrl`+click toggles a row; `Shift`+click selects
 a range from the anchor; `Ctrl+Shift`+click adds a range; double-click plays the
-row; drag moves the selected rows; right-click opens the row menu (Reload info,
-Rename files, Properties, ...). Header: drag reorders columns, drag the edge
-resizes, right-click opens the column menu.
+row (clearing the Playback Queue; in the queue tab it jumps the line instead);
+drag moves the selected rows; right-click opens the row menu (Add to Playback
+Queue, Play Next, Reload info, Rename files, Properties, ...). Header: drag
+reorders columns, drag the edge resizes, right-click opens the column menu.
 
-Tabs: click switches; double-click the title renames; drag reorders;
-middle-click closes; middle-click on the empty strip creates a playlist;
-close glyph closes. Dropping files on the strip makes a new tab for them.
+Tabs: click switches; double-click the title renames (not the Playback Queue
+tab, whose title is fixed); drag reorders; middle-click closes; middle-click on
+the empty strip creates a playlist; close glyph closes. Closing the Playback
+Queue tab hides it with its contents intact. Dropping files on the strip makes
+a new tab for them.
 
 Player bar: click or drag the progress bar to seek (one seek, on release);
 click the volume percentage to mute / unmute; wheel over the volume slider

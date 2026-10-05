@@ -60,6 +60,12 @@
 //                               the drop then lands in it (generic name)
 //       * a .rwfpl            -> opened in its own new tab (as a fresh live copy)
 //
+// The Playback Queue tab (the model's isQueue role) is drawn like any other
+// tab with three differences: its underline is the teal queue identity, full
+// width whether or not it is active (dim when not), a dim entry count sits
+// after its title, and the double-click rename is off (its title is fixed).
+// Closing it hides it; the Playback menu brings it back.
+//
 // `tabs` is the PlaylistTabs (the list model + the session API); `view` is the
 // PlaylistView, read only to snapshot the active column widths before a switch.
 
@@ -450,10 +456,13 @@ Rectangle {
                     // Dim the tab being dragged.
                     opacity: (strip._dragging && strip._dragFrom === tabItem.index) ? 0.4 : 1
                     radius: 2
-                    width: tabLabel.width + closeBtn.width + 24
+                    width: tabLabel.width + queueCount.slot + closeBtn.width + 24
 
                     // Inline-rename state (double-click the title to edit).
                     property bool editing: false
+
+                    // The Playback Queue tab (see the file comment).
+                    readonly property bool isQueue: tabItem.model.isQueue === true
 
                     Text {
                         id: tabLabel
@@ -468,6 +477,27 @@ Rectangle {
                         text: tabItem.model.title
                         visible: !tabItem.editing
                         width: Math.min(implicitWidth, 200)
+                    }
+
+                    // The queue's entry count, a dim badge after the title
+                    // (its own Text, so the title string and the rename
+                    // editor never see it). Shown only while something is
+                    // queued: an idle queue tab reads as its plain title.
+                    // `slot` is the width it takes in the tab, 0 when hidden,
+                    // so the tab width and the underline follow it.
+                    Text {
+                        id: queueCount
+                        readonly property bool shown:
+                            tabItem.isQueue && tabItem.model.queueCount > 0
+                        readonly property real slot: shown ? implicitWidth + 5 : 0
+                        anchors.left: tabLabel.right
+                        anchors.leftMargin: 5
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.textDim
+                        font.family: Theme.monoFont
+                        font.pixelSize: 11
+                        text: shown ? String(tabItem.model.queueCount) : ""
+                        visible: shown && !tabItem.editing
                     }
 
                     // Rename editor: shown on double-click, commits on Enter / focus
@@ -537,12 +567,18 @@ Rectangle {
                         // smooths the batch increments and is enabled ONLY
                         // while scanning, so ordinary tab switches never
                         // animate the full underline.
+                        //
+                        // The queue tab carries its teal identity in this
+                        // same line: full width whether focused or not
+                        // (queueAccent focused, queueAccentDim otherwise, the
+                        // same pair while scanning), the one visual that
+                        // says "this tab is not a playlist".
                         readonly property bool active:
                             tabItem.index === strip.tabs.currentIndex
                         readonly property bool scanning:
                             tabItem.model.scanning === true
                         readonly property real fullW:
-                            tabLabel.width + closeBtn.width + 12
+                            tabLabel.width + queueCount.slot + closeBtn.width + 12
                         anchors.bottom: parent.bottom
                         x: (tabItem.width - fullW) / 2
                         height: 2
@@ -550,9 +586,11 @@ Rectangle {
                                ? fullW * Math.max(0, Math.min(1,
                                      tabItem.model.scanProgress))
                                : fullW
-                        color: scanning
-                               ? (active ? Theme.accent : Theme.accentSoft)
-                               : (active ? Theme.accent : "transparent")
+                        color: tabItem.isQueue
+                               ? (active ? Theme.queueAccent : Theme.queueAccentDim)
+                               : scanning
+                                 ? (active ? Theme.accent : Theme.accentSoft)
+                                 : (active ? Theme.accent : "transparent")
                         Behavior on width {
                             enabled: tabUnderlineActive.scanning
                             NumberAnimation {
@@ -579,7 +617,9 @@ Rectangle {
                         onWheel: function (wheel) { strip._onWheel(wheel) }
 
                         onDoubleClicked: function (mouse) {
-                            if (mouse.button === Qt.LeftButton)
+                            // The queue's title is fixed (C++ refuses the
+                            // rename too; this keeps the editor from opening).
+                            if (mouse.button === Qt.LeftButton && !tabItem.isQueue)
                                 tabEdit.begin()
                         }
 

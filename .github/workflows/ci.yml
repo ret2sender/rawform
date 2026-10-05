@@ -22,13 +22,15 @@
 #     it removes the distro from the equation and keeps CI on the exact
 #     version the Flatpak ships.
 #   - Two build trees per platform, matching the Makefile's own split: the
-#     app tree carries the three UI test binaries (-DRAWFORM_BUILD_TESTS=ON;
-#     Qt-Core-only console apps, no display server needed), while the nine
-#     engine tests need a STANDALONE audio/ build. ui/ pulls the engine in
-#     with EXCLUDE_FROM_ALL, so the engine's test targets are configured but
-#     never built by the app's `all` target; the app-tree ctest is therefore
-#     scoped to the UI tests with an anchored -R, and the engine tree runs
-#     the other nine (this is exactly what `make test` does locally).
+#     app tree carries the UI test binaries (-DRAWFORM_BUILD_TESTS=ON;
+#     Qt-Core/Qml-only console apps, no display server needed), while the
+#     nine engine tests need a STANDALONE audio/ build. ui/ pulls the engine
+#     in with EXCLUDE_FROM_ALL, so the engine's test targets are configured
+#     but never built by the app's `all` target; the app-tree ctest is
+#     therefore scoped to the UI tests by their `ui` label (ui/CMakeLists.txt
+#     sets it on every UI test, so a new test is picked up here without a
+#     workflow edit), and the engine tree runs the other nine (this is
+#     exactly what `make test` does locally).
 #   - CMake: ui/ requires 4.2, newer than any distro repo, so the Linux app
 #     job installs it from PyPI. audio/ only requires 3.20, which Fedora's
 #     own cmake satisfies.
@@ -112,11 +114,9 @@ jobs:
 
       # The engine tests are registered in this tree too but their binaries
       # are not built here (EXCLUDE_FROM_ALL); they run from the standalone
-      # engine tree below. Scope this run to the three UI tests.
+      # engine tree below. Scope this run to the UI tests by label.
       - name: UI tests
-        run: >
-          ctest --test-dir build --output-on-failure
-          -R '^(pattern_evaluator|rename_sanitizer|playlist_file)$'
+        run: ctest --test-dir build --output-on-failure -L ui
 
       - name: Configure engine (standalone)
         run: cmake -S audio -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -159,9 +159,7 @@ jobs:
         run: cmake --build build
 
       - name: UI tests
-        run: >
-          ctest --test-dir build --output-on-failure
-          -R '^(pattern_evaluator|rename_sanitizer|playlist_file)$'
+        run: ctest --test-dir build --output-on-failure -L ui
 
       - name: Configure engine (standalone)
         run: cmake -S audio -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Debug

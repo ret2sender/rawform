@@ -42,9 +42,9 @@
 // default seed when nothing is saved.
 
 // qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController),
-// which qmllint cannot see, so the unqualified-access category is disabled
-// file-wide. Components stay fully linted; keep global wiring in the views so
+// Wiring layer: this file reaches the C++ context properties (audioController,
+// playbackQueue), which qmllint cannot see, so the unqualified-access category
+// is disabled file-wide. Components stay fully linted; keep global wiring in the views so
 // they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
 
 pragma ComponentBehavior: Bound
@@ -139,6 +139,15 @@ Item {
             return -1
         return root.model.mapRowFromSource(audioController.playingRow)
     }
+
+    // True while this view shows the Playback Queue (the active tab is the
+    // queue; its proxy's source is the queue's model). The row context menu
+    // swaps its queue verbs on this, the activation gestures skip their
+    // pending-row bookkeeping (the row is culled on start and the playing
+    // marker lands in the origin playlist, so the pending check could never
+    // clear), and enqueueSelection refuses to queue the queue.
+    readonly property bool isQueueView:
+        root.model !== null && playbackQueue.model === root.model.source
 
     // The playlist session manager (PlaylistTabs, created in C++, assigned from
     // MainWindow). The body DropArea hands dropped URLs to it in ONE call
@@ -438,9 +447,32 @@ Item {
         _selectExclusive(Math.min(firstDeleted, n - 1))
     }
 
+    // Queue the selection: appended to the end of the playback queue, or
+    // with `next` put at its front (Play Next). The rows go across in SOURCE
+    // space with their source model, so each entry remembers where it came
+    // from (the queue's continuation rule). A no-op in the queue view itself
+    // (queueing the queue is meaningless; Delete is the verb there) and with
+    // nothing selected. Logs one status line with the running total; returns
+    // the number queued. The host's Playback menu and the row context menu
+    // both come here.
+    function enqueueSelection(next) {
+        if (!root.model || root.isQueueView)
+            return 0
+        var rows = root._selectedRows()
+        if (rows.length === 0)
+            return 0
+        var src = root.model.mapRowsToSource(rows)
+        var n = next ? playbackQueue.enqueueNext(root.model.source, src)
+                     : playbackQueue.enqueue(root.model.source, src)
+        if (root.log && n > 0)
+            root.log.append("info", (next ? "Playing next: " : "Queued ") + n
+                            + " track(s), " + playbackQueue.count + " in queue")
+        return n
+    }
+
     // The selected rows as a sorted, de-duplicated array of ints, via the C++
     // range walk (PlaylistModel.selectedRowList). Feeds the Properties window,
-    // the rename dialog, and row deletion.
+    // the rename dialog, row deletion, and the queue verbs.
     function _selectedRows() {
         // C++ range walk (PlaylistModel.selectedRowList). The scenario this
         // prevents: reading selectionModel.selectedIndexes materializes one
@@ -1648,11 +1680,18 @@ Item {
                             var ci = root.selectionModel
                                    ? root.selectionModel.currentIndex : null
                             if (ci && ci.valid && root.model) {
-                                root._pendingActivateRow = ci.row
+                                // No pending bookkeeping in the queue view:
+                                // the entry is culled on start and plays
+                                // from its origin playlist, so there is no
+                                // row here for the verdict to land on (and
+                                // no view jerk to avoid: the rows shift).
+                                if (!root.isQueueView) {
+                                    root._pendingActivateRow = ci.row
+                                    if (!root._rowFullyVisible(ci.row))
+                                        root._centerRow(ci.row, true)
+                                }
                                 audioController.playAt(root.model.source,
                                                        root.model.mapRowToSource(ci.row))
-                                if (!root._rowFullyVisible(ci.row))
-                                    root._centerRow(ci.row, true)
                             }
                             event.accepted = true
                         } else if (event.key === Qt.Key_A && ctrl) {
@@ -2301,7 +2340,10 @@ Item {
                     _pendingCollapse = false
                     root._selectExclusive(rr)
                     if (root.model) {
-                        root._pendingActivateRow = rr
+                        // Queue view: no pending row (see the Enter branch);
+                        // the entry leaves this list the moment it starts.
+                        if (!root.isQueueView)
+                            root._pendingActivateRow = rr
                         audioController.playAt(root.model.source,
                                                root.model.mapRowToSource(rr))
                     }
@@ -2736,6 +2778,33 @@ Item {
     // to match the menu bar and header menus.
     ThemedMenu {
         id: rowContextMenu
+        // The queue verbs lead: the most frequent action on a row. In a
+        // playlist: append the selection, or put it next in line. In the
+        // queue view those two collapse and "Remove from Playback Queue"
+        // takes their place (the Delete key's twin). The keys are OWNED
+        // elsewhere (Q / Shift+Q by the Playback menu's items, Delete and
+        // Alt+Enter by the table's key handler), so every hint here is
+        // shortcutHint: drawn in the menu's hint column, never registered,
+        // or Q would fire twice.
+        ThemedMenuItem {
+            text: "Add to Playback Queue"
+            shortcutHint: "Q"
+            collapsed: root.isQueueView
+            onTriggered: root.enqueueSelection(false)
+        }
+        ThemedMenuItem {
+            text: "Play Next"
+            shortcutHint: "Shift+Q"
+            collapsed: root.isQueueView
+            onTriggered: root.enqueueSelection(true)
+        }
+        ThemedMenuItem {
+            text: "Remove from Playback Queue"
+            shortcutHint: "Del"
+            collapsed: !root.isQueueView
+            onTriggered: root._deleteSelected()
+        }
+        MenuSeparator {}
         ThemedMenuItem {
             // Right-click already selected the row, so this force-reloads the
             // current selection's tags from disk (mtime/size be damned).
@@ -2763,6 +2832,9 @@ Item {
         MenuSeparator {}
         ThemedMenuItem {
             text: "Properties"
+            // "Return" is the main Enter key in Qt's naming (and the glyph
+            // macOS shows for it); "Enter" alone would be the keypad key.
+            shortcutHint: "Alt+Return"
             onTriggered: root._openPropertiesWindow()
         }
     }

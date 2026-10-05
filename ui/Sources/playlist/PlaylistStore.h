@@ -40,10 +40,12 @@
 // layout that silently failed to travel is exactly the kind of loss that should
 // be stated once rather than discovered later.
 //
-// The column-layout PRESET (saveColumnPreset / loadColumnPreset) is a
-// layout-only .rwftp under userConfigDir(), loaded at startup so a user's
-// chosen columns/order/widths survive restarts. It reuses the .rwfpl writer with
-// an empty track list.
+// The column-layout PRESETS (saveColumnPreset / loadColumnPreset) are
+// layout-only .rwftp files under userConfigDir(), loaded at startup so a
+// user's chosen columns/order/widths survive restarts. There are two: the
+// new-tab default (columns.rwftp) and the Playback Queue tab's own
+// (queue_columns.rwftp), selected by the `forQueue` flag; both reuse the
+// .rwfpl writer with an empty track list.
 //
 // One operation at a time: a save requested while busy is rejected with a failure
 // signal rather than queued.
@@ -123,21 +125,24 @@ public:
                           int currentRow = -1,
                           int scrollRow = -1);
 
-    /// Save the default column arrangement (order + widths, no tracks) to the
-    /// user config preset (columns.rwftp under userConfigDir()), loaded on
-    /// startup so the chosen columns/order/widths survive restarts.
-    /// Synchronous; returns false on write failure. Reuses the .rwfpl writer
-    /// with an empty track list (the preset is just a layout-only playlist
-    /// file).
+    /// Save a column arrangement (order + widths, no tracks) as a user config
+    /// preset under userConfigDir(): columns.rwftp, the arrangement every new
+    /// tab adopts, or with @p forQueue the Playback Queue tab's own
+    /// queue_columns.rwftp (the queue has no live file, so this preset is
+    /// what seeds its layout at launch). Synchronous; returns false on write
+    /// failure. Reuses the .rwfpl writer with an empty track list (a preset
+    /// is just a layout-only playlist file).
     Q_INVOKABLE bool saveColumnPreset(const QStringList& fieldIds,
-                                      const QVariantList& widths);
+                                      const QVariantList& widths,
+                                      bool forQueue = false);
 
-    /// Load the default column arrangement preset. Returns a map
-    /// { fieldIds: QStringList, widths: QVariantList } in visual order, or an
-    /// empty map when no preset exists or can't be read (the caller then keeps
-    /// the schema defaults). Synchronous; safe to call at startup. Called from
-    /// main.cpp only; no QML caller, so not invokable.
-    QVariantMap loadColumnPreset();
+    /// Load a column arrangement preset (the new-tab default, or with
+    /// @p forQueue the queue tab's). Returns a map { fieldIds: QStringList,
+    /// widths: QVariantList } in visual order, or an empty map when no preset
+    /// exists or can't be read (the caller then falls back). Synchronous;
+    /// safe to call at startup. Called from main.cpp only; no QML caller, so
+    /// not invokable.
+    QVariantMap loadColumnPreset(bool forQueue = false);
 
 signals:
     /// A save finished. @p ok false carries a human-readable @p message.

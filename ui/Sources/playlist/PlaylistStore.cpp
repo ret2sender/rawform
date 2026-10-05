@@ -42,6 +42,18 @@
 
 namespace rawform {
 
+namespace {
+
+/// The preset file for one arrangement: the new-tab default, or the queue
+/// tab's. One name authority for the save and load paths.
+QString columnPresetPath(bool forQueue) {
+    return userConfigDir()
+           + (forQueue ? QStringLiteral("/queue_columns.rwftp")
+                       : QStringLiteral("/columns.rwftp"));
+}
+
+} // namespace
+
 PlaylistStore::PlaylistStore(PlaylistModel* model, QObject* parent)
     : QObject(parent), m_model(model) {
     connect(&m_saveWatcher, &QFutureWatcher<WriteOutcome>::finished,
@@ -128,7 +140,8 @@ void PlaylistStore::onSaveFinished() {
 }
 
 bool PlaylistStore::saveColumnPreset(const QStringList& fieldIds,
-                                     const QVariantList& widths) {
+                                     const QVariantList& widths,
+                                     bool forQueue) {
     // A preset is layout-only: an otherwise-empty document carrying just the
     // column order + widths, written with the normal atomic .rwfpl writer.
     PlaylistDocument doc;
@@ -147,7 +160,7 @@ bool PlaylistStore::saveColumnPreset(const QStringList& fieldIds,
                  qUtf8Printable(dir));
         return false;
     }
-    const QString path = dir + QStringLiteral("/columns.rwftp");
+    const QString path = columnPresetPath(forQueue);
     QString err;
     if (!writePlaylist(path, doc, &err)) {
         qWarning("rawform: failed to save column preset: %s", qUtf8Printable(err));
@@ -156,11 +169,10 @@ bool PlaylistStore::saveColumnPreset(const QStringList& fieldIds,
     return true;
 }
 
-QVariantMap PlaylistStore::loadColumnPreset() {
-    const QString path =
-        userConfigDir() + QStringLiteral("/columns.rwftp");
+QVariantMap PlaylistStore::loadColumnPreset(bool forQueue) {
+    const QString path = columnPresetPath(forQueue);
     if (!QFile::exists(path))
-        return {}; // no preset yet -> caller keeps the schema defaults
+        return {}; // no preset yet -> caller falls back
 
     const PlaylistReadResult res = readPlaylist(path);
     if (!res.ok()) {

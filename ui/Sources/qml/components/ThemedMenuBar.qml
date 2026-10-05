@@ -57,10 +57,17 @@ Rectangle {
     // Everything this menu bar can DO is a signal; the host owns the doing.
     // The bar renders labels, opens/closes its menus, and emits. It holds no
     // reference to dialogs, stores, views, or windows, so it instantiates
-    // anywhere and the wiring is readable in one place at the host. None of
-    // the actions below need an enabled/checked binding; if one ever
-    // does, the state comes DOWN through a declared property, mirroring how
-    // these requests go UP through signals.
+    // anywhere and the wiring is readable in one place at the host. The two
+    // entries that read state take it DOWN through the declared properties
+    // below, mirroring how these requests go UP through signals.
+
+    // The Playback Queue tab is in the strip (Playback > Show / Hide
+    // Playback Queue flips its verb on this).
+    property bool queueVisible: false
+    // The ACTIVE tab is the Playback Queue (View > Save Column Layout names
+    // the queue preset on this; the host routes the save accordingly).
+    property bool queueTabActive: false
+
     signal addFilesRequested()
     signal addFolderRequested()
     signal newPlaylistRequested()
@@ -76,6 +83,12 @@ Rectangle {
     signal stopRequested()
     signal previousRequested()
     signal nextRequested()
+    // The playback queue: append the selection, put it next in line, empty
+    // the queue, and show or hide the queue tab.
+    signal addToQueueRequested()
+    signal playNextRequested()
+    signal clearQueueRequested()
+    signal toggleQueueRequested()
     signal aboutRequested()
 
     Row {
@@ -271,7 +284,11 @@ Rectangle {
                 id: viewMenu
 
                 ThemedMenuItem {
-                    text: "Save Column Layout"
+                    // One entry, two targets: the new-tab default, or the
+                    // queue's own preset while the queue tab is active. The
+                    // label says which, the host does the routing.
+                    text: root.queueTabActive ? "Save Playback Queue Column Layout"
+                                              : "Save Column Layout"
                     onTriggered: root.saveColumnLayoutRequested()
                 }
             }
@@ -346,6 +363,37 @@ Rectangle {
                     shortcut: "Ctrl+>"
                     shortcutAliases: ["Ctrl+."]
                     onTriggered: root.nextRequested()
+                }
+                MenuSeparator {}
+                // The playback queue. Bare letters, like Space above: a
+                // focused text field keeps them (it accepts the shortcut
+                // override), so Q types a q in the rename editor and queues
+                // the selection everywhere else. The host no-ops both when
+                // the active tab is the queue itself.
+                ThemedMenuItem {
+                    text: "Add to Playback Queue"
+                    shortcut: "Q"
+                    onTriggered: root.addToQueueRequested()
+                }
+                ThemedMenuItem {
+                    // The front of the queue, in playlist order.
+                    text: "Play Next"
+                    shortcut: "Shift+Q"
+                    onTriggered: root.playNextRequested()
+                }
+                ThemedMenuItem {
+                    text: "Clear Playback Queue"
+                    onTriggered: root.clearQueueRequested()
+                }
+                MenuSeparator {}
+                ThemedMenuItem {
+                    // A verb that flips rather than a check mark: a checkable
+                    // MenuItem toggles its own `checked` on trigger, which
+                    // would break a binding to the tab's real state.
+                    text: root.queueVisible ? "Hide Playback Queue"
+                                            : "Show Playback Queue"
+                    shortcut: "Ctrl+Shift+Q"
+                    onTriggered: root.toggleQueueRequested()
                 }
             }
         }

@@ -39,7 +39,9 @@
 //                        columns
 //   - metadataModel    : MetadataModel, the dock pane, following the active tab
 //   - trackScanner     : TrackScanner, off-thread file/tag ingestion
-//   - playlistStore    : PlaylistStore, Save / Save As + the column preset
+//   - playlistStore    : PlaylistStore, Save / Save As + the column presets
+//   - playbackQueue    : PlaybackQueue, the cross-playlist play-next list
+//                        behind the Playback Queue tab
 //   - audioController  : AudioController, the engine wrapper and the cursor
 //   - spectrumProvider : SpectrumProvider, the spectrum viewer
 //   - windowGeometry   : WindowGeometryStore, window.yaml
@@ -85,6 +87,7 @@
 #include "media/TrackData.h"
 #include "media/TrackScanner.h"
 #include "playback/AudioController.h"
+#include "playback/PlaybackQueue.h"
 #include "playback/SpectrumProvider.h"
 #include "settings/SettingsStore.h"
 #include "utils/MacOSStyling.h"
@@ -212,13 +215,28 @@ int main(int argc, char* argv[]) {
     // New (empty) tabs adopt the user's saved column preset rather than bare
     // schema defaults, so a chosen column set/order/widths applies to fresh
     // playlists; opened/restored tabs use their own saved layout. Read the
-    // preset ONCE and hand it to the session.
+    // preset ONCE and hand it to the session. The Playback Queue tab follows
+    // with its own preset (falling back to the default inside createQueueTab);
+    // it must exist before restoreSession, whose manifest may show it.
     {
         const QVariantMap preset = playlistStore.loadColumnPreset();
         const QStringList ids = preset.value(QStringLiteral("fieldIds")).toStringList();
         if (!ids.isEmpty())
             tabs.setDefaultLayout(ids, preset.value(QStringLiteral("widths")).toList());
+
+        const QVariantMap queuePreset = playlistStore.loadColumnPreset(/*forQueue*/ true);
+        tabs.createQueueTab(queuePreset.value(QStringLiteral("fieldIds")).toStringList(),
+                            queuePreset.value(QStringLiteral("widths")).toList());
     }
+
+    // -----------------------------------------------------------------------
+    // The playback queue: the cross-playlist "play these next" list. Its rows
+    // live in the queue tab's model (built by PlaylistTabs so it is a playlist
+    // in every respect); this object adds each entry's origin and the
+    // controller-facing queries. Constructed BEFORE the controller, which
+    // points at it, so it outlives the controller.
+    // -----------------------------------------------------------------------
+    rawform::PlaybackQueue playbackQueue(tabs.queueModel());
 
     // -----------------------------------------------------------------------
     // Metadata pane follows the ACTIVE tab. PlaylistTabs surfaces both a
@@ -275,10 +293,12 @@ int main(int argc, char* argv[]) {
     // for QML to bind. It owns the cursor that makes playback follow a playlist
     // automatically; the persistent playlist itself stays in PlaylistModel. The
     // tabs pointer is the fallback source when play() is hit from Stopped with
-    // nothing ever played (start the active tab).
+    // nothing ever played (start the active tab) and the search space for a
+    // queued entry's origin recovery; the queue is the lookahead prefix.
     // -----------------------------------------------------------------------
     rawform::AudioController audioController;
     audioController.setPlaylistTabs(&tabs);
+    audioController.setPlaybackQueue(&playbackQueue);
 
     // -----------------------------------------------------------------------
     // Spectrum viewer. A focused QObject that drives the PlayerBar's spectrum: a
@@ -362,6 +382,7 @@ int main(int argc, char* argv[]) {
     ctx->setContextProperty("metadataModel", &metadataModel);
     ctx->setContextProperty("trackScanner", &trackScanner);
     ctx->setContextProperty("playlistStore", &playlistStore);
+    ctx->setContextProperty("playbackQueue", &playbackQueue);
     ctx->setContextProperty("audioController", &audioController);
     ctx->setContextProperty("spectrumProvider", &spectrumProvider);
     ctx->setContextProperty("windowGeometry", &windowGeometry);

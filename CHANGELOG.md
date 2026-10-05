@@ -5,6 +5,64 @@ All notable changes to rawform are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-05
+
+The playback queue: a cross-playlist "play these next" list, shown as a tab
+of its own.
+
+### Added
+
+- Playback Queue. Right-click tracks in any playlist for Add to Playback
+  Queue (Q), which appends them, or Play Next (Shift+Q), which puts them at
+  the front; both entries are in the Playback menu too. Queued tracks play
+  before the playing playlist's next row, each leaving the queue the moment
+  it starts, and when the queue runs dry playback continues after the last
+  queued track in the playlist it was queued from (the foobar2000 rule), so
+  a queue can hop between playlists and land playback where its last entry
+  came from. Next plays the queue head first; Previous and Stop leave the
+  queue alone; double-clicking (or Enter on) a track in a normal playlist
+  clears it. A queued entry whose source row or tab is gone still plays,
+  recovering its continuation by file path where it can.
+- Playback > Show Playback Queue (Ctrl+Shift+Q) opens the queue as a tab,
+  used like any playlist: drag to reorder, Delete (or Remove from Playback
+  Queue) to drop entries, double-click an entry to play it now and skip the
+  ones above it, Find, Properties, and the rest. The tab is marked by a teal
+  underline, full width whether or not it is the active tab (dimmer when
+  not), with the entry count after its title. Closing the tab hides it with
+  its contents intact; its position in the strip is remembered across
+  launches, its contents are not.
+- View > Save Column Layout, with the queue tab active, becomes Save
+  Playback Queue Column Layout and writes the queue's own preset
+  (`queue_columns.rwftp`), which seeds the tab at launch; the new-tab
+  default is untouched.
+- Playback > Clear Playback Queue.
+- Shortcut hints in the playlist's right-click menu: Add to Playback Queue
+  (Q), Play Next (Shift+Q), Remove from Playback Queue (Del) and Properties
+  (Alt+Enter) show their keys like the menu bar's entries do.
+- A unit test for the queue's origin bookkeeping (`rawform_queue_test`),
+  bringing the tree to fourteen test binaries: nine engine, five UI.
+
+### Changed
+
+- Closing the playing tab no longer ends playback after the current track
+  when the Playback Queue still holds entries; the queue plays through.
+- The UI tests are selected by a ctest label (`ctest -L ui`) instead of a
+  name list, in CI and in the README recipe, so a new test is run the
+  moment it is registered.
+
+### Fixed
+
+- CI ran three of the UI tests, not all of them: the workflow named the
+  tests it ran, and `playlist_search_filter` (added in 1.2.0) was never
+  added to the list. The label selection above closes that gap for good.
+
+[1.3.0]: https://github.com/ret2sender/rawform/releases/tag/v1.3.0
+
+## [1.2.1] - 2026-10-03
+
+Trim the heap after a tool window closes (HeapTrim singleton, glibc only).
+
+
 ## [1.2.0] - 2026-10-02
 
 A search release: Edit > Find filters the active playlist in place as you
@@ -231,10 +289,11 @@ at this release.
 
 ### Quality
 
-- Twelve unit-test binaries across the engine and the UI (ring buffer,
-  decoders, engine conformance, rate management, ReplayGain, spectrum,
-  pattern evaluation, rename sanitization, playlist file round-trip and
-  corruption), on a dependency-free test harness.
+- A unit-test suite across the engine and the UI (ring buffer, decoders,
+  engine conformance, rate management, ReplayGain, spectrum, pattern
+  evaluation, rename sanitization, playlist file round-trip and
+  corruption), on a dependency-free test harness. Later releases add to it;
+  the count at any release is the sum of its engine and UI test targets.
 - TSan and ASan+UBSan clean on Linux, with the suppression rationale
   documented in the tree.
 - GPL-3.0-or-later, with SPDX headers on every file and full third-party

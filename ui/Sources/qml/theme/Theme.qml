@@ -67,19 +67,30 @@ QtObject {
     // -----------------------------------------------------------------------
 
     // Text ramp, brightest to dimmest.
-    readonly property color textPrimary: "#E2E2E2"   // default UI text
-    readonly property color textSecondary: "#D0D0D0" // values, field text
-    readonly property color textMuted: "#9F9F9F"     // hints, placeholders
-    readonly property color textDim: "#8A8A8A"       // inactive labels, deemphasis
+    readonly property color textPrimary: "#E2E2E2"    // default UI text
+    readonly property color textSecondary: "#D0D0D0"  // values, field text
+    readonly property color textMuted: "#9F9F9F"      // hints, placeholders
+    readonly property color textDim: "#8A8A8A"        // inactive labels, deemphasis
     // String twin of textDim for HTML/rich-text contexts (see the tier-2
     // policy note on why color tokens must never be concatenated into HTML).
     // The pair must hold the same value; edit both lines together.
     readonly property string textDimHex: "#8A8A8A"
 
     // Accent (the app's purple family).
-    readonly property color accent: "#9641FF"        // selection underlines, indicators
-    readonly property color accentSoft: "#BDB2FF"    // lavender: focus strokes, highlights
-    readonly property color accentHover: "#D4B8FF"   // menu-label hover tint
+    readonly property color accent: "#9641FF"       // selection underlines, indicators
+    readonly property color accentSoft: "#BDB2FF"   // lavender: focus strokes, highlights
+    readonly property color accentHover: "#D4B8FF"  // menu-label hover tint
+
+    // The Playback Queue's identity color, a teal. The app's three signals are
+    // purple (what you selected), green (what is playing), and the queue is
+    // what plays next: on the hue wheel teal sits between green and purple, so
+    // the queue tab's underline reads as the bridge between playing and
+    // chosen while being unmistakably neither (vivid teal against the pastel
+    // mint of `success` and the lavender of accentSoft). The dim tone is the
+    // same hue at roughly 40% over surfaceTabIdle: the inactive queue tab
+    // keeps its full underline in a quieter tone, never a different hue.
+    readonly property color queueAccent: "#4FD1C5"    // active queue tab underline
+    readonly property color queueAccentDim: "#336A64" // inactive queue tab underline
 
     // The playlist's current-row (focus) outline, the remembered-track rectangle.
     // Deliberately a quiet gray rather than the accent family: the outline marks FOCUS,
@@ -88,13 +99,13 @@ QtObject {
     readonly property color focusOutline: "#8A8A8A"  // shares #8A8A8A with textDim
 
     // Status.
-    readonly property color warning: "#F2C94C"       // amber: warning log level, encoding conflict
+    readonly property color warning: "#F2C94C"  // amber: warning log level, encoding conflict
     // String twin of warning for HTML/rich-text contexts; same pairing rule
     // as textDimHex: the two lines must hold the same value.
     readonly property string warningHex: "#F2C94C"
-    readonly property color danger: "#FF6B6B"        // errors
-    readonly property color dangerSoft: "#FF8A8A"    // error log level, destructive hints
-    readonly property color success: "#CAFFBF"       // positive confirmations
+    readonly property color danger: "#FF6B6B"      // errors
+    readonly property color dangerSoft: "#FF8A8A"  // error log level, destructive hints
+    readonly property color success: "#CAFFBF"     // positive confirmations
     // The warm salmon shared by the log surfaces for error text (LogStore's
     // HTML lines and StatusLogBar's message color). Distinct from danger and
     // dangerSoft on purpose: those are for controls and hints, this one is
@@ -108,7 +119,7 @@ QtObject {
 
     // -----------------------------------------------------------------------
     // Palette, tier 2: the dark surface ladder and its satellites, named by
-    // ROLE. Several tokens deliberately share a value (noted inline); that is
+    // role. Several tokens deliberately share a value (noted inline); that is
     // the point of role naming: two roles that happen to coincide today can
     // diverge later by editing one line here, with no call-site migration.
     // Never map a call site to a token whose role does not match, even when
@@ -127,50 +138,50 @@ QtObject {
     // -----------------------------------------------------------------------
 
     // Surfaces, deepest to most raised.
-    readonly property color surfaceSunken: "#141414"   // deep panels below page level
-    readonly property color surfaceInset: "#161616"    // inset content wells (log console, RG inner panels)
-    readonly property color headerBand: "#181818"      // table/section header strips
-    readonly property color surfacePage: "#1B1B1B"     // window/pane/dialog body background
-    readonly property color surfaceTabIdle: "#1F1F1F"  // unselected tab fill
-    readonly property color surfacePanel: "#232323"    // framed panel surface; shares #232323 with rowEven
-    readonly property color buttonFace: "#262626"      // pushbutton resting face
-    readonly property color surfaceRaised: "#2A2A2A"   // bubbles, transport buttons, hover fills; shares #2A2A2A with separator
-    readonly property color surfaceSelected: "#2E2E2E" // selected tab/nav surface; shares #2E2E2E with separatorStrong
+    readonly property color surfaceSunken: "#141414"    // deep panels below page level
+    readonly property color surfaceInset: "#161616"     // inset content wells (log console, RG inner panels)
+    readonly property color headerBand: "#181818"       // table/section header strips
+    readonly property color surfacePage: "#1B1B1B"      // window/pane/dialog body background
+    readonly property color surfaceTabIdle: "#1F1F1F"   // unselected tab fill
+    readonly property color surfacePanel: "#232323"     // framed panel surface; shares #232323 with rowEven
+    readonly property color buttonFace: "#262626"       // pushbutton resting face
+    readonly property color surfaceRaised: "#2A2A2A"    // bubbles, transport buttons, hover fills; shares #2A2A2A with separator
+    readonly property color surfaceSelected: "#2E2E2E"  // selected tab/nav surface; shares #2E2E2E with separatorStrong
 
     // Zebra stripes (playlist, metadata tables, edit dialog grid).
-    readonly property color rowEven: "#232323"         // shares #232323 with surfacePanel
+    readonly property color rowEven: "#232323"  // shares #232323 with surfacePanel
     readonly property color rowOdd: "#1D1D1D"
 
     // Controls (segment selectors, spin boxes, footer buttons).
-    readonly property color surfaceControl: "#222222"      // resting surface
-    readonly property color surfaceControlHover: "#2C2C2C" // hover state
+    readonly property color surfaceControl: "#222222"       // resting surface
+    readonly property color surfaceControlHover: "#2C2C2C"  // hover state
 
     // Lines. Two weights exist in the wild; both are kept, not unified,
     // because unification would be a visible pixel change.
-    readonly property color separator: "#2A2A2A"       // 1px rules, dividers, panel frame borders; shares #2A2A2A with surfaceRaised
-    readonly property color separatorStrong: "#2E2E2E" // section rules, dialog frame borders; shares #2E2E2E with surfaceSelected
-    readonly property color windowOutline: "#4C4E51"   // frameless MAIN window edge line (Linux); KDE Breeze's outline value, lighter than the separators on purpose: it must read against arbitrary desktop content behind the window, not against our own surfaces
+    readonly property color separator: "#2A2A2A"        // 1px rules, dividers, panel frame borders; shares #2A2A2A with surfaceRaised
+    readonly property color separatorStrong: "#2E2E2E"  // section rules, dialog frame borders; shares #2E2E2E with surfaceSelected
+    readonly property color windowOutline: "#4C4E51"    // frameless MAIN window edge line (Linux); KDE Breeze's outline value, lighter than the separators on purpose: it must read against arbitrary desktop content behind the window, not against our own surfaces
 
     // Selection tints (the purple wash family).
-    readonly property color selectionFill: "#3D2D5C"   // selected row, text selectionColor, menu highlight
-    readonly property color selectionSoft: "#2E2A44"   // selected cell, primary button base, add-row hover
+    readonly property color selectionFill: "#3D2D5C"  // selected row, text selectionColor, menu highlight
+    readonly property color selectionSoft: "#2E2A44"  // selected cell, primary button base, add-row hover
 
     // Accent satellites.
-    readonly property color accentButtonHover: "#A99CF0" // accent footer-button hover (pairs with buttonFace cluster)
-    readonly property color textAccent: "#B285FF"        // purple field-name/key text
-    readonly property color textOnAccent: "#1B1B1B"      // dark text on accent-filled controls; shares #1B1B1B with surfacePage
+    readonly property color accentButtonHover: "#A99CF0"  // accent footer-button hover (pairs with buttonFace cluster)
+    readonly property color textAccent: "#B285FF"         // purple field-name/key text
+    readonly property color textOnAccent: "#1B1B1B"       // dark text on accent-filled controls; shares #1B1B1B with surfacePage
 
     // Status satellite.
-    readonly property color dangerSurface: "#3A2A2A"   // close-button hover wash
+    readonly property color dangerSurface: "#3A2A2A"  // close-button hover wash
 
     // Title bar caption buttons (frameless-window minimize/close), consumed
     // through TitleBarStyle's Profile system. The default pair styles the
     // Linux profiles; the windows* pair matches the stock Win11 caption
     // treatment and applies only under the Windows profile.
-    readonly property color controlHover: "#4E4E4E"        // minimize hover fill
-    readonly property color closeHover: "#C42B1C"          // close hover fill; shares #C42B1C with windowsCloseHover
-    readonly property color windowsControlHover: "#626262" // Windows minimize hover fill
-    readonly property color windowsCloseHover: "#C42B1C"   // Windows close hover fill; shares #C42B1C with closeHover
+    readonly property color controlHover: "#4E4E4E"         // minimize hover fill
+    readonly property color closeHover: "#C42B1C"           // close hover fill; shares #C42B1C with windowsCloseHover
+    readonly property color windowsControlHover: "#626262"  // Windows minimize hover fill
+    readonly property color windowsCloseHover: "#C42B1C"    // Windows close hover fill; shares #C42B1C with closeHover
     // Breeze inverts on hover: a near-white plate carrying a dark glyph, and
     // a pink plate for close (Breeze's negative color lightened, as sampled
     // from a Plasma 6 decoration on a dark color scheme). The dark glyph
@@ -179,7 +190,7 @@ QtObject {
     readonly property color breezeCloseHover: "#FF98A2"    // Breeze close hover plate
 
     // Text ramp extensions, below tier 1's textDim.
-    readonly property color textInactive: "#9A9A9A"    // inactive icons, secondary window chrome text
-    readonly property color textFaint: "#6E6E6E"       // muted glyphs, empty-state hints
-    readonly property color textDisabled: "#5A5A5A"    // placeholders, disabled labels
+    readonly property color textInactive: "#9A9A9A"  // inactive icons, secondary window chrome text
+    readonly property color textFaint: "#6E6E6E"     // muted glyphs, empty-state hints
+    readonly property color textDisabled: "#5A5A5A"  // placeholders, disabled labels
 }

@@ -35,6 +35,10 @@
 // at the row's right edge, in the platform's native spelling, so the two can
 // never drift apart. `shortcutAliases` adds silent extra sequences that fire
 // the same item (a shifted twin of the hinted key, say) without a hint.
+// `shortcutHint` is the hint alone, for an item whose key is owned elsewhere
+// (a context-menu entry whose key lives on the menu bar's twin, or on a view's
+// key handler): it draws in the same column, in the same spelling, and
+// registers nothing, so the key cannot fire twice.
 //
 // `fitWidth` is the width this row needs, measured through a TextMetrics
 // child rather than the control's deferred contentItem, so ThemedMenu can fit
@@ -80,9 +84,18 @@ MenuItem {
     // Extra sequences that trigger the item without appearing in the hint. A
     // plain JS array: Shortcut.sequences is a QVariantList and takes one as is.
     property var shortcutAliases: []
+    // A hint-only sequence (see the file comment): drawn, never registered.
+    // Ignored when `shortcut` is set, which owns both the trigger and the hint.
+    property string shortcutHint: ""
     // Gap between the label's trailing margin and the hint. 24 keeps a long
     // label and its hint readable as two columns rather than one run of text.
     readonly property int shortcutGap: 24
+
+    // What the hint column shows: the registered shortcut's native spelling,
+    // else the hint-only one's, else nothing (no column at all).
+    readonly property string _hintText:
+        root.shortcut !== "" ? _shortcut.nativeText
+                             : (root.shortcutHint !== "" ? _hintOnly.nativeText : "")
 
     Shortcut {
         id: _shortcut
@@ -94,6 +107,16 @@ MenuItem {
         enabled: root.shortcut !== "" && root.enabled && !root.collapsed
                  && !(root.menu && root.menu.visible)
         onActivated: root.triggered()
+    }
+
+    // The hint-only sequence's native spelling. A Shortcut that is never
+    // enabled registers nothing with the window; it exists for nativeText,
+    // the one place the platform's key spelling (Cmd glyphs on macOS) comes
+    // from, so a hint-only row reads exactly like a registered one.
+    Shortcut {
+        id: _hintOnly
+        enabled: false
+        sequence: root.shortcutHint
     }
 
     // Width this item needs, measured WITHOUT touching the control's deferred
@@ -114,11 +137,11 @@ MenuItem {
                                      + (root.subMenu ? 26 : 12)
 
     // The hint column's contribution to the row width: the hint's advance plus
-    // the gap, or nothing for an item without a shortcut, which stays
+    // the gap, or nothing for an item without a shortcut or hint, which stays
     // pixel-identical to a row that predates hints.
     readonly property real _hintColumnWidth:
-        root.shortcut !== "" ? Math.ceil(_hintMetrics.advanceWidth) + root.shortcutGap
-                             : 0
+        root._hintText !== "" ? Math.ceil(_hintMetrics.advanceWidth) + root.shortcutGap
+                              : 0
 
     // Font mirrors the content Text's font exactly; the pair is coupled, so a
     // font change below must be repeated here or measured and rendered widths
@@ -136,7 +159,7 @@ MenuItem {
         id: _hintMetrics
         font.family: Theme.uiFont
         font.pixelSize: 12
-        text: _shortcut.nativeText
+        text: root._hintText
     }
 
     // The shortcut hint, right-aligned so every hinted row in a menu shares one
@@ -152,8 +175,8 @@ MenuItem {
                              : (root.highlighted ? Theme.textPrimary : Theme.textFaint)
         font.family: Theme.uiFont
         font.pixelSize: 12
-        text: _shortcut.nativeText
-        visible: root.shortcut !== ""
+        text: root._hintText
+        visible: root._hintText !== ""
     }
 
     arrow: AppIcon {

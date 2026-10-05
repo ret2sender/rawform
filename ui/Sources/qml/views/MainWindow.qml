@@ -33,21 +33,22 @@
 // LogConsole popping up over the playlist. The PlayerBar spans the bottom.
 //
 // Wiring: this file binds the C++ context properties (audioController,
-// playlistTabs, trackScanner, playlistStore, windowGeometry, metadataModel)
-// to the components, which declare what they consume and reach no global
-// themselves. It forwards ThemedMenuBar's request signals to PlaylistDialogs
-// and the tool windows, feeds the status line (live activity while busy,
-// otherwise the latest LogStore entry), logs activity edges and playback
-// errors, and persists the windowed geometry on quit. Settings and About are
+// playbackQueue, playlistTabs, trackScanner, playlistStore, windowGeometry,
+// metadataModel) to the components, which declare what they consume and
+// reach no global themselves. It forwards ThemedMenuBar's request signals to
+// PlaylistDialogs and the tool windows, feeds the status line (live activity
+// while busy, otherwise the latest LogStore entry), logs activity edges and
+// playback errors, and persists the windowed geometry on quit. Settings and About are
 // declared here so they share this window's lifetime; Properties, Custom
 // Columns and Rename Files are created by PlaylistView.
 
 // qmllint disable unqualified
 // Wiring layer: this file reaches the C++ context properties (audioController,
-// metadataModel, playlistStore, playlistTabs, trackScanner, windowGeometry),
-// which qmllint cannot see, so the unqualified-access category is disabled
-// file-wide. Components stay fully linted; keep global wiring in the views so
-// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
+// metadataModel, playbackQueue, playlistStore, playlistTabs, trackScanner,
+// windowGeometry), which qmllint cannot see, so the unqualified-access
+// category is disabled file-wide. Components stay fully linted; keep global
+// wiring in the views so they can. Cost: a typo'd global name here surfaces
+// at runtime, not at lint.
 
 pragma ComponentBehavior: Bound
 
@@ -367,6 +368,11 @@ ApplicationWindow {
                             id: mainMenu
                             Layout.fillWidth: true
 
+                            // State DOWN for the two entries that read it (the
+                            // queue tab's verb, the layout preset's name).
+                            queueVisible: playlistTabs.queueVisible
+                            queueTabActive: playlistTabs.activeIsQueue
+
                             onAddFilesRequested: playlistDialogs.openAddFiles()
                             onAddFolderRequested: playlistDialogs.openAddFolder()
                             onNewPlaylistRequested: playlistTabs.newPlaylist("")
@@ -404,18 +410,42 @@ ApplicationWindow {
                             onPreviousRequested: audioController.previous()
                             onNextRequested: audioController.next()
 
+                            // The playback queue. The two enqueue verbs act on
+                            // the active playlist's selection through the
+                            // view (which owns the selection and logs the
+                            // outcome); clear and show/hide go straight to
+                            // the queue and the tab manager.
+                            onAddToQueueRequested: playlistView.enqueueSelection(false)
+                            onPlayNextRequested: playlistView.enqueueSelection(true)
+                            onClearQueueRequested: {
+                                if (playbackQueue.count > 0) {
+                                    playbackQueue.clear()
+                                    logStore.append("info", "Playback queue cleared")
+                                }
+                            }
+                            onToggleQueueRequested: playlistTabs.toggleQueueTab()
+
                             onAboutRequested: aboutWindow.openAbout()
 
                             // Persist the full arrangement (which columns, order,
-                            // widths) as the startup default, and refresh the live
-                            // default so new tabs created later this session use it
-                            // immediately, rather than only after a restart re-reads
-                            // the preset file.
+                            // widths). For a playlist tab: as the startup default,
+                            // also refreshing the live default so new tabs created
+                            // later this session use it immediately, rather than
+                            // only after a restart re-reads the preset file. For
+                            // the Playback Queue tab: as the queue's own preset,
+                            // which is what seeds its layout at launch (the queue
+                            // has no live file); the new-tab default is untouched.
                             onSaveColumnLayoutRequested: {
                                 var order = playlistView.currentColumnOrder()
                                 var widths = playlistView.currentColumnWidths()
-                                playlistStore.saveColumnPreset(order, widths)
-                                playlistTabs.setDefaultLayout(order, widths)
+                                if (playlistTabs.activeIsQueue) {
+                                    playlistStore.saveColumnPreset(order, widths, true)
+                                    logStore.append("info",
+                                                    "Playback queue column layout saved")
+                                } else {
+                                    playlistStore.saveColumnPreset(order, widths)
+                                    playlistTabs.setDefaultLayout(order, widths)
+                                }
                             }
                         }
 

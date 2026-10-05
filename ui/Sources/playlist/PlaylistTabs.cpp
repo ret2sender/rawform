@@ -22,8 +22,9 @@
 //
 // Implementation of the tab session manager: per-tab model, selection, and
 // reloader ownership, the active-tab pointers, the scanner seam with its FIFO of
-// scan targets, tab creation, closing, moving, and renaming, the live-playlist
-// autosave and restore, and the width and scroll parking that survives a switch.
+// scan targets, tab creation, closing, moving, and renaming, the queue tab's
+// show/hide lifecycle, the live-playlist autosave and restore, and the width
+// and scroll parking that survives a switch.
 
 #include "playlist/PlaylistTabs.h"
 
@@ -48,10 +49,20 @@
 #include <QtConcurrent>
 #include <QtGlobal>
 
-#include <algorithm> // std::min (parked-width splice on columnsRemoved)
+#include <algorithm> // std::min (parked-width splice), std::ranges::any_of (ownsTab)
 #include <utility> // std::move
 
 namespace rawform {
+
+namespace {
+
+/// The queue tab's fixed title, and its line in the session manifest. The
+/// sentinel cannot collide with a live-file basename: those are
+/// "<uuid>.rwfpl" and never start with '@'.
+const QString kQueueTitle    = QStringLiteral("Playback Queue");
+const QString kQueueSentinel = QStringLiteral("@queue");
+
+} // namespace
 
 PlaylistTabs::PlaylistTabs(QObject* parent)
     : QAbstractListModel(parent) {}
@@ -65,8 +76,15 @@ PlaylistTabs::~PlaylistTabs() {
 
     // Tab QObjects are parented into their model subtrees and die with `this`;
     // the Tab structs are plain heap records we own, so free them explicitly.
+    // The queue tab's record is in m_tabs only while shown; free it once
+    // either way.
+    const bool queueShown = m_queueTab && m_tabs.contains(m_queueTab);
     qDeleteAll(m_tabs);
     m_tabs.clear();
+    if (!queueShown) {
+        delete m_queueTab;
+    }
+    m_queueTab = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +102,85 @@ void PlaylistTabs::setCustomColumns(const CustomColumnRegistry* registry) {
 void PlaylistTabs::setDefaultLayout(QStringList fieldIds, QVariantList widths) {
     m_defaultFieldIds = std::move(fieldIds);
     m_defaultWidths   = std::move(widths);
+}
+
+void PlaylistTabs::createQueueTab(const QStringList& fieldIds,
+                                  const QVariantList& widths) {
+    if (m_queueTab) {
+        return; // one queue per session
+    }
+    // The full per-tab subtree, so the queue is a playlist in every respect
+    // the view, the dialogs, the reloader and the Find filter care about.
+    // Flagged AFTER makeTab: the per-tab lambdas read tab->isQueue at call
+    // time (markDirty's gate), never at connect time.
+    Tab* tab     = makeTab(kQueueTitle);
+    tab->isQueue = true;
+    tab->livePath.clear(); // no live file, ever
+    // Layout precedence: the queue's own preset, else the new-tab default,
+    // else the schema's arrangement makeTab already seeded.
+    if (!fieldIds.isEmpty()) {
+        applyLayoutToModel(tab, fieldIds, widths);
+    } else if (!m_defaultFieldIds.isEmpty()) {
+        applyLayoutToModel(tab, m_defaultFieldIds, m_defaultWidths);
+    }
+    m_queueTab = tab;
+
+    // The strip's count badge: refresh the role on every structural change
+    // of the queue model while the tab is shown (the row is resolved per
+    // call, so a reorder of the strip cannot misroute it).
+    const auto refreshCount = [this]() {
+        const int row = m_queueTab ? static_cast<int>(m_tabs.indexOf(m_queueTab)) : -1;
+        if (row >= 0) {
+            emit dataChanged(index(row, 0), index(row, 0), { QueueCountRole });
+        }
+    };
+    connect(tab->model, &QAbstractItemModel::rowsInserted, this, refreshCount);
+    connect(tab->model, &QAbstractItemModel::rowsRemoved, this, refreshCount);
+    connect(tab->model, &QAbstractItemModel::modelReset, this, refreshCount);
+}
+
+PlaylistModel* PlaylistTabs::queueModel() const {
+    return m_queueTab ? m_queueTab->model : nullptr;
+}
+
+QList<PlaylistModel*> PlaylistTabs::playlistModels() const {
+    QList<PlaylistModel*> out;
+    out.reserve(m_tabs.size());
+    for (const Tab* t : m_tabs) {
+        if (!t->isQueue && t->model) {
+            out << t->model;
+        }
+    }
+    return out;
+}
+
+bool PlaylistTabs::queueVisible() const {
+    return m_queueTab && m_tabs.contains(m_queueTab);
+}
+
+bool PlaylistTabs::activeIsQueue() const {
+    if (m_current < 0 || m_current >= m_tabs.size()) {
+        return false;
+    }
+    return m_tabs.at(m_current)->isQueue;
+}
+
+bool PlaylistTabs::ownsTab(const Tab* tab) const {
+    if (!tab) {
+        return false;
+    }
+    if (tab == m_queueTab) {
+        return true;
+    }
+    return std::ranges::any_of(m_tabs, [tab](const Tab* t) { return t == tab; });
+}
+
+QList<PlaylistTabs::Tab*> PlaylistTabs::allTabs() const {
+    QList<Tab*> out = m_tabs;
+    if (m_queueTab && !out.contains(m_queueTab)) {
+        out << m_queueTab;
+    }
+    return out;
 }
 
 void PlaylistTabs::setScanner(TrackScanner* scanner) {
@@ -126,6 +223,10 @@ QVariant PlaylistTabs::data(const QModelIndex& index, int role) const {
         return t->scanning;
     case ScanProgressRole:
         return t->scanProgress;
+    case IsQueueRole:
+        return t->isQueue;
+    case QueueCountRole:
+        return (t->isQueue && t->model) ? t->model->rowCount() : 0;
     default:
         return {};
     }
@@ -137,6 +238,8 @@ QHash<int, QByteArray> PlaylistTabs::roleNames() const {
         { DirtyRole,        QByteArrayLiteral("dirty") },
         { ScanningRole,     QByteArrayLiteral("scanning") },
         { ScanProgressRole, QByteArrayLiteral("scanProgress") },
+        { IsQueueRole,      QByteArrayLiteral("isQueue") },
+        { QueueCountRole,   QByteArrayLiteral("queueCount") },
     };
 }
 
@@ -317,8 +420,8 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     // column, and it is active-tab-only and re-parks explicitly.
     connect(model, &QAbstractItemModel::columnsRemoved, this,
             [this, tab](const QModelIndex&, int first, int last) {
-                if (!m_tabs.contains(tab))
-                    return;
+                if (!ownsTab(tab))
+                    return; // ownsTab, not m_tabs: the hidden queue parks too
                 const int hi = std::min(last, static_cast<int>(tab->widths.size()) - 1);
                 for (int c = hi; c >= first && c >= 0; --c)
                     tab->widths.removeAt(c);
@@ -374,6 +477,10 @@ void PlaylistTabs::destroyTab(int index) {
     if (index < 0 || index >= m_tabs.size())
         return;
     Tab* tab = m_tabs.at(index);
+    if (tab->isQueue) {
+        removeTabKeepAlive(index); // the queue is hidden, never destroyed
+        return;
+    }
     if (tab->autosave)
         tab->autosave->stop();
 
@@ -390,6 +497,20 @@ void PlaylistTabs::destroyTab(int index) {
     delete tab;                    // the plain record
     emit countChanged();
     writeSessionManifest();
+}
+
+void PlaylistTabs::removeTabKeepAlive(int index) {
+    if (index < 0 || index >= m_tabs.size())
+        return;
+    // The structural half of destroyTab with nothing deleted: the Tab record,
+    // its model subtree, its parked widths and scroll row all stay, so the
+    // next showQueueTab re-inserts the same object with its state intact.
+    beginRemoveRows(QModelIndex(), index, index);
+    m_tabs.removeAt(index);
+    endRemoveRows();
+    emit countChanged();
+    writeSessionManifest();
+    emit queueVisibleChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -418,10 +539,12 @@ void PlaylistTabs::closeTab(int index) {
         return;
 
     const bool wasCurrent = (index == m_current);
-    destroyTab(index);
+    destroyTab(index); // the queue tab is only hidden here (see destroyTab)
 
-    if (m_tabs.isEmpty()) {
-        // Never zero tabs: spawn a fresh empty one (becomes current).
+    if (m_tabs.isEmpty() || (m_tabs.size() == 1 && m_tabs.first()->isQueue)) {
+        // Never zero PLAYLISTS: spawn a fresh empty one (becomes current). The
+        // queue alone does not count; it is somewhere to queue TO, not from,
+        // the same rule restoreSession applies.
         m_current = -1;
         newPlaylist();
         return;
@@ -463,6 +586,36 @@ bool PlaylistTabs::moveTab(int from, int to) {
     }
     writeSessionManifest();
     return true;
+}
+
+void PlaylistTabs::showQueueTab() {
+    if (!m_queueTab)
+        return;
+    int at = static_cast<int>(m_tabs.indexOf(m_queueTab));
+    if (at < 0) {
+        // Appended, like a new playlist; the user drags it where they like
+        // and the manifest remembers that for the next launch.
+        at = static_cast<int>(m_tabs.size());
+        insertTab(m_queueTab, at);
+        emit queueVisibleChanged();
+    }
+    setCurrentIndex(at);
+}
+
+void PlaylistTabs::hideQueueTab() {
+    if (!m_queueTab)
+        return;
+    const int at = static_cast<int>(m_tabs.indexOf(m_queueTab));
+    if (at < 0)
+        return;
+    closeTab(at); // routes through destroyTab -> removeTabKeepAlive
+}
+
+void PlaylistTabs::toggleQueueTab() {
+    if (queueVisible())
+        hideQueueTab();
+    else
+        showQueueTab();
 }
 
 void PlaylistTabs::openInNewTab(const QUrl& fileUrl) {
@@ -703,6 +856,8 @@ void PlaylistTabs::renameTab(int idx, const QString& title) {
     if (clean.isEmpty())
         return; // ignore an empty rename; keep the existing title
     Tab* t = m_tabs.at(idx);
+    if (t->isQueue)
+        return; // the queue's title is fixed (the tab bar disables the editor too)
     if (t->title == clean)
         return;
     t->title = clean;
@@ -728,7 +883,9 @@ int PlaylistTabs::indexOfModel(PlaylistModel* model) const {
 // ---------------------------------------------------------------------------
 
 void PlaylistTabs::markDirty(Tab* tab) {
-    if (!tab || tab->suppressAutosave)
+    // The queue tab has no live file: nothing to arm, nothing to flag. Every
+    // per-tab dirty hook funnels through here, so this one gate covers them.
+    if (!tab || tab->suppressAutosave || tab->isQueue)
         return;
     if (!tab->dirty) {
         tab->dirty = true;
@@ -848,7 +1005,11 @@ void PlaylistTabs::applyPathRenames(const QVariantMap& renames) {
     // that just happened.
     if (renames.isEmpty())
         return;
-    for (Tab* tab : std::as_const(m_tabs)) {
+    // allTabs, not m_tabs: a hidden queue still holds copies of the renamed
+    // rows, and a queued entry pointing at a path that no longer exists would
+    // fail to open when its turn came.
+    const QList<Tab*> tabs = allTabs();
+    for (Tab* tab : tabs) {
         PlaylistModel* model = tab->model;
         if (model == nullptr)
             continue;
@@ -999,16 +1160,18 @@ QString PlaylistTabs::makeLivePath() const {
 
 // Session manifest: a tiny text file in liveDir() recording tab ORDER and the
 // active index. Line 0 is the active index; each following line is a live-file
-// basename in tab order. The live files are uuid-named, so without this their
-// on-disk (name-sorted) order is arbitrary; this is what makes tabs reopen in
-// the order they were left. Named ".session" so the *.rwfpl enumeration skips it.
+// basename in tab order, or the "@queue" sentinel where the Playback Queue tab
+// sits (its presence IS the tab's shown state). The live files are uuid-named,
+// so without this their on-disk (name-sorted) order is arbitrary; this is what
+// makes tabs reopen in the order they were left. Named ".session" so the
+// *.rwfpl enumeration skips it.
 void PlaylistTabs::writeSessionManifest() const {
     if (m_restoring)
         return; // one explicit write at the end of restoreSession instead
     QStringList lines;
     lines << QString::number(m_current);
     for (const Tab* t : m_tabs)
-        lines << QFileInfo(t->livePath).fileName();
+        lines << (t->isQueue ? kQueueSentinel : QFileInfo(t->livePath).fileName());
 
     QSaveFile f(liveDir() + QStringLiteral("/.session"));
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
@@ -1153,23 +1316,42 @@ void PlaylistTabs::restoreSession() {
     const QStringList saved = readSessionManifest(&savedActive);
 
     // Reconstruct the order: manifest entries that still exist, in manifest
-    // order, then any present files the manifest didn't list (e.g. a crash
-    // between creating a live file and writing the manifest) appended at the end.
+    // order (the queue sentinel counts as existing iff the queue tab was
+    // built, and at most once), then any present files the manifest didn't
+    // list (e.g. a crash between creating a live file and writing the
+    // manifest) appended at the end.
     QStringList ordered;
-    for (const QString& name : saved)
+    for (const QString& name : saved) {
+        if (name == kQueueSentinel) {
+            if (m_queueTab && !ordered.contains(name))
+                ordered << name;
+            continue;
+        }
         if (present.contains(name) && !ordered.contains(name))
             ordered << name;
+    }
     for (const QString& name : present)
         if (!ordered.contains(name))
             ordered << name;
 
-    if (ordered.isEmpty()) {
+    // The zero-tab guard counts playlists, not the queue: a manifest that
+    // lists only the queue still gets its one empty playlist, so the user is
+    // never left with a queue and nowhere to queue from.
+    if (ordered.isEmpty() || (ordered.size() == 1 && ordered.first() == kQueueSentinel)) {
         m_restoring = false;
         newPlaylist(); // one empty tab on a fresh install (writes the manifest)
+        if (!ordered.isEmpty())
+            showQueueTab(); // ... plus the queue the user left open
         return;
     }
 
     for (const QString& f : ordered) {
+        if (f == kQueueSentinel) {
+            // The queue tab re-enters the strip at the position it was left.
+            insertTab(m_queueTab, static_cast<int>(m_tabs.size()));
+            emit queueVisibleChanged();
+            continue;
+        }
         const QString path = dir + QLatin1Char('/') + f;
         Tab* tab = makeTab(QStringLiteral("…")); // provisional; real title from META
         tab->livePath = path;                    // adopt the existing live file

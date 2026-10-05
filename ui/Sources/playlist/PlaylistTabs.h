@@ -64,6 +64,18 @@
 // creates a fresh live copy; the original is untouched. restoreSession() re-opens
 // the live files on startup, or seeds one empty tab.
 //
+// THE QUEUE TAB. One tab is special: the "Playback Queue". Its model is the
+// PlaybackQueue's (built here by makeTab so it carries the schema, the
+// registry, and the full per-tab subtree, then handed to PlaybackQueue by
+// main.cpp), and the tab outlives its place in the strip: closing it HIDES
+// it (removed from m_tabs, never destroyed, contents untouched), and
+// Playback > Playback Queue shows it again. It has no live file, no
+// autosave, no dirty flag, cannot be renamed, and its contents are
+// session-transient. Its column layout is seeded from the queue column
+// preset (queue_columns.rwftp, falling back to the new-tab default) and
+// otherwise rides the Tab struct across hide/show like any parked state.
+// The session manifest records its strip position with a "@queue" line.
+//
 // Registered via QML_ELEMENT into com.rawform.app; a QML context property.
 
 #pragma once
@@ -123,6 +135,13 @@ class PlaylistTabs : public QAbstractListModel {
     /// everywhere. Only one tab is ever filtered: the one being searched.
     Q_PROPERTY(rawform::PlaylistSearch* activeSearch READ activeSearch
                    WRITE setActiveSearch NOTIFY activeSearchChanged)
+    /// Whether the Playback Queue tab is in the strip right now (the Playback
+    /// menu's checkable entry binds to it). Flips on show/hide only.
+    Q_PROPERTY(bool queueVisible READ queueVisible NOTIFY queueVisibleChanged)
+    /// Whether the ACTIVE tab is the Playback Queue: the menu bar relabels
+    /// "Save Column Layout" and the host routes it to the queue preset. Shares
+    /// activeChanged, since it can only change when the active tab does.
+    Q_PROPERTY(bool activeIsQueue READ activeIsQueue NOTIFY activeChanged)
 
 public:
     /// Roles for the tab-bar list delegate.
@@ -135,6 +154,12 @@ public:
         ScanningRole,
         /// double 0..1: that scan's progress (files processed / files total).
         ScanProgressRole,
+        /// bool: this is the Playback Queue tab (teal underline, count badge,
+        /// no rename).
+        IsQueueRole,
+        /// int: the queue's entry count (0 for every other tab). Refreshed on
+        /// the queue model's structural signals while the tab is shown.
+        QueueCountRole,
     };
 
     explicit PlaylistTabs(QObject* parent = nullptr);
@@ -162,6 +187,22 @@ public:
     /// the change would only take effect after a restart re-reads the preset).
     Q_INVOKABLE void setDefaultLayout(QStringList fieldIds, QVariantList widths);
 
+    /// Build the Playback Queue tab (hidden until showQueueTab). Call once,
+    /// AFTER setDefaultLayout and BEFORE restoreSession (the manifest may
+    /// show it). @p fieldIds / @p widths are the queue column preset
+    /// (queue_columns.rwftp); empty falls back to the new-tab default preset,
+    /// and an empty default to the schema's own arrangement.
+    void createQueueTab(const QStringList& fieldIds, const QVariantList& widths);
+
+    /// The queue tab's model, for main.cpp to hand to PlaybackQueue. Null
+    /// before createQueueTab.
+    [[nodiscard]] PlaylistModel* queueModel() const;
+
+    /// Every open NON-queue playlist model, in strip order. The controller's
+    /// path-recovery fallback for a queued entry whose origin is gone walks
+    /// these (the queue itself is never a continuation target).
+    [[nodiscard]] QList<PlaylistModel*> playlistModels() const;
+
     // --- QAbstractListModel ------------------------------------------------
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -181,6 +222,9 @@ public:
     }
     void setActiveSearch(PlaylistSearch* search);
 
+    [[nodiscard]] bool queueVisible() const;
+    [[nodiscard]] bool activeIsQueue() const;
+
     // --- Lifecycle (QML) ---------------------------------------------------
 
     /// Create a tab and make it active. @p title empty -> a unique generic
@@ -190,8 +234,22 @@ public:
 
     /// Close @p index: stop its autosave, delete its live .rwfpl, destroy its
     /// model subtree. Never leaves zero tabs; closing the last one spawns a
-    /// fresh empty "New Playlist".
+    /// fresh empty "New Playlist". The queue tab routes to hideQueueTab()
+    /// instead: it is never destroyed and its contents are kept.
     Q_INVOKABLE void closeTab(int index);
+
+    /// Put the Playback Queue tab in the strip (appended at the end, then
+    /// reorderable like any tab) and make it active. A no-op beyond the
+    /// activation when it is already shown.
+    Q_INVOKABLE void showQueueTab();
+
+    /// Take the Playback Queue tab out of the strip, keeping its contents,
+    /// layout, and parked state for the next show. The active tab is
+    /// re-resolved exactly as closeTab does. A no-op when hidden.
+    Q_INVOKABLE void hideQueueTab();
+
+    /// The Playback menu's checkable entry: hide when shown, show otherwise.
+    Q_INVOKABLE void toggleQueueTab();
 
     /// Reorder tabs: move the tab at @p from so it lands at @p to. A
     /// begin/endMoveRows MOVE (keeps currentIndex pinned to the same tab).
@@ -274,7 +332,8 @@ public:
     Q_INVOKABLE [[nodiscard]] int activeScrollRow() const;
 
     /// Rename a tab (the inline double-click edit in the tab bar). An empty/
-    /// whitespace title is ignored. Persists via the tab's autosave.
+    /// whitespace title is ignored, and so is the queue tab (its title is
+    /// fixed). Persists via the tab's autosave.
     Q_INVOKABLE void renameTab(int index, const QString& title);
 
     /// The tab index owning @p model, -1 when no open tab does (null model, or
@@ -287,10 +346,11 @@ public:
 
     /// Patch the in-memory identity of every row whose filePath is a KEY of
     /// @p renames (old absolute path -> new absolute path), across EVERY open
-    /// tab, after FileRenamer moved the files on disk. Lives here because this
-    /// object is the one holder of all models: a file renamed from one tab may
-    /// be listed in others, and patching only the invoking tab would leave
-    /// those rows pointing at a path that no longer exists.
+    /// tab (the hidden queue tab included), after FileRenamer moved the files
+    /// on disk. Lives here because this object is the one holder of all
+    /// models: a file renamed from one tab may be listed in others, and
+    /// patching only the invoking tab would leave those rows pointing at a
+    /// path that no longer exists.
     ///
     /// Each hit is a copy-patch of filePath + fileName pushed through
     /// PlaylistModel::refreshTrack: an in-place dataChanged, never a reset, so
@@ -345,6 +405,8 @@ signals:
     void countChanged();
     void activeSearchChanged();
     void currentIndexChanged();
+    /// The Playback Queue tab entered or left the strip.
+    void queueVisibleChanged();
     /// Emitted BEFORE the active tab flips (m_current still points at the
     /// OUTGOING tab). The view detaches the TableView's selection model on
     /// this, because TableView clears whichever selection model is attached
@@ -423,10 +485,26 @@ private:
         bool                 dirty = false; ///< unsaved-vs-autosave; arms the debounce
         /// True during a load, so the apply never re-writes what was just read.
         bool                 suppressAutosave = false;
+        /// The Playback Queue tab (see the file comment): no live file, no
+        /// autosave (markDirty is a no-op for it), never destroyed, and
+        /// absent from m_tabs while hidden.
+        bool                 isQueue = false;
     };
 
     // Construction / teardown helpers.
     void applyActiveSearch();           ///< m_activeSearch on the active proxy only
+    /// True for a tab this object holds: in the strip, or the hidden queue
+    /// tab. The guard the per-tab lambdas use, since m_tabs.contains() alone
+    /// would read the hidden queue as closed.
+    [[nodiscard]] bool ownsTab(const Tab* tab) const;
+    /// The strip's tabs plus the queue tab when hidden: every model this
+    /// object holds, for the sweeps that must not miss the hidden queue.
+    [[nodiscard]] QList<Tab*> allTabs() const;
+    /// Low-level remove of a tab from the strip WITHOUT destroying it (the
+    /// queue tab's hide; destroyTab delegates here for it). Like destroyTab
+    /// it leaves m_current to the caller (closeTab) to re-resolve. Emits
+    /// queueVisibleChanged.
+    void removeTabKeepAlive(int index);
     /// Arm the coalesced activeSelectionChanged (see the signal); a no-op
     /// while one is already queued.
     void notifyActiveSelection();
@@ -463,10 +541,12 @@ private:
     [[nodiscard]] QString makeLivePath() const;       ///< liveDir()/<uuid>.rwfpl
     [[nodiscard]] QString uniqueGenericTitle() const; ///< "New Playlist" / "... 2"
 
-    // Session manifest: the ordered list of live-file basenames + the active
-    // index, so tab ORDER and the active tab survive a restart (the live files
-    // themselves are uuid-named, so their on-disk order is meaningless). Written
-    // (atomically) on every order/active change; a no-op while m_restoring.
+    // Session manifest: the ordered list of live-file basenames (the queue
+    // tab as the "@queue" sentinel) + the active index, so tab ORDER, the
+    // queue tab's visibility and position, and the active tab survive a
+    // restart (the live files themselves are uuid-named, so their on-disk
+    // order is meaningless). Written (atomically) on every order/active
+    // change; a no-op while m_restoring.
     void                      writeSessionManifest() const;
     [[nodiscard]] QStringList readSessionManifest(int* activeIndex) const;
 
@@ -486,6 +566,9 @@ private:
     void updateScanTabState(bool scanning, double progress);
 
     QList<Tab*>                 m_tabs;
+    /// The Playback Queue tab, owned here for the app's lifetime; a member of
+    /// m_tabs only while shown. Null before createQueueTab.
+    Tab*                        m_queueTab = nullptr;
     int                         m_current = -1;
     QPointer<PlaylistSearch>    m_activeSearch;  ///< see activeSearch
     bool                        m_selectionNotifyPending = false; ///< see the signal
