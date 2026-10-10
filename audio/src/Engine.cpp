@@ -326,6 +326,17 @@ struct SeamMarker {
     TrackInfo     info;                // snapshot taken when this track's decoder was opened
 };
 
+// How a fresh start differs from the default "frame 0, Playing". The
+// reopen-at-position boundary (a device change) uses both: it wants the same
+// track to come back at the listening position, and, when it was Paused, to
+// come back parked. Seeking the fresh decoder BEFORE the prime and starting
+// once is what keeps the track head from playing for a device period before
+// the seek lands, and keeps the UI to one announcement at the right position.
+struct StartOptions {
+    std::uint64_t startFrame = 0;      // seek the fresh decoder here before priming
+    bool          paused     = false;  // negotiate and prime, but do not start pulling
+};
+
 // ---------------------------------------------------------------------------
 // Published current-track snapshot, the backing store for Engine::currentTrackInfo()
 //. TrackInfo owns a std::string, so unlike formatBits it cannot ride a
@@ -446,22 +457,14 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     RateManager            rateManager;
     std::atomic<RateMode>  rateMode{RateMode::BitPerfectWhenAvailable};
 
-    // The DEVICE format the engine considers itself transitioning FROM: the
-    // resolved device rate plus the source channel count of the currently or
-    // most-recently open stream. An invalid (zeroed) value means "transitioning
-    // from a closed device" (a fresh start). The RateManager reads it as
-    // `currentOpen` to compute the gate (needsDeviceReconfigure / keepSink). Set
-    // after each successful open; cleared by enterStopped(). Deliberately NOT
-    // cleared in teardownCurrent(), so a track-to-track reconfigure still compares
-    // the incoming track against the outgoing one.
-    AudioFormat openDeviceFormat{};
-
-    // Whether the sink currently holds an OPEN device. Distinct from
-    // openDeviceFormat above, which deliberately SURVIVES teardown as the
-    // decision's comparison seed: this flag tracks the physical open/closed
+    // Whether the sink currently holds an OPEN device: the physical open/closed
     // truth, so startTrack knows whether an in-place reconfigure is even on the
     // table and enterStopped knows whether a parked device is left to release.
-    // Engine-thread-only.
+    // The same-source-format fast paths (the stitch, the HOLD-CUT) do not read
+    // it: they gate on `format` identity and the rate-mode snapshot below,
+    // which is the whole of the engine's stream-sharing rule (the sink's stream
+    // format IS the source format, so nothing about the device rate can make
+    // two source formats share a stream). Engine-thread-only.
     bool deviceOpen = false;
 
     // The applied output pin: mirrors what doSelectOutputDevice last
@@ -546,7 +549,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     // in startTrack after each successful open (measurement-first, prediction
     // fallback; see the publication site), untouched across stitches, HOLD-CUTs,
     // seeks, and pause (the open persists through all of those), cleared by
-    // enterStopped beside openDeviceFormat (device released).
+    // enterStopped (device released).
     std::atomic<std::uint64_t> outcomeBits{0};
 
     // The current track's length in frames, published with formatBits at each
@@ -642,8 +645,10 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
         post(Command{CommandType::OutputFailed, reason, 0.0, {}, 0, 0});
     }
 
-    bool startTrack(std::unique_ptr<IDecoder> dec, const std::string& path);  // configure ring, open sink, play
-    bool openAndStart(const std::string& path);          // factory open then startTrack
+    bool startTrack(std::unique_ptr<IDecoder> dec, const std::string& path,
+                    const StartOptions& options = {});  // configure ring, open sink, play
+    bool openAndStart(const std::string& path,
+                      const StartOptions& options = {});  // factory open then startTrack
     bool cutOrStartTo(std::unique_ptr<IDecoder> dec, const std::string& path); // HOLD-CUT or reconfigure to an opened decoder
     void advanceToPendingOrStop();                       // pop next openable, else Stopped
     bool startSink();                                    // re-anchor, then sink->start()
@@ -654,7 +659,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void primeUpTo(std::size_t thresholdFrames);         // pre-buffer before start
     void handleProducerEos();                            // Stitch next track gaplessly, or mark exhausted
     void reportDecoderOutcome();                         // onError for a retiring decoder
-    void publishUnderruns();                             // onInfo + total for new underruns
+    void publishUnderruns();                             // onInfo + total of new underruns
     void crossSeam(const SeamMarker& marker);            // Fire onTrackChanged + position rebase at a boundary
 
     // --- the engine thread's wait and consumer tracking ---
@@ -1059,34 +1064,27 @@ void Engine::Impl::doSelectOutputDevice(const std::string& deviceId) {
 
 // The shared audible-change boundary (factored from device selection
 // and reused by the default-device reaction): capture the position, full
-// teardown (the outgoing device gets its restore), reopen the SAME track, seek
-// back, restore Paused if that is where we were. A no-op from Stopped or with
-// nothing current; a failed reopen settles Stopped with onError, the pending
-// queue preserved. Position from the same source firePosition uses, so the
-// resume target is exactly what the user last saw.
+// teardown (the outgoing device gets its restore), reopen the SAME track AT
+// that position, Paused again if that is where we were. The position travels
+// as a StartOptions into the fresh start, so the new decoder is positioned
+// before the ring is primed and the device started once: nothing from the
+// track head reaches the device, and the UI sees one announcement at the kept
+// position. A no-op from Stopped or with nothing current; a failed reopen
+// settles Stopped with onError, the pending queue preserved. Position from the
+// same source firePosition uses, so the resume target is exactly what the user
+// last saw.
 void Engine::Impl::reopenAtPosition() {
     const State entryState = stateAtomic.load(std::memory_order_relaxed);
     if (entryState == State::Stopped || !decoder || currentPath.empty()) {
         return;
     }
-    const std::uint32_t rate = format.sampleRate;
-    const double        resumeAt =
-        (rate != 0)
-            ? static_cast<double>(ringSource.playheadFrames()) /
-                  static_cast<double>(rate)
-            : 0.0;
-    const bool wasPaused = (entryState == State::Paused);
+    StartOptions options;
+    options.startFrame = ringSource.playheadFrames();
+    options.paused     = (entryState == State::Paused);
 
     teardownCurrent();
-    if (!openAndStart(currentPath)) {
+    if (!openAndStart(currentPath, options)) {
         enterStopped();
-        return;
-    }
-    if (resumeAt > 0.0) {
-        doSeek(resumeAt);
-    }
-    if (wasPaused) {
-        doPause();
     }
 }
 
@@ -1261,11 +1259,13 @@ bool Engine::Impl::cutOrStartTo(std::unique_ptr<IDecoder> dec,
 // decoder within the current track. Runs on the engine thread with no lock held;
 // it parks the RT thread for the duration, so it is the only actor touching the
 // ring and the decoder. Distinct from the stop-rewind: that opens a fresh decoder
-// from 0, this repositions the existing one. The transport state is preserved
-// A seek clears ALL pending stitch state; a seek landing in
-// the brief drain-overlap window therefore targets the upcoming (already-opened)
-// track, an accepted wrinkle of the gapless design (the producer-logical
-// current is the only live decoder there is to reseek).
+// from 0, this repositions the existing one. The transport state is preserved.
+// A seek clears ALL pending stitch state; a seek landing in the brief
+// drain-overlap window therefore targets the upcoming (already-opened) track,
+// the only live decoder there is to reseek. The UI is told: once such a seek
+// lands, the incoming track is announced, so what the user sees (title,
+// duration, cursor) is the track that is actually playing from the target, not
+// the outgoing one whose tail was just flushed.
 void Engine::Impl::doSeek(double seconds) {
     const State entryState = stateAtomic.load(std::memory_order_relaxed);
 
@@ -1313,6 +1313,7 @@ void Engine::Impl::doSeek(double seconds) {
     // pre-seek decode block so its stale samples never bleed into the fresh ring.
     publishUnderruns();  // before the reset drops the tally
     ringSource.reset();
+    const bool crossedIntoPending = !seams.empty();  // live decoder is a stitched track
     seams.clear();
     stagedFrames      = 0;
     stagedOffset      = 0;
@@ -1351,6 +1352,14 @@ void Engine::Impl::doSeek(double seconds) {
         return;
     }
 
+    // A seek that landed in a stitched (not yet announced) track makes that
+    // track current for the UI too: announce it before the position fires, so
+    // the position is read against the right duration.
+    if (crossedIntoPending) {
+        publishFormat(format);  // unchanged across a stitch; kept coherent
+        announceTrack(makeTrackInfo(currentPath, *decoder));
+    }
+
     // Reflect the new position at once (Playing or Paused) and rebase the tick
     // clock so the periodic fire is measured from here.
     lastPositionFire = std::chrono::steady_clock::now();
@@ -1369,9 +1378,11 @@ void Engine::Impl::doSeek(double seconds) {
 // (either way: RT joined, ring reset, decoder dropped; deviceOpen says whether
 // the device itself survived, which decides the reconfigure offer below).
 // currentPath is committed here so a failed open never poisons the remembered
-// track.
+// track. `options` carries a start position and a start-parked flag for the
+// reopen-at-position boundary; the defaults are frame 0 and Playing.
 bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
-                              const std::string&        path) {
+                              const std::string&        path,
+                              const StartOptions&       options) {
     decoder     = std::move(dec);
     currentPath = path;
     format      = decoder->format();
@@ -1389,14 +1400,30 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
     ringSource.reconfigure(capacity, format.channels);  // fresh ring, flags + counters + origin cleared
     publishFormat(format);
 
+    // A start position: reposition the fresh decoder BEFORE the prime fills
+    // the ring, and set the playhead origin so the first frame pulled reports
+    // that position. A source that cannot seek, or refuses, starts from 0 with
+    // a notice rather than failing the start: the device change the user asked
+    // for still happens, only the place is lost.
+    if (options.startFrame != 0) {
+        if (decoder->seekable() && decoder->seek(options.startFrame)) {
+            ringSource.setPlayhead(options.startFrame);
+            framesProducedThisTrack = options.startFrame;
+        } else {
+            notifyInfo("could not resume '" + currentPath +
+                       "' at the previous position; starting from the beginning");
+        }
+    }
+
     // Load the rate mode ONCE for this whole open and snapshot it as the mode
     // in force. The snapshot must land BEFORE primeUpTo: a
     // multi-track start whose first track is shorter than the prime threshold
     // stitches the next track DURING the prime, and that stitch's mode gate
     // must compare against this open's mode, not against a stale snapshot from
     // a previous open (which would wrongly refuse a perfectly coherent stitch).
-    const RateMode mode = rateMode.load(std::memory_order_acquire);
-    openRateMode        = mode;
+    const RateMode mode          = rateMode.load(std::memory_order_acquire);
+    const RateMode priorRateMode = openRateMode;  // the parked device's opening mode
+    openRateMode                 = mode;
 
     // Snapshot THIS track's identity for its onTrackChanged BEFORE priming.
     // primeUpTo can reach end of stream on a track shorter than the prime
@@ -1416,14 +1443,28 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
         return false;
     }
 
+    // A flip to AlwaysResample since the open means "give the device its rate
+    // back": a parked device is still sitting at the rate the previous mode
+    // borrowed, and an in-place reconfigure under the new mode would keep it
+    // there (the decision reads the current rate and never switches), so the
+    // flip would only take effect at the next stop. Close it here instead, the
+    // one boundary where the repayment runs (CoreAudio restores its ledger,
+    // PipeWire's force lifts with the stream), so the capabilities read below
+    // sees the device's own rate and the open that follows resamples to it.
+    // One close+open at this single boundary, the same cost as a stop/play;
+    // the reverse flip needs nothing, since the device sits at its own rate.
+    if (deviceOpen && mode == RateMode::AlwaysResample &&
+        priorRateMode != RateMode::AlwaysResample) {
+        sink->close();
+        deviceOpen = false;
+    }
+
     // Resolve the rate decision before opening. Read the device's
-    // capabilities ONCE, ask the portable RateManager what to do given this
-    // track's source format, the chosen mode, and the device format we are
-    // transitioning from (openDeviceFormat; invalid on a fresh start), then hand
-    // the decision to the sink, which executes it without re-deriving anything.
-    const SinkCapabilities caps = sink->capabilities();
-    const RateDecision     decision =
-        rateManager.decide(format, caps, mode, openDeviceFormat);
+    // capabilities, ask the portable RateManager what to do given this track's
+    // source format and the chosen mode, then hand the decision to the sink,
+    // which executes it without re-deriving anything.
+    SinkCapabilities caps     = sink->capabilities();
+    RateDecision     decision = rateManager.decide(format, caps, mode);
 
     // When the device survived the boundary (a transition PARKED it rather than
     // closing), offer the sink an in-place reconfigure: retune the existing
@@ -1441,6 +1482,13 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
         if (deviceOpen) {
             sink->close();  // declined: release, then a genuine open below
             deviceOpen = false;
+            // The close repaid the session's rate debt (CoreAudio's restore,
+            // PipeWire's force lifting with the stream), so the device no
+            // longer sits at the rate the decision above was made against: a
+            // decision that found it "already at rate" would open without a
+            // switch onto a device that has since moved. Read it again.
+            caps     = sink->capabilities();
+            decision = rateManager.decide(format, caps, mode);
         }
         sinkReady = sink->open(format, decision, &ringSource);
     }
@@ -1450,13 +1498,6 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
         return false;
     }
     deviceOpen = true;
-
-    // Remember the resolved device config so the NEXT track's decision compares
-    // against it. The "device format" is the chosen device rate paired with this
-    // track's channel count (the sink's stream format carries the source
-    // channels, so a channel change is a reconfigure even at the same rate).
-    openDeviceFormat.sampleRate = decision.deviceRate;
-    openDeviceFormat.channels   = format.channels;
 
     // Publish the device outcome for the UI, measurement
     // first: the sink's measured device rate is the authority when it has one
@@ -1479,10 +1520,22 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
                           std::memory_order_release);
     }
 
-    // Prime the position tick so the first loop iteration fires position 0.0
-    // promptly, the moment onTrackChanged lands, rather than up to a tick later.
+    // Prime the position tick so the first loop iteration fires the start
+    // position promptly, the moment onTrackChanged lands, rather than up to a
+    // tick later.
     lastPositionFire =
         std::chrono::steady_clock::now() - std::chrono::milliseconds(kPositionIntervalMs);
+
+    if (options.paused) {
+        // Negotiated and primed, parked: the device is open and silent, the
+        // ring holds the first frames from the start position, and the next
+        // play() starts pulling exactly as a resume from Paused does. One
+        // announcement, one position fire, and nothing reaches the device.
+        setState(State::Paused);
+        announceTrack(startedInfo);
+        firePosition();
+        return true;
+    }
 
     if (!startSink()) {
         // Negotiated but not pulling: a Playing state here would be a lie the
@@ -1499,14 +1552,14 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
 
 // Open `path` through the factory, then start it fresh. Returns false on a failed
 // open (onError already fired) or a failed start.
-bool Engine::Impl::openAndStart(const std::string& path) {
+bool Engine::Impl::openAndStart(const std::string& path, const StartOptions& options) {
     std::string err;
     std::unique_ptr<IDecoder> dec = factory->open(path, &err);
     if (!dec) {
         notifyError("could not open '" + path + "': " + err);
         return false;
     }
-    return startTrack(std::move(dec), path);
+    return startTrack(std::move(dec), path, options);
 }
 
 // Pop pending paths until one opens and starts, else settle into Stopped (the
@@ -1884,13 +1937,11 @@ void Engine::Impl::setState(State s) {
     }
 }
 
-// Settle into Stopped, releasing a parked device and clearing the gate origin.
-// A transition that dead-ends here arrives with the device parked open; once
-// the engine is Stopped the device is closed, so the next playback transitions
-// from nothing: the gate must read a fresh open rather than comparing against
-// the track that just ended. Distinct from the bare setState(Stopped) so that a
-// track-to-track reconfigure, which does NOT pass through here, keeps
-// openDeviceFormat for the incoming decision.
+// Settle into Stopped, releasing a parked device. A transition that dead-ends
+// here arrives with the device parked open; once the engine is Stopped the
+// device is closed, so the next playback opens afresh. Distinct from the bare
+// setState(Stopped) so that a track-to-track reconfigure, which does NOT pass
+// through here, keeps its device.
 void Engine::Impl::enterStopped() {
     // A transition that dead-ends here (empty queue, or every pending path
     // failing to open) arrived with the device parked open; settling
@@ -1900,7 +1951,6 @@ void Engine::Impl::enterStopped() {
         sink->close();
         deviceOpen = false;
     }
-    openDeviceFormat = AudioFormat{};
     outcomeBits.store(0, std::memory_order_release);  // device released: no outcome
     setState(State::Stopped);
 }
@@ -2064,9 +2114,17 @@ bool Engine::setSink(std::unique_ptr<IAudioSink> sink) {
     return true;
 }
 
-void Engine::setDecoderFactory(IDecoderFactory* factory) {
+// Same gate and the same ordering argument as setSink: the engine thread reads
+// `factory` without the command mutex, so the swap is legal only while Stopped
+// (no open or advance can be reading it), and the store under the mutex is
+// ordered before the engine thread's next command drain.
+bool Engine::setDecoderFactory(IDecoderFactory* factory) {
     std::lock_guard<std::mutex> lock(m_impl->mtx);
+    if (m_impl->stateAtomic.load(std::memory_order_acquire) != State::Stopped) {
+        return false;
+    }
     m_impl->factory = (factory != nullptr) ? factory : &m_impl->defaultFactory;
+    return true;
 }
 
 void Engine::setListener(Listener* listener) {

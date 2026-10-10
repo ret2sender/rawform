@@ -125,8 +125,12 @@ public:
     /// Override how paths become decoders. Non-owning; must outlive the Engine.
     /// Defaults to the built-in format-dispatching DecoderFactory, so leaving it
     /// unset still plays every format the build supports; tests inject an
-    /// in-memory factory. Passing nullptr restores the default.
-    void setDecoderFactory(IDecoderFactory* factory);
+    /// in-memory factory. Passing nullptr restores the default. Legal only
+    /// while Stopped, like setSink and for the same reason (the engine thread
+    /// reads the factory without a lock at every open); any other state
+    /// refuses and returns false. Every current caller sets it once before the
+    /// first play() and may ignore the return.
+    bool setDecoderFactory(IDecoderFactory* factory);
 
     /// Choose how the engine reconciles each track's native rate with the output
     /// device. Defaults to RateMode::BitPerfectWhenAvailable, a "follow the track
@@ -134,8 +138,12 @@ public:
     /// valid in any state: the engine thread reads it at each track start to
     /// consult the RateManager, and a change while a track is playing takes
     /// effect at the next boundary (that boundary re-decides under the new mode
-    /// instead of stitching or holding the device). The CLI maps its
-    /// --resample / --force-rate flags to this; the UI maps a settings toggle.
+    /// instead of stitching or holding the device). A flip TO AlwaysResample
+    /// also releases the device at that boundary, so a rate an earlier track
+    /// switched it to is given back then rather than at the next stop, and
+    /// every following track resamples to the device's own rate. The CLI maps
+    /// its --resample / --force-rate flags to this; the UI maps a settings
+    /// toggle.
     void setRateMode(RateMode mode);
 
     // ----- output device selection ------------------------------------
@@ -261,8 +269,10 @@ public:
     /// target is clamped to [0, duration]; the transport state is preserved (a
     /// seek while Paused stays Paused and resumes from the new spot). A seek while
     /// Stopped, or on an unseekable source, is ignored; an unseekable source also
-    /// reports through onError. See the seek handler in the .cpp for the full
-    /// mechanics and edge cases.
+    /// reports through onError. In the brief gapless overlap at a track's end
+    /// the live decoder is already the NEXT track; a seek there repositions that
+    /// track and announces it (onTrackChanged) so the UI follows. See the seek
+    /// handler in the .cpp for the full mechanics and edge cases.
     void seek(double seconds);
 
     // ----- master volume, control thread, lock-free, immediate -------

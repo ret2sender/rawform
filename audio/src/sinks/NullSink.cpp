@@ -130,6 +130,7 @@ bool NullSink::open(const AudioFormat& sourceFormat, const RateDecision& decisio
     {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_decisions.push_back(decision);
+        m_originalRate = m_caps.currentRate;  // the session ledger's baseline
         if (decision.deviceRate != 0) {
             m_caps.currentRate = decision.deviceRate;
         }
@@ -177,6 +178,15 @@ std::vector<RateDecision> NullSink::recordedReconfigures() const {
 int NullSink::closeCount() const {
     std::lock_guard<std::mutex> lock(m_mtx);
     return m_closeCount;
+}
+
+int NullSink::startCount() const {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_startCount;
+}
+
+float NullSink::firstPulledSample() const {
+    return m_firstPulled.load(std::memory_order_acquire);
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +243,7 @@ void NullSink::fireExternalRateChanged(std::uint32_t newRateHz) {
         std::lock_guard<std::mutex> lock(m_mtx);
         if (newRateHz != 0) {
             m_caps.currentRate = newRateHz;  // the device moved; forgiven state
+            m_originalRate     = newRateHz;  // close() restores nothing now
         }
         l = m_events;
     }
@@ -307,6 +318,12 @@ bool NullSink::start() {
         return false;
     }
     if (!m_running.load(std::memory_order_relaxed)) {
+        {
+            std::lock_guard<std::mutex> lock(m_mtx);
+            ++m_startCount;
+        }
+        m_firstPulled.store(-1.0f, std::memory_order_release);
+        m_captureArmed.store(true, std::memory_order_release);
         m_running.store(true, std::memory_order_release);
         m_thread = std::thread(&NullSink::pumpLoop, this);
     }
@@ -327,6 +344,7 @@ void NullSink::close() {
     if (m_opened) {
         std::lock_guard<std::mutex> lock(m_mtx);
         ++m_closeCount;  // count genuine releases only, not redundant closes
+        m_caps.currentRate = m_originalRate;  // the session's rate debt, repaid
     }
     m_opened = false;
     m_source = nullptr;
@@ -354,6 +372,9 @@ void NullSink::pumpLoop() {
             const std::size_t got = m_source->pull(m_scratch.data(), m_blockFrames);
             m_pulledThisOpen.fetch_add(static_cast<std::uint64_t>(got),
                                        std::memory_order_relaxed);
+            if (got != 0 && m_captureArmed.exchange(false, std::memory_order_acq_rel)) {
+                m_firstPulled.store(m_scratch[0], std::memory_order_release);
+            }
         }
         if (m_mode == Mode::Paced || stalled) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

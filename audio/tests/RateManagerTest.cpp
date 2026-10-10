@@ -22,14 +22,14 @@
 //
 // The portable, deterministic truth table for the rate policy. No sink, no
 // audio hardware, no threads: just RateManager::decide() over a matrix of
-// {source rates} x {device capability sets} x {RateMode}, plus the gapless-gate
-// dimension {what is currently open}, plus the nearest-best fallback ladder
-// inside BitPerfectWhenAvailable: family descent, family
+// {source rates} x {device capability sets} x {RateMode}, plus the nearest-best
+// fallback ladder inside BitPerfectWhenAvailable: family descent, family
 // ascent, the two cross-family last resorts, and the degradations back to the
 // stay-parked behavior. Because decide() is a pure function, every
 // assertion is exact, which is the point of having lifted the policy out of the
-// sink. Same hand-rolled CHECK harness as the rest of the suite; main returns
-// non-zero on any failure.
+// sink. The gapless stitch and the held cut are gated on source-format identity
+// in the Engine, not here; EngineTest covers them. Same hand-rolled CHECK
+// harness as the rest of the suite; main returns non-zero on any failure.
 //
 // The capability sets mirror real devices: a fixed 48000-only output (cheap USB
 // DACs, many Bluetooth links), a 44100/48000 pair (the common consumer case),
@@ -97,8 +97,6 @@ AudioFormat fmt(std::uint32_t rate, std::uint16_t channels = 2) {
     return AudioFormat{rate, channels};
 }
 
-constexpr AudioFormat kClosed{};  // invalid: transitioning from a closed device
-
 // ---------------------------------------------------------------------------
 // BitPerfectWhenAvailable: switch only on an advertised, switchable match.
 
@@ -106,19 +104,17 @@ void testBitPerfectExactMatchSwitches() {
     constexpr RateManager rm;
     const RateDecision d =
         rm.decide(fmt(96000), caps({44100, 48000, 88200, 96000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == true);      // 96000 advertised, device was at 48000
     CHECK(d.resampleNeeded == false);   // bit-perfect predicted
-    CHECK(d.needsDeviceReconfigure == true);  // fresh start
-    CHECK(d.keepSink == false);
 }
 
 void testBitPerfectAlreadyAtRateDoesNotSwitch() {
     constexpr RateManager rm;
     const RateDecision d =
         rm.decide(fmt(48000), caps({44100, 48000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);
     CHECK(d.switchDevice == false);     // already there, no-op switch avoided
     CHECK(d.resampleNeeded == false);   // bit-perfect (device clocks the source)
@@ -133,7 +129,7 @@ void testBitPerfectUnadvertisedRateResamples() {
     // to it.
     const RateDecision d =
         rm.decide(fmt(96000), caps({44100, 48000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);       // family fallback == the standing rate
     CHECK(d.switchDevice == false);     // no-op switch skipped
     CHECK(d.resampleNeeded == true);    // OS path resamples 96000 -> 48000
@@ -153,7 +149,7 @@ void testFallbackFamilyDescentSwitchesUp() {
     // device SWITCHES UP from its standing 44100 instead of resampling into it.
     const RateDecision d =
         rm.decide(fmt(192000), caps({44100, 48000, 88200, 96000}, 44100, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);    // honest: 192000 -> 96000 is not bit-perfect
@@ -165,7 +161,7 @@ void testFallbackFamilyDescentPrefersOwnFamily() {
     // the fallback must land on 48000 (96000 / 2), not stay at 44100.
     const RateDecision d =
         rm.decide(fmt(96000), caps({44100, 48000}, 44100, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);       // family, not the standing 44100
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -177,7 +173,7 @@ void testFallbackFamilyDescent441Family() {
     // cross-family) 96000 and not on the standing 48000.
     const RateDecision d =
         rm.decide(fmt(176400), caps({44100, 48000, 88200, 96000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 88200);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -188,7 +184,7 @@ void testFallbackFamilyDescentDeeperDivisor() {
     // 192000 with no 96000 advertised: descent continues to 48000 (192000 / 4).
     const RateDecision d =
         rm.decide(fmt(192000), caps({44100, 48000}, 44100, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -200,7 +196,7 @@ void testFallbackFamilyAscent() {
     // (22050 * 2), the family multiple, not the standing 48000.
     const RateDecision d =
         rm.decide(fmt(22050), caps({44100, 48000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 44100);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -213,7 +209,7 @@ void testFallbackHighestBelowCrossFamily() {
     // advertised rate below the source, 96000.
     const RateDecision d =
         rm.decide(fmt(176400), caps({48000, 96000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -226,7 +222,7 @@ void testFallbackLowestAbove() {
     // last step takes the lowest advertised rate above, 44100.
     const RateDecision d =
         rm.decide(fmt(8000), caps({44100, 48000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 44100);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -240,7 +236,7 @@ void testFallbackSpanBoundary() {
     // proves covers() feeds the family probe, not just discrete points).
     const RateDecision d =
         rm.decide(fmt(192000), capsRange(44100, 96000, 44100, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == true);
@@ -252,7 +248,7 @@ void testFallbackCannotSwitchStillStays() {
     // device that refuses a rate change is never asked to fall back anywhere.
     const RateDecision d =
         rm.decide(fmt(192000), caps({44100, 48000, 96000}, 44100, false),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 44100);       // parked; OS path resamples into it
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == true);
@@ -265,26 +261,25 @@ void testFallbackEmptyCapabilitySetStays() {
     // the pre-fallback behavior.
     const RateDecision d =
         rm.decide(fmt(96000), caps({}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == true);
 }
 
-void testFallbackGaplessAcrossSameSourceRate() {
+void testFallbackRepeatsAcrossSameSourceRate() {
     constexpr RateManager rm;
-    // The gapless interaction: two consecutive 192000 tracks both fall back to 96000,
-    // so the second decision sees the device config unchanged and keeps the
-    // sink. Fallback transitions stitch gaplessly like any other.
+    // The gapless interaction: a second 192000 track arrives with the device
+    // already clocking the 96000 fallback the first one chose. The fallback is a
+    // pure function of (source rate, capabilities), so it resolves to the same
+    // 96000 with no switch, which is what lets the Engine's same-source-format
+    // stitch skip re-deciding without ever landing on a different device rate.
     const SinkCapabilities c = caps({44100, 48000, 96000}, 96000, true);
-    const AudioFormat openAt = fmt(96000);  // device stream open at 96000/2
     const RateDecision d =
-        rm.decide(fmt(192000), c, RateMode::BitPerfectWhenAvailable, openAt);
+        rm.decide(fmt(192000), c, RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == false);           // already clocking the fallback
     CHECK(d.resampleNeeded == true);
-    CHECK(d.needsDeviceReconfigure == false);
-    CHECK(d.keepSink == true);
 }
 
 void testBitPerfectCannotSwitchResamples() {
@@ -292,7 +287,7 @@ void testBitPerfectCannotSwitchResamples() {
     // The rate IS advertised, but the device refuses a nominal-rate change.
     const RateDecision d =
         rm.decide(fmt(44100), caps({44100, 48000}, 48000, false),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 48000);
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == true);
@@ -303,7 +298,7 @@ void testBitPerfectContinuousRangeCovers() {
     // A device advertising a continuous 44100..192000 span must accept 96000.
     const RateDecision d =
         rm.decide(fmt(96000), capsRange(44100, 192000, 44100, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
+                  RateMode::BitPerfectWhenAvailable);
     CHECK(d.deviceRate == 96000);
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == false);
@@ -316,7 +311,7 @@ void testAlwaysResampleNeverSwitchesEvenWhenSupported() {
     constexpr RateManager rm;
     const RateDecision d =
         rm.decide(fmt(44100), caps({44100, 48000}, 48000, true),
-                  RateMode::AlwaysResample, kClosed);
+                  RateMode::AlwaysResample);
     CHECK(d.deviceRate == 48000);       // stays at the device's current rate
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == true);    // 44100 source over a 48000 device
@@ -328,7 +323,7 @@ void testAlwaysResampleLuckyMatchIsBitPerfect() {
     // bit-perfect even though we never touched the device.
     const RateDecision d =
         rm.decide(fmt(48000), caps({44100, 48000}, 48000, true),
-                  RateMode::AlwaysResample, kClosed);
+                  RateMode::AlwaysResample);
     CHECK(d.deviceRate == 48000);
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == false);
@@ -341,7 +336,7 @@ void testForceSwitchesUnadvertisedRate() {
     constexpr RateManager rm;
     const RateDecision d =
         rm.decide(fmt(96000), caps({44100, 48000}, 48000, true),
-                  RateMode::ForceDeviceRate, kClosed);
+                  RateMode::ForceDeviceRate);
     CHECK(d.deviceRate == 96000);       // forced despite not being advertised
     CHECK(d.switchDevice == true);
     CHECK(d.resampleNeeded == false);   // predicted bit-perfect; sink measures truth
@@ -351,72 +346,10 @@ void testForceCannotSwitchFallsBackToResample() {
     constexpr RateManager rm;
     const RateDecision d =
         rm.decide(fmt(96000), caps({48000}, 48000, false),
-                  RateMode::ForceDeviceRate, kClosed);
+                  RateMode::ForceDeviceRate);
     CHECK(d.deviceRate == 48000);       // device refuses a switch; cannot force
     CHECK(d.switchDevice == false);
     CHECK(d.resampleNeeded == true);
-}
-
-// ---------------------------------------------------------------------------
-// The gapless gate: needsDeviceReconfigure / keepSink versus what is currently open.
-
-void testGateSameDeviceRateHolds() {
-    constexpr RateManager rm;
-    // Two 44100 sources, both bit-perfect at a device already running 44100: the
-    // second transition keeps the sink.
-    const SinkCapabilities c = caps({44100, 48000}, 44100, true);
-    const AudioFormat openAt = fmt(44100);  // device currently open at 44100/2
-    const RateDecision d =
-        rm.decide(fmt(44100), c, RateMode::BitPerfectWhenAvailable, openAt);
-    CHECK(d.deviceRate == 44100);
-    CHECK(d.needsDeviceReconfigure == false);
-    CHECK(d.keepSink == true);
-}
-
-void testGateDifferentDeviceRateReconfigures() {
-    constexpr RateManager rm;
-    const SinkCapabilities c = caps({44100, 48000}, 44100, true);
-    const AudioFormat openAt = fmt(44100);
-    const RateDecision d =
-        rm.decide(fmt(48000), c, RateMode::BitPerfectWhenAvailable, openAt);
-    CHECK(d.deviceRate == 48000);
-    CHECK(d.needsDeviceReconfigure == true);
-    CHECK(d.keepSink == false);
-}
-
-void testGateChannelChangeReconfigures() {
-    constexpr RateManager rm;
-    const SinkCapabilities c = caps({48000}, 48000, true);
-    const AudioFormat openAt = fmt(48000, 2);  // open stereo
-    const RateDecision d =
-        rm.decide(fmt(48000, 1), c, RateMode::BitPerfectWhenAvailable, openAt);
-    CHECK(d.deviceRate == 48000);             // same device rate
-    CHECK(d.needsDeviceReconfigure == true);  // but mono vs stereo: reconfigure
-    CHECK(d.keepSink == false);
-}
-
-void testGateResampleToSameDeviceRateHolds() {
-    constexpr RateManager rm;
-    // The nice gapless property: two DIFFERENT source rates that both resample to
-    // the same fixed device rate keep the sink, because the device stream config
-    // does not move. Device fixed at 48000, cannot switch.
-    const SinkCapabilities c = caps({48000}, 48000, false);
-    const AudioFormat openAt = fmt(48000);  // device stream running at 48000/2
-    const RateDecision d =
-        rm.decide(fmt(44100), c, RateMode::BitPerfectWhenAvailable, openAt);
-    CHECK(d.deviceRate == 48000);
-    CHECK(d.resampleNeeded == true);          // 44100 source resampled to 48000
-    CHECK(d.needsDeviceReconfigure == false); // device config unchanged: hold
-    CHECK(d.keepSink == true);
-}
-
-void testGateFreshStartAlwaysReconfigures() {
-    constexpr RateManager rm;
-    const RateDecision d =
-        rm.decide(fmt(48000), caps({48000}, 48000, true),
-                  RateMode::BitPerfectWhenAvailable, kClosed);
-    CHECK(d.needsDeviceReconfigure == true);  // nothing open
-    CHECK(d.keepSink == false);
 }
 
 }  // namespace
@@ -438,19 +371,13 @@ int main() {
     testFallbackSpanBoundary();
     testFallbackCannotSwitchStillStays();
     testFallbackEmptyCapabilitySetStays();
-    testFallbackGaplessAcrossSameSourceRate();
+    testFallbackRepeatsAcrossSameSourceRate();
 
     testAlwaysResampleNeverSwitchesEvenWhenSupported();
     testAlwaysResampleLuckyMatchIsBitPerfect();
 
     testForceSwitchesUnadvertisedRate();
     testForceCannotSwitchFallsBackToResample();
-
-    testGateSameDeviceRateHolds();
-    testGateDifferentDeviceRateReconfigures();
-    testGateChannelChangeReconfigures();
-    testGateResampleToSameDeviceRateHolds();
-    testGateFreshStartAlwaysReconfigures();
 
     if (g_failures == 0) {
         std::puts("RateManagerTest: all checks passed");

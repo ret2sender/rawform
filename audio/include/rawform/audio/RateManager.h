@@ -30,8 +30,7 @@
 // CoreAudioSink and PipeWireSink share this file verbatim and write no policy
 // of their own.
 //
-// The division of labor worth stating up front, because it is the source of two
-// fields that look redundant but are not:
+// The division of labor worth stating up front:
 //   - This header PREDICTS the outcome (RateDecision::resampleNeeded is the
 //     planned result of the policy: will the OS device path resample).
 //   - The sink MEASURES the outcome after open (IAudioSink::measuredDeviceRateHz:
@@ -41,6 +40,14 @@
 // for "was this really bit-perfect" and the predicted value is the authority
 // for "what did the policy choose to attempt". The Engine logs the prediction;
 // the sink logs the measurement; the Engine publishes measurement-first.
+//
+// What this policy does NOT decide: whether two consecutive tracks can share
+// one open stream. The sink's stream format is the SOURCE format (interleaved
+// float32 at the source rate and channel count), so the Engine's gapless
+// stitch and its held cut are gated on source-format identity plus an
+// unchanged rate mode, not on the device rate the two tracks resolve to. Two
+// source rates that both resample to one device rate still need two stream
+// formats, and no decision field could make them one.
 //
 // Pipeline invariant this policy serves, restated: the device follows the track
 // at its native rate (bit-perfect) whenever the device can clock that rate, and
@@ -143,14 +150,9 @@ struct SinkCapabilities {
 
 // ---------------------------------------------------------------------------
 /// The policy's output: what the device should do for one source format under one
-/// mode, given the device's capabilities and what is currently open. Trivially
-/// copyable POD, passed by value into IAudioSink::open so the sink executes it
-/// without re-deriving anything (one decider, one device read; see the Engine).
-///
-/// keepSink is exactly !needsDeviceReconfigure; both are present because the two
-/// call sites name different signals and read better for it (the Engine asks
-/// "needsDeviceReconfigure" when deciding to tear down, and asks "keepSink"
-/// when deciding to stitch). They are computed together so they cannot disagree.
+/// mode, given the device's capabilities. Trivially copyable POD, passed by
+/// value into IAudioSink::open so the sink executes it without re-deriving
+/// anything (one decider, one device read; see the Engine).
 struct RateDecision {
     std::uint32_t deviceRate = 0;  ///< the rate the device should run at after open
 
@@ -164,15 +166,6 @@ struct RateDecision {
     /// planning sense; the sink's measured device rate is the authority on the
     /// realized sense. See the file header.
     bool resampleNeeded = false;
-
-    /// The gapless gate. True when the resolved device config (deviceRate plus
-    /// the source channel count) differs from what is currently open, or when
-    /// nothing is open. The gapless path reads it to skip the teardown for a
-    /// same-config transition and stitch tracks without a boundary.
-    bool needsDeviceReconfigure = false;
-
-    /// == !needsDeviceReconfigure. The same gate, named for the stitch decision.
-    bool keepSink = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -184,15 +177,12 @@ struct RateDecision {
 class RateManager {
 public:
     /// Resolve the device action for `source` under `mode`, given `caps` (read
-    /// fresh from the sink) and `currentOpen` (the DEVICE format the engine is
-    /// transitioning from: an invalid/zeroed AudioFormat means it is transitioning
-    /// from a closed device, i.e. a fresh start). Deterministic and allocation-free
-    /// so it is trivially unit-testable as a truth table and safe to call from the
-    /// engine thread at every track boundary.
+    /// fresh from the sink). Deterministic and allocation-free, so it is
+    /// trivially unit-testable as a truth table and safe to call from the engine
+    /// thread at every track boundary.
     [[nodiscard]] RateDecision decide(const AudioFormat&      source,
                                       const SinkCapabilities& caps,
-                                      RateMode                mode,
-                                      const AudioFormat&      currentOpen) const noexcept;
+                                      RateMode                mode) const noexcept;
 };
 
 }  // namespace rawform::audio

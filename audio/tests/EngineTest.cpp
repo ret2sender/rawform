@@ -1259,17 +1259,18 @@ void testDestroyMidStream() {
 
 // ---------------------------------------------------------------------------
 // RATE SCENARIOS: the engine consults the RateManager per track and publishes the
-// decision (including the gate) to the sink. These drive the wiring end to end,
-// capabilities() -> decide() -> open(), over a mixed-rate queue, and assert the
-// decisions the engine handed down. They assert ONE decision per track, which is
-// the pre-gapless behavior, so they pin gapless OFF via NoGaplessEnvGuard: with
+// decision to the sink. These drive the wiring end to end, capabilities() ->
+// decide() -> open(), over a mixed-rate queue, and assert the decisions the
+// engine handed down. They assert ONE decision per track, which is the
+// pre-gapless behavior, so they pin gapless OFF via NoGaplessEnvGuard: with
 // gapless ON a same-source-format auto-advance would stitch (no open, no
 // decision) and change the decision count. The gapless behavior itself is
 // exercised in its own section. They are codec-free: the ramp factory fabricates
 // tracks at chosen rates and channel counts. The exhaustive policy truth table
-// lives in RateManagerTest; here the point is the ENGINE plumbing and the
-// cross-track gate, which depends on engine state (openDeviceFormat) that a pure
-// policy test cannot exercise.
+// lives in RateManagerTest; here the point is the ENGINE plumbing across
+// boundaries, including the device state a boundary leaves behind (a close
+// restores the session's rate, a retune does not), which a pure policy test
+// cannot exercise.
 // ---------------------------------------------------------------------------
 
 // Helper: build a capability set from discrete advertised rates.
@@ -1286,17 +1287,17 @@ SinkCapabilities makeCaps(std::initializer_list<std::uint32_t> rates,
 }
 
 // A fixed-rate device (cannot switch, runs at 48000) plays a mixed-rate queue.
-// Every track therefore resolves to the device's 48000 and resamples when the
-// source differs; the interesting output is the gate across the queue:
-//   t0 48000/2 : fresh start          -> reconfigure
-//   t1 44100/2 : resamples to 48000   -> HOLD (same device rate and channels)
-//   t2 88200/2 : resamples to 48000   -> HOLD
-//   t3 48000/1 : same rate, mono      -> reconfigure (channel count changed)
-// This proves the engine carries the prior device format across auto-advance and
-// that a channel change forces a reconfigure even when the rate does not move.
-// Gapless is pinned OFF so each track yields a decision (the source formats here
-// all differ consecutively, so no stitch would occur anyway, but the pin keeps
-// the test's intent explicit and robust to future rate edits).
+// Every track therefore resolves to the device's 48000 and resamples exactly
+// when the source differs:
+//   t0 48000/2 : already at rate
+//   t1 44100/2 : resamples to 48000
+//   t2 88200/2 : resamples to 48000
+//   t3 48000/1 : already at rate (mono changes nothing about the rate)
+// This proves the per-track decision plumbing (capabilities -> decide -> open)
+// runs at every boundary of an auto-advancing queue. Gapless is pinned OFF so
+// each track yields a decision (the source formats here all differ
+// consecutively, so no stitch would occur anyway, but the pin keeps the test's
+// intent explicit and robust to future rate edits).
 void testRateGateFixedDevice() {
     RampDecoderFactory factory;
     RecordingListener  listener;
@@ -1339,27 +1340,22 @@ void testRateGateFixedDevice() {
         CHECK(d[1].resampleNeeded == true);
         CHECK(d[2].resampleNeeded == true);
         CHECK(d[3].resampleNeeded == false);
-
-        // The gate: fresh start reconfigures, same-config transitions hold, the
-        // channel change reconfigures.
-        CHECK(d[0].needsDeviceReconfigure == true);
-        CHECK(d[1].keepSink == true);
-        CHECK(d[2].keepSink == true);
-        CHECK(d[3].needsDeviceReconfigure == true);
     }
     CHECK(listener.errors() == 0);
 }
 
 // A switchable device under BitPerfectWhenAvailable follows the track when the
-// rate is advertised. Because NullSink models the device following each switch,
-// a repeated rate is recognized as already-current (no redundant switch) and the
-// gate holds the sink:
-//   t0 44100 : device at 48000 -> switch to 44100, fresh start -> reconfigure
-//   t1 44100 : device now 44100 -> no switch, same config       -> HOLD
-//   t2 48000 : advertised       -> switch to 48000              -> reconfigure
+// rate is advertised. NullSink models the device following each switch AND the
+// session restore at close (this sink declines reconfigure, so every boundary
+// here is a close+open, which gives the device its 48000 back between tracks):
+//   t0 44100 : device at 48000 -> switch to 44100
+//   t1 44100 : device restored to 48000 by the boundary close -> switch again
+//   t2 48000 : device restored to 48000 -> already at rate, no switch
 // Gapless is pinned OFF: with it ON the t0 -> t1 advance (identical 44100/2
 // source format) would STITCH, producing no t1 decision and collapsing the count
 // to 2, which would defeat the per-track decision assertion this test exists for.
+// The no-redundant-switch case on a device that KEEPS its rate across a boundary
+// is testReconfigureAcceptedKeepsDeviceOpen's business.
 void testRateGateBitPerfectSwitch() {
     RampDecoderFactory factory;
     RecordingListener  listener;
@@ -1387,19 +1383,16 @@ void testRateGateBitPerfectSwitch() {
     CHECK(d.size() == 3);
     if (d.size() == 3) {
         CHECK(d[0].deviceRate == 44100);
-        CHECK(d[0].switchDevice == true);    // device was at 48000
+        CHECK(d[0].switchDevice == true);     // device was at 48000
         CHECK(d[0].resampleNeeded == false);  // bit-perfect
-        CHECK(d[0].needsDeviceReconfigure == true);  // fresh start
 
         CHECK(d[1].deviceRate == 44100);
-        CHECK(d[1].switchDevice == false);   // device already at 44100
+        CHECK(d[1].switchDevice == true);     // the boundary close restored 48000
         CHECK(d[1].resampleNeeded == false);
-        CHECK(d[1].keepSink == true);         // same device config: hold
 
         CHECK(d[2].deviceRate == 48000);
-        CHECK(d[2].switchDevice == true);
+        CHECK(d[2].switchDevice == false);    // restored to 48000: already at rate
         CHECK(d[2].resampleNeeded == false);
-        CHECK(d[2].needsDeviceReconfigure == true);  // 48000 != prior 44100
     }
     CHECK(listener.errors() == 0);
 }
@@ -1510,14 +1503,12 @@ void testReconfigureAcceptedKeepsDeviceOpen() {
     const std::vector<RateDecision> r = sinkPtr->recordedReconfigures();
     CHECK(r.size() == 2);  // one per boundary
     if (r.size() == 2) {
-        // Each boundary's decision is a genuine rate switch computed against
-        // the surviving openDeviceFormat: 44100 -> 48000, then back.
+        // Each boundary's decision is a genuine rate switch against the device
+        // the retune left behind: 44100 -> 48000, then back.
         CHECK(r[0].deviceRate == 48000);
         CHECK(r[0].switchDevice == true);
-        CHECK(r[0].needsDeviceReconfigure == true);
         CHECK(r[1].deviceRate == 44100);
         CHECK(r[1].switchDevice == true);
-        CHECK(r[1].needsDeviceReconfigure == true);
     }
 
     CHECK(sinkPtr->closeCount() == 1);          // the single final repayment at Stopped
@@ -1633,6 +1624,48 @@ void testSelectDeviceWhilePlayingReopens() {
     settle();
 }
 
+// The reopen comes back AT the listening position with ONE announcement: the
+// first frame the new device pulls is from where the user was, never from the
+// track head. Channel 0 of frame p is enc(2p), so a first pull from the head
+// would read 0.0 and a resumed one reads a value past the position the engine
+// reported before the switch. A seek-then-reopen design would also announce
+// the track once more and fire position 0 in between; one announcement total
+// per reopen is asserted here (two paths: the original start and the reopen).
+void testSelectDeviceWhilePlayingResumesAtPosition() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    sinkPtr->setDevices(twoTestDevices());
+
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    engine.enqueue("ramp:44100:2:2000000");  // long: the position keeps climbing
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    settle(200);  // well past the ring: the position is unambiguously non-zero
+    const double before = engine.position();
+    CHECK(before > 0.1);
+
+    engine.selectOutputDevice("dev-b");
+    settle();
+
+    CHECK(engine.state() == State::Playing);
+    CHECK(listener.trackPaths().size() == 2);  // the original start plus the reopen
+    CHECK(sinkPtr->startCount() == 2);
+    const float first = sinkPtr->firstPulledSample();
+    CHECK(first >= enc(static_cast<std::uint64_t>(before * 44100.0) * 2u));
+    CHECK(engine.position() >= before);  // no rewind reached the readout
+    CHECK(listener.errors() == 0);
+
+    engine.stop();
+    settle();
+}
+
 // The same boundary from Paused restores Paused.
 void testSelectDeviceWhilePausedStaysPaused() {
     RampDecoderFactory factory;
@@ -1659,6 +1692,8 @@ void testSelectDeviceWhilePausedStaysPaused() {
     CHECK(engine.state() == State::Paused);
     CHECK(sinkPtr->selectedDeviceId() == "dev-b");
     CHECK(sinkPtr->recordedDecisions().size() == 2);
+    CHECK(sinkPtr->startCount() == 1);         // the reopen came back parked: no pull
+    CHECK(listener.trackPaths().size() == 2);  // announced once by the reopen
     CHECK(listener.errors() == 0);
 
     engine.stop();
@@ -2108,6 +2143,96 @@ void testUnderrunsReported() {
     }
     CHECK(sawUnderrunLine);
     CHECK(listener.errors() == 0);  // an underrun is information, not an error
+}
+
+// The reverse flip, TO AlwaysResample, gives the device its own rate back at
+// the next boundary rather than at the next stop: A opened bit-perfect at 44100
+// on a device parked at 48000 (a switch), the mode flips mid-A, and B's
+// boundary CLOSES the device (one close before the final one) instead of
+// retuning it, so the open that follows sees the device restored to 48000 and
+// resamples B to it. The sink accepts reconfigure here on purpose: without the
+// close-first rule the boundary would be an in-place retune that leaves the
+// device at the borrowed 44100 (no reconfigure recorded here proves the rule
+// fired).
+void testAlwaysResampleFlipReleasesBorrowedRate() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    sinkPtr->setCapabilities(makeCaps({44100, 48000}, 48000, /*canSwitch=*/true));
+    sinkPtr->setReconfigureSupported(true);
+
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setRateMode(RateMode::BitPerfectWhenAvailable);
+    engine.setSink(std::move(sink));
+
+    engine.enqueue("ramp:44100:2:1048576");  // long: the flip lands before the boundary
+    engine.enqueue("ramp:44100:2:4000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+
+    engine.pause();
+    CHECK(waitForState(engine, State::Paused));
+    engine.setRateMode(RateMode::AlwaysResample);  // the flip
+    engine.play();
+
+    CHECK(waitForCompletion(engine, kPacedDrainTimeoutMs));
+    settle();
+
+    const std::vector<RateDecision> d = sinkPtr->recordedDecisions();
+    CHECK(d.size() == 2);                             // B was a fresh open, not a retune
+    CHECK(sinkPtr->recordedReconfigures().empty());
+    CHECK(sinkPtr->closeCount() == 2);                // the flip's close plus the final
+    if (d.size() == 2) {
+        CHECK(d[0].deviceRate == 44100);
+        CHECK(d[0].switchDevice == true);             // A borrowed 44100
+        CHECK(d[1].deviceRate == 48000);              // the device had its 48000 back
+        CHECK(d[1].switchDevice == false);
+        CHECK(d[1].resampleNeeded == true);           // B resamples to it
+    }
+    CHECK(listener.trackPaths().size() == 2);
+    CHECK(listener.errors() == 0);
+}
+
+// A seek inside the gapless overlap: A is shorter than the prime threshold, so
+// B is stitched during the prime and is the live decoder while A's frames are
+// still draining. A seek at that moment repositions B and must ANNOUNCE B, so
+// the UI follows the engine's own current track instead of keeping A's title
+// and duration while B plays. Both tracks are announced exactly once: A by the
+// start, B by the seek (its seam was discarded with the flush).
+void testSeekInOverlapAnnouncesIncomingTrack() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+    configure(engine, factory, listener, NullSink::Mode::Paced);
+
+    const std::string a = "ramp:44100:2:3000";     // inside the prime threshold
+    const std::string b = "ramp:44100:2:400000";   // long enough to be seeked into
+    engine.enqueue(a);
+    engine.enqueue(b);
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+
+    // At Playing, B is already the producer-logical current (stitched during the
+    // prime) and A's 3000 frames are in the ring: a seek now lands in B.
+    engine.seek(1.0);
+    settle();
+
+    const auto paths = listener.trackPaths();
+    CHECK(paths.size() == 2);
+    if (paths.size() == 2) {
+        CHECK(paths[0] == a);
+        CHECK(paths[1] == b);
+    }
+    CHECK(engine.currentTrackInfo().path == b);
+    CHECK(engine.position() >= 1.0);
+    CHECK(listener.errors() == 0);
+
+    engine.stop();
+    settle();
 }
 
 // ---------------------------------------------------------------------------
@@ -2979,6 +3104,7 @@ int main() {
     testDeviceEnumerationPushesThroughListener();
     testSelectDeviceWhileStoppedParksAndRefusesUnknown();
     testSelectDeviceWhilePlayingReopens();
+    testSelectDeviceWhilePlayingResumesAtPosition();
     testSelectDeviceWhilePausedStaysPaused();
 
     testExternalRateChangeRepublishesOutcome();
@@ -2996,6 +3122,8 @@ int main() {
     testDecoderDamageReportedAtStitch();
     testCleanTrackReportsNothing();
     testUnderrunsReported();
+    testAlwaysResampleFlipReleasesBorrowedRate();
+    testSeekInOverlapAnnouncesIncomingTrack();
 
     testGaplessStitchSameFormat();
     testGaplessNoStitchDifferentRate();

@@ -1165,7 +1165,7 @@ int runRates(const std::string& filePath, PlayRateFlag rateFlag,
         return 0;  // device-only report
     }
 
-    // Decision for a specific file, from a fresh start (invalid currentOpen).
+    // Decision for a specific file.
     DecoderFactory            factory;
     std::string               err;
     std::unique_ptr<IDecoder> dec = factory.open(filePath, &err);
@@ -1178,7 +1178,7 @@ int runRates(const std::string& filePath, PlayRateFlag rateFlag,
     const AudioFormat  fmt  = dec->format();
     const RateMode     mode = toRateMode(rateFlag);
     constexpr RateManager rm;
-    const RateDecision d    = rm.decide(fmt, caps, mode, AudioFormat{});
+    const RateDecision d    = rm.decide(fmt, caps, mode);
 
     std::printf("\nFile:         %s\n", filePath.c_str());
     std::printf("Source:       %u Hz, %u ch\n", fmt.sampleRate,
@@ -1188,7 +1188,6 @@ int runRates(const std::string& filePath, PlayRateFlag rateFlag,
     std::printf("  device rate: %u Hz\n", d.deviceRate);
     std::printf("  switch:      %s\n", d.switchDevice ? "yes" : "no");
     std::printf("  resample:    %s (predicted)\n", d.resampleNeeded ? "yes" : "no");
-    std::printf("  reconfigure: %s\n", d.needsDeviceReconfigure ? "yes" : "no");
     return 0;
 }
 

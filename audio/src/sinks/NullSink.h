@@ -45,10 +45,15 @@
 //     resolved (two separate logs) and advances the fake device's current
 //     rate to the executed device rate, so the engine's next capabilities()
 //     read reflects the rate the device now runs at, the way a real device
-//     would after a switch. reconfigure() is opt-in (setReconfigureSupported),
-//     default off, so the whole existing suite keeps exercising the engine's
-//     close+open fallback. closeCount() makes the "one open per session, one
-//     release at the final close" shape assertable.
+//     would after a switch. close() returns the fake device to the rate it had
+//     when the session opened, the way CoreAudio's ledger restore and
+//     PipeWire's force lift both do (an injected external rate change forgives
+//     that, as on the real sinks). reconfigure() is opt-in
+//     (setReconfigureSupported), default off, so the whole existing suite keeps
+//     exercising the engine's close+open fallback. closeCount() makes the "one
+//     open per session, one release at the final close" shape assertable, and
+//     startCount() / firstPulledSample() make a start, and what it pulled
+//     first, assertable.
 //   - The rate-gate tests pin gapless OFF (via RAWFORM_NO_GAPLESS), so the
 //     engine reopens at every boundary and there is one recorded decision per
 //     track; with gapless ON a same-format boundary is a stitch with no open()
@@ -142,6 +147,14 @@ public:
     /// (the final release at Stopped): the "one open per session, one
     /// repayment at the final close" ledger shape, made assertable.
     [[nodiscard]] int closeCount() const;
+
+    /// How many times start() spun the pump (a resume counts, a start on an
+    /// already-running pump does not), and the channel-0 sample of the first
+    /// frame the pump pulled after the most recent start (a negative value
+    /// until it has pulled one). Together they make "the device came back at
+    /// the kept position without playing the track head first" assertable.
+    [[nodiscard]] int   startCount() const;
+    [[nodiscard]] float firstPulledSample() const;
 
     // ----- device-list test configuration / observation -----------------------
 
@@ -247,6 +260,14 @@ private:
     bool                      m_reconfigureSupported = false;
     std::vector<RateDecision> m_reconfigures;
     int                       m_closeCount = 0;
+    int                       m_startCount = 0;
+    std::uint32_t             m_originalRate = 0;  ///< session baseline; close() restores it
+
+    /// First-pull capture: armed by start(), consumed by the pump on its first
+    /// pull with real frames. Atomics because the pump thread writes what the
+    /// test thread reads after settling.
+    std::atomic<bool>  m_captureArmed{false};
+    std::atomic<float> m_firstPulled{-1.0f};
 
     /// Device-list state, same m_mtx discipline.
     std::vector<AudioDeviceInfo> m_devices;

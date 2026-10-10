@@ -29,12 +29,11 @@
 // of the policy/mechanism split, and it is what lets RateManagerTest assert the
 // full truth table with no audio hardware in sight.
 //
-// The decision is two questions answered in order:
-//   1. What rate should the device run at, and does reaching it require a switch?
-//      This is the mode-dependent part (the truth table proper).
-//   2. Relative to what is currently open, does that amount to a device
-//      reconfigure? This is the mode-independent gapless gate, computed from the
-//      resolved device rate plus the source channel count.
+// The decision answers one question: what rate should the device run at, and
+// does reaching it require a switch? That is the mode-dependent truth table
+// below. Whether the next track can share the open stream is not asked here;
+// the Engine gates that on source-format identity (RateManager.h explains why
+// no device-rate comparison could stand in for it).
 //
 // NEAREST-BEST FALLBACK.
 // Under BitPerfectWhenAvailable the exact source rate is the goal, but
@@ -75,8 +74,8 @@
 // A fallback is never reported as bit-perfect: deviceRate differs from the
 // source rate, so resampleNeeded is true, honestly. And because the fallback is
 // a pure function of (source rate, capabilities), two consecutive tracks at the
-// same source rate resolve to the same device rate, so the keepSink gapless
-// gate keeps working across fallback transitions unchanged.
+// same source rate resolve to the same device rate, which is what lets the
+// Engine's same-source-format stitch skip the re-decision safely.
 
 #include "rawform/audio/RateManager.h"
 
@@ -183,13 +182,12 @@ std::uint32_t bestFallbackRate(std::uint32_t srcRate, const SinkCapabilities& ca
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 RateDecision RateManager::decide(const AudioFormat&      source,
                                  const SinkCapabilities& caps,
-                                 RateMode                mode,
-                                 const AudioFormat&      currentOpen) const noexcept {
+                                 RateMode                mode) const noexcept {
     const std::uint32_t srcRate = source.sampleRate;
     const std::uint32_t curRate = caps.currentRate;
 
     // -----------------------------------------------------------------------
-    // Question 1: target device rate and whether a switch is required.
+    // Target device rate and whether a switch is required.
     //
     // The default for every "do not switch" branch is to leave the device where
     // it is (deviceRate = curRate). The exception is a degenerate capabilities
@@ -262,27 +260,10 @@ RateDecision RateManager::decide(const AudioFormat&      source,
 
     // Predicted outcome: a device rate that differs from the source rate means
     // the OS path resamples (not bit-perfect, in the planning sense).
-    const bool resampleNeeded = (deviceRate != srcRate);
-
-    // -----------------------------------------------------------------------
-    // Question 2: the gapless gate. Compare the resolved device config (the chosen
-    // device rate plus the source channel count, which is what the sink's input
-    // scope carries) against what the engine is transitioning from. An invalid
-    // currentOpen means a fresh start from a closed device, which is always a
-    // reconfigure. A channel-count change is always a reconfigure too, since the
-    // device stream's channel layout cannot change underneath a running sink.
-    bool needsReconfigure = true;
-    if (currentOpen.isValid()) {
-        needsReconfigure = (currentOpen.sampleRate != deviceRate) ||
-                           (currentOpen.channels != source.channels);
-    }
-
     RateDecision d;
-    d.deviceRate             = deviceRate;
-    d.switchDevice           = switchDevice;
-    d.resampleNeeded         = resampleNeeded;
-    d.needsDeviceReconfigure = needsReconfigure;
-    d.keepSink               = !needsReconfigure;
+    d.deviceRate     = deviceRate;
+    d.switchDevice   = switchDevice;
+    d.resampleNeeded = (deviceRate != srcRate);
     return d;
 }
 

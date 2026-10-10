@@ -248,7 +248,10 @@ Item {
         // because "bit-perfect" alone does not say what happens to a rate the
         // device cannot clock. That the change lands at the next track
         // boundary (the engine reads its rate mode there) is stated here as
-        // "next track" rather than discovered by surprise.
+        // "next track" rather than discovered by surprise. Platform-neutral on
+        // purpose: the same pane serves PipeWire and CoreAudio, and "the
+        // device's own rate" is the one phrase true of both (the graph's clock
+        // on Linux, the Audio MIDI Setup rate on macOS).
         Text {
             Layout.fillWidth: true
             Layout.topMargin: 2
@@ -257,8 +260,8 @@ Item {
             font.family: pane.uiFont
             font.pixelSize: 11
             text: (pane.settings && !pane.settings.bitPerfect)
-                  ? "Off: rawform gives rate control back to the system. The device returns to the sample rate configured in Audio MIDI Setup (restoring it if a previous track had switched it) and every track is resampled to that rate. Takes effect at the next track."
-                  : "On: the device follows each track's sample rate when it can; rates beyond the hardware fall back to the nearest supported rate in the same family (192 kHz plays at 96 kHz on a 96 kHz-max device). The system-configured rate is restored on stop or quit. Takes effect at the next track."
+                  ? "Off: rawform leaves the device's sample rate alone. The device returns to its own rate (restoring one an earlier track had switched) and every track is resampled to it. Takes effect at the next track."
+                  : "On: the device follows each track's sample rate when it can; rates beyond the hardware fall back to the nearest supported rate in the same family (192 kHz plays at 96 kHz on a 96 kHz-max device). The device's own rate is restored when playback stops or rawform quits. Takes effect at the next track."
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
