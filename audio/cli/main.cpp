@@ -76,6 +76,7 @@
 #include <atomic>
 #include <chrono>
 #include <signal.h>  // NOLINT: sigaction/SA_RESTART are POSIX, not in <csignal>
+#include <stdlib.h>  // setenv is POSIX, not in <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <thread>

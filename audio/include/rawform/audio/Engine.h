@@ -43,8 +43,20 @@
 //
 // Lifetime: ~Engine() shuts the engine thread down, and that thread closes the
 // sink (joining the RT thread) BEFORE any buffer it reads is destroyed, so the
-// IAudioSink lifetime invariant holds without the caller ordering anything. See
-// the teardown note in the .cpp.
+// IAudioSink lifetime invariant holds without the caller ordering anything.
+// The sink object itself is then detached from the engine's event and log
+// channels and destroyed while the engine's command queue is still alive, so a
+// platform thread's last event can never land on a dead queue. See the
+// teardown note in the .cpp.
+//
+// Output failures. A session can end from the sink's side: the device vanishes,
+// the stream errors, the daemon goes away, or the consumer simply stops
+// pulling. The engine learns of the first three through
+// ISinkEventListener::onOutputFailed and of the last through its own stall
+// watchdog (frames in the ring, nothing consumed for RAWFORM_OUTPUT_STALL_MS,
+// default 10 s, 0 disables); either way it tears the session down, settles in
+// Stopped, reports through onError, and keeps the current track remembered so
+// play() retries. A sink whose start() fails is handled the same way.
 //
 // What the surface is, and is not. It carries everything the controller needs
 // to wrap the engine: the transport commands including the playNow/setQueue

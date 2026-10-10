@@ -66,18 +66,21 @@
 // Engine drives the reopen that makes a change audible. The event channel
 // (ISinkEventListener) is how a sink reports the world changing underneath a
 // session: an external rate assertion, a default-device change, a device-list
-// change, a ledger change. The defaults for all of these are honest no-ops, so
-// a sink with no device concept (NullSink's discard path) is a complete
+// change, a ledger change, and the one event that ends a session from the
+// sink's side, an output failure (the device vanished, the stream errored, the
+// daemon went away). The defaults for all of these are honest no-ops, so a
+// sink with no device concept (NullSink's discard path) is a complete
 // IAudioSink without overriding them.
 //
 // Lifetime invariant, the reason the sink can hold the source non-owning:
 //   stop()/close() MUST guarantee the real-time thread has finished and will
 //   not call pull() again BEFORE the IPullSource and the buffer it reads are
 //   destroyed. CoreAudio gives that through the synchronous
-//   AudioOutputUnitStop; PipeWire gives it by disarming the pull under the
-//   thread-loop lock, which excludes the process callback; NullSink joins its
-//   thread. Callers therefore order teardown as: stop()/close() the sink
-//   first, then destroy the source.
+//   AudioOutputUnitStop; PipeWire gives it through pw_stream_set_active(false),
+//   whose deactivation runs as blocking invokes on the stream's data thread and
+//   therefore returns only once no process callback is in flight or can
+//   follow; NullSink joins its thread. Callers therefore order teardown as:
+//   stop()/close() the sink first, then destroy the source.
 
 #pragma once
 
@@ -146,6 +149,13 @@ struct IPullSource {
 ///   - onRateDebtChanged: the restore ledger changed; the engine forwards it
 ///     for persistence (crash recovery). All-zero arguments mean cleared.
 ///     Sinks whose repayment is structural (PipeWire) never emit it.
+///   - onOutputFailed: the open session cannot continue: the bound or pinned
+///     device disappeared, the stream entered an error state, or the daemon
+///     connection was lost. `reason` is a short human-readable phrase the
+///     engine prepends to its error. Emitted only while the sink is open and
+///     never for the sink's own stop()/close() transitions; the engine treats
+///     it as the end of the listening session (teardown, Stopped, onError),
+///     and tolerates duplicates and late arrivals racing its own close.
 struct ISinkEventListener {
     virtual ~ISinkEventListener() = default;
     virtual void onExternalRateChanged(std::uint32_t /*newRateHz*/) {}
@@ -154,6 +164,7 @@ struct ISinkEventListener {
     virtual void onRateDebtChanged(const std::string& /*deviceId*/,
                                    std::uint32_t /*originalRateHz*/,
                                    std::uint32_t /*borrowedRateHz*/) {}
+    virtual void onOutputFailed(const std::string& /*reason*/) {}
 };
 
 /// A platform output device, configured for one interleaved float32 stream.
@@ -257,7 +268,13 @@ public:
     }
 
     /// Begin pulling: the real-time thread starts and pull() is called from it.
-    virtual void start() = 0;
+    /// Returns true once pulling is under way (or already was); false when the
+    /// platform refused to start the real-time thread, in which case the sink
+    /// is left open and parked (nothing pulls) and close() must cope, exactly
+    /// as after a declined reconfigure(). The Engine treats false like a failed
+    /// open(): it ends the session rather than report Playing on a silent
+    /// device. Not started when not open; that also returns false.
+    [[nodiscard]] virtual bool start() = 0;
 
     /// Stop pulling and JOIN the real-time thread before returning, so no pull()
     /// is in flight or will follow. This is the synchronization point the

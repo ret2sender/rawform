@@ -44,6 +44,10 @@
 //     fireExternalRateChanged moves the fake device before reporting, so the
 //     observable state matches a real sink's forgiven-ledger state at the
 //     moment it emits.
+//   - The failure shapes: a refused start() leaves the sink open and parked
+//     (what the contract calls close()-tolerant), and a stall keeps the pump
+//     thread alive but idle so stop() still has a thread to join, exactly as a
+//     real device that stopped calling back would.
 
 #include "sinks/NullSink.h"
 
@@ -111,6 +115,7 @@ bool NullSink::open(const AudioFormat& sourceFormat, const RateDecision& decisio
     }
     m_format = sourceFormat;
     m_source = source;
+    m_pulledThisOpen.store(0, std::memory_order_relaxed);  // fresh stall budget per open
     // Discard buffer for one block of interleaved float32 at the source shape.
     m_scratch.assign(
         m_blockFrames * static_cast<std::size_t>(sourceFormat.channels), 0.0f);
@@ -271,12 +276,41 @@ void NullSink::fireRateDebtChanged(const std::string& deviceId,
     }
 }
 
+void NullSink::fireOutputFailed(const std::string& reason) {
+    ISinkEventListener* l = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        l = m_events;
+    }
+    if (l != nullptr) {
+        l->onOutputFailed(reason);
+    }
+}
+
 // ---------------------------------------------------------------------------
-void NullSink::start() {
-    if (m_opened && !m_running.load(std::memory_order_relaxed)) {
+// Failure shapes. Both are test knobs set from the test thread between
+// settled transport commands, like the other configuration setters.
+void NullSink::setStartFails(bool on) {
+    m_startFails = on;
+}
+
+void NullSink::setStallAfterFrames(std::uint64_t frames) {
+    m_stallAfterFrames.store(frames, std::memory_order_relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// start() reports the contract's verdict: false when not open, false when the
+// test asked the "platform" to refuse (the sink stays open and parked, nothing
+// pulls), true otherwise, including when already running.
+bool NullSink::start() {
+    if (!m_opened || m_startFails) {
+        return false;
+    }
+    if (!m_running.load(std::memory_order_relaxed)) {
         m_running.store(true, std::memory_order_release);
         m_thread = std::thread(&NullSink::pumpLoop, this);
     }
+    return true;
 }
 
 // stop() flips running and JOINS the pull thread, so no pull() follows. Safe to
@@ -308,13 +342,20 @@ AudioFormat NullSink::currentFormat() const {
 // or naps a small fixed interval (Paced). The nap is intentionally NOT tied to
 // the sample rate: the transport soak cares about correctness and concurrency, not
 // realtime cadence, so a coarse fixed nap keeps tests fast while still letting
-// the producer's full-ring path engage.
+// the producer's full-ring path engage. Past a configured stall budget the loop
+// keeps spinning on its nap without pulling: the thread stays joinable, the
+// ring stays full, the consumed counter freezes.
 void NullSink::pumpLoop() {
     while (m_running.load(std::memory_order_acquire)) {
-        if (m_source != nullptr) {
-            m_source->pull(m_scratch.data(), m_blockFrames);
+        const std::uint64_t budget = m_stallAfterFrames.load(std::memory_order_relaxed);
+        const bool stalled =
+            budget != 0 && m_pulledThisOpen.load(std::memory_order_relaxed) >= budget;
+        if (m_source != nullptr && !stalled) {
+            const std::size_t got = m_source->pull(m_scratch.data(), m_blockFrames);
+            m_pulledThisOpen.fetch_add(static_cast<std::uint64_t>(got),
+                                       std::memory_order_relaxed);
         }
-        if (m_mode == Mode::Paced) {
+        if (m_mode == Mode::Paced || stalled) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         } else {
             std::this_thread::yield();

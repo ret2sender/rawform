@@ -61,7 +61,13 @@
 //     injectors emit each ISinkEventListener event from the CALLING thread,
 //     proving the engine's any-thread enqueue contract under TSan. An injected
 //     external rate change moves the fake device first, so the sink is in the
-//     same forgiven state a real one is in when it reports.
+//     same forgiven state a real one is in when it reports; an injected output
+//     failure models a device that died underneath an open session.
+//   - Failure shapes: setStartFails() makes start() refuse (the platform would
+//     not start the RT thread), and setStallAfterFrames() makes the pump thread
+//     stop pulling after that many frames while staying alive (a device that
+//     silently stops calling back), so the engine's start-failure path and its
+//     stall watchdog are both reachable without hardware.
 // The logs are mutex-guarded because the engine thread writes them while the
 // test thread reads after the run settles.
 //
@@ -161,15 +167,32 @@ public:
     void fireRateDebtChanged(const std::string& deviceId,
                              std::uint32_t originalRateHz,
                              std::uint32_t borrowedRateHz);
+    void fireOutputFailed(const std::string& reason);
+
+    // ----- failure-shape test configuration -----------------------------------
+
+    /// Make every start() return false (the platform refused to start the RT
+    /// thread) while leaving the sink open and parked, the contract's degraded
+    /// shape. Call before injecting the sink, or between transport commands
+    /// after settling; read on the engine thread only.
+    void setStartFails(bool on);
+
+    /// Make the pump thread stop pulling once it has consumed `frames` frames in
+    /// the current open, while the thread itself keeps running: the consumed
+    /// counter freezes with data still in the ring, which is exactly what the
+    /// engine's stall watchdog must detect. 0 (the default) never stalls. Reset
+    /// per open(); same call discipline as setStartFails.
+    void setStallAfterFrames(std::uint64_t frames);
 
     // ----- IAudioSink ---------------------------------------------------------
     /// capabilities() returns the configured set. open() sizes the discard scratch
     /// from the source format, records the decision, and attaches the source;
-    /// start() spins the pull thread; stop() JOINS it (the lifetime
-    /// synchronization point); close() releases. currentFormat() echoes open()'s
-    /// source format. The decision is recorded for assertion and the simulated
-    /// device's currentRate follows its executed rate; nothing else about the
-    /// discard path changes, since there is no real device behind it.
+    /// start() spins the pull thread and reports true (false when not open, or
+    /// when setStartFails is on); stop() JOINS it (the lifetime synchronization
+    /// point); close() releases. currentFormat() echoes open()'s source format.
+    /// The decision is recorded for assertion and the simulated device's
+    /// currentRate follows its executed rate; nothing else about the discard
+    /// path changes, since there is no real device behind it.
     [[nodiscard]] SinkCapabilities capabilities() const override;
     bool             open(const AudioFormat&  sourceFormat,
                           const RateDecision& decision,
@@ -187,9 +210,9 @@ public:
     [[nodiscard]] std::vector<AudioDeviceInfo> enumerateDevices() const override;
     bool                         selectDevice(const std::string& deviceId) override;
     void                         setEventListener(ISinkEventListener* listener) override;
-    void             start() override;
-    void             stop()  override;
-    void             close() override;
+    [[nodiscard]] bool start() override;
+    void               stop()  override;
+    void               close() override;
     [[nodiscard]] AudioFormat currentFormat() const override;
     /// Models a measuring device: the capability model's currentRate,
     /// which open()/reconfigure() move to each executed switch, IS the measured
@@ -235,6 +258,15 @@ private:
     /// themselves run outside the lock (the listener enqueues, never
     /// re-enters).
     ISinkEventListener*          m_events = nullptr;
+
+    /// Failure shapes. m_startFails is engine-thread-only after injection (a
+    /// plain bool, like m_reconfigureSupported). The stall budget is read by
+    /// the pump thread every block, so it is atomic: m_stallAfterFrames is the
+    /// configured budget (0 == never) and m_pulledThisOpen the pump's running
+    /// count, reset by open().
+    bool                       m_startFails = false;
+    std::atomic<std::uint64_t> m_stallAfterFrames{0};
+    std::atomic<std::uint64_t> m_pulledThisOpen{0};
 };
 
 }  // namespace rawform::audio

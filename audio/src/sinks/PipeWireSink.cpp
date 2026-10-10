@@ -27,12 +27,13 @@
 //
 // The shape of a PipeWire client, for the record and the next reader:
 //   - pw_thread_loop: a loop plus its own thread. All PipeWire objects created
-//     on it must be touched with the loop LOCK held from any other thread, and
-//     the stream's process callback runs on the loop thread. The lock is a real
-//     mutex the loop thread holds while dispatching, so holding it from the
-//     engine thread excludes callbacks entirely; pw_thread_loop_wait/timed_wait
-//     release it while waiting, which is what makes waiting for an event from
-//     inside a locked section work.
+//     on it must be touched with the loop LOCK held from any other thread; the
+//     registry, metadata, core and stream-state callbacks run on the loop
+//     thread with the lock held. The lock is a real mutex the loop thread holds
+//     while dispatching, so holding it from the engine thread excludes those
+//     callbacks; pw_thread_loop_wait/timed_wait release it while waiting, which
+//     is what makes waiting for an event from inside a locked section work. The
+//     process callback is the exception: see the join paragraph at the end.
 //   - pw_context / pw_core: the daemon connection. Constructed once here and
 //     held for the sink's whole life.
 //   - pw_registry + settings metadata: the graph publishes its clock settings
@@ -94,13 +95,34 @@
 // format diverging from or re-converging with the graph clock); it never
 // emits onDefaultDeviceChanged or onRateDebtChanged, for the reasons above.
 //
-// The join guarantee stop() gives (the IAudioSink lifetime invariant): stop()
-// takes the thread-loop lock, disarms the pull flag, deactivates the stream,
-// and unlocks. Taking the lock excludes the loop thread from being mid-process;
-// the flag flip therefore happens-before any subsequent process invocation,
-// which observes armed == false and writes silence without touching the source.
-// Combined with close() destroying the stream under the same lock before the
-// engine resets the ring, no pull() ever reaches a dead source or buffer.
+// Output failure: the sink tells the engine when an open session cannot go
+// on, through ISinkEventListener::onOutputFailed, from three places: the
+// stream state machine entering ERROR or dropping to UNCONNECTED while open
+// (a daemon or driver problem), a core error naming a closed connection (the
+// daemon went away; the sink then refuses every open until a new sink is
+// constructed, since the core cannot be reconnected in place), and the
+// registry removing the node the pinned stream was opened on (the session
+// manager would migrate the stream to another device, which a pin forbids).
+// The sink's own stop()/close() transitions never emit: close() raises a flag
+// before disconnecting, and the handlers check it. One emission per open.
+//
+// The join guarantee stop() gives (the IAudioSink lifetime invariant). The
+// stream is connected with RT_PROCESS, so the process callback runs on the
+// stream's DATA thread, which never takes the thread-loop lock; holding that
+// lock therefore does not exclude a process invocation in flight. The join is
+// pw_stream_set_active(false) itself: deactivation removes the node from the
+// graph through blocking invokes executed on the data thread
+// (do_node_unprepare, then do_stop_drain), each of which serializes with any
+// process callback that was running, so when set_active returns no pull() is
+// in flight and none will follow until the next activation. The armed flag is
+// the second half: stored with release before the deactivation and loaded
+// with acquire in process, so a cycle that does run after a start() observes
+// the flag coherently, and a disarmed cycle writes silence without touching
+// the source. This is a verified implementation property of the 1.x line
+// (the invokes were already blocking in 0.3), not a documented API promise;
+// if it ever changed, this paragraph is where the dependency is written down.
+// Combined with close() destroying the stream under the lock before the engine
+// resets the ring, no pull() ever reaches a dead source or buffer.
 
 #include "sinks/PipeWireSink.h"
 
@@ -270,9 +292,24 @@ struct PipeWireSinkImpl {
     std::uint32_t   driverCertRate     = 0;
     std::atomic<std::uint32_t> driverFormatRate{0};
 
-    // armed gates the pull in process (the stop() join mechanism; see the file
-    // header). Written under the loop lock, read on the loop thread.
+    // armed gates the pull in process. Release-stored by start()/stop() on the
+    // engine thread, acquire-loaded by process on the data thread; the join
+    // itself is set_active(false), see the file header.
     std::atomic<bool> armed{false};
+
+    // Output-failure bookkeeping. closing is raised by close() before the
+    // stream is disconnected so the state_changed the disconnect emits is not
+    // mistaken for a failure; failureReported makes the several emission paths
+    // (stream state, core error, registry removal) report once per open.
+    // Both loop-lock-guarded like the rest of the plain state. daemonLost is
+    // the connection's death certificate: set on the loop thread by the core
+    // error handler, read lockless by capabilities()/open() on the engine
+    // thread so they refuse at once instead of timing out. Distinct from
+    // `connected`, which keeps meaning "constructed successfully" so the
+    // destructor still tears the session objects down.
+    bool              closing         = false;
+    bool              failureReported = false;
+    std::atomic<bool> daemonLost{false};
 
     bool        opened  = false;
     bool        started = false;
@@ -320,6 +357,23 @@ std::uint32_t parseRate(const char* value) {
 void disarmDriverFormatWatchLocked(PipeWireSinkImpl* impl);
 bool armDriverFormatWatchLocked(PipeWireSinkImpl* impl);
 
+// The one funnel for onOutputFailed. Loop lock held (every caller is a
+// dispatch handler). Emits only for an open session that is not being closed
+// by the engine itself, and once per open; the engine side tolerates
+// duplicates regardless, this keeps the console honest. stderr for the
+// breadcrumb: the logger is an engine-thread facility and this is not the
+// engine thread.
+void emitOutputFailedLocked(PipeWireSinkImpl* impl, const char* reason) {
+    if (!impl->opened || impl->closing || impl->failureReported) {
+        return;
+    }
+    impl->failureReported = true;
+    std::fprintf(stderr, "PipeWireSink: output failed: %s\n", reason);
+    if (impl->events != nullptr) {
+        impl->events->onOutputFailed(std::string(reason));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Core events: done drives the sync rendezvous every metadata round trip uses;
 // error is logged as a breadcrumb (stderr only: this callback has no reliable
@@ -358,6 +412,15 @@ void onCoreError(void* data, std::uint32_t id, int seq, int res,
     }
     std::fprintf(stderr, "PipeWireSink: core error id %u seq %d res %d: %s\n",
                  id, seq, res, message != nullptr ? message : "(null)");
+    // A closed connection on the core object itself is the daemon going away
+    // (a restart, a crash): the stream is dead with it, and so is every proxy
+    // this sink holds. Mark the connection lost so the engine-thread entry
+    // points refuse immediately, and end the open session if there is one.
+    if (impl != nullptr && id == PW_ID_CORE && (res == -EPIPE || res == -ECONNRESET)) {
+        impl->daemonLost.store(true, std::memory_order_release);
+        emitOutputFailedLocked(impl,
+                               "PipeWire connection lost (restart rawform to reconnect)");
+    }
 }
 
 // Event-table construction pattern, used for all four tables in this file:
@@ -582,6 +645,18 @@ void onRegistryGlobalRemove(void* data, std::uint32_t id) {
     }
     for (std::size_t i = 0; i < impl->sinkNodes.size(); ++i) {
         if (impl->sinkNodes[i].id == id) {
+            // The pinned device the open stream targets just left the graph.
+            // The session manager would now migrate the stream to the default
+            // sink, which is exactly what a pin forbids ("never silently play
+            // elsewhere"); report the failure and let the engine end the
+            // session. An unpinned stream is migrated by design and reports
+            // nothing here.
+            if (!impl->openTargetName.empty() &&
+                impl->sinkNodes[i].name == impl->openTargetName) {
+                const std::string reason =
+                    "output device '" + impl->sinkNodes[i].description + "' disconnected";
+                emitOutputFailedLocked(impl, reason.c_str());
+            }
             impl->sinkNodes.erase(impl->sinkNodes.begin() +
                                   static_cast<std::ptrdiff_t>(i));
             if (impl->events != nullptr) {
@@ -590,9 +665,8 @@ void onRegistryGlobalRemove(void* data, std::uint32_t id) {
             return;
         }
     }
-    // Metadata removal (a daemon restart mid-session) is outside this sink's
-    // recovery scope: the stream is gone with the daemon, and the session ends
-    // through the engine's error path rather than a rebind.
+    // Metadata removal (a daemon restart mid-session) needs no handling of its
+    // own: the core error that accompanies it reports the lost connection.
 }
 
 struct pw_registry_events makeRegistryEvents() {
@@ -940,6 +1014,14 @@ void onStreamStateChanged(void* data, enum pw_stream_state /*old*/,
     if (state == PW_STREAM_STATE_ERROR) {
         std::fprintf(stderr, "PipeWireSink: stream error: %s\n",
                      error != nullptr ? error : "(null)");
+        // During open() the negotiation wait reads the state itself and fails
+        // the open; once open, an error ends the session through the engine.
+        emitOutputFailedLocked(impl, "PipeWire stream error");
+    } else if (state == PW_STREAM_STATE_UNCONNECTED) {
+        // An open stream only returns to UNCONNECTED when something other than
+        // our own close() disconnected it (the funnel's closing check keeps our
+        // disconnect quiet): the daemon dropped it.
+        emitOutputFailedLocked(impl, "PipeWire stream disconnected");
     }
     pw_thread_loop_signal(impl->loop, false);
 }
@@ -1010,7 +1092,7 @@ void onStreamProcess(void* data) {
     }
 
     std::size_t got = 0;
-    if (impl->armed.load(std::memory_order_relaxed) && impl->source != nullptr) {
+    if (impl->armed.load(std::memory_order_acquire) && impl->source != nullptr) {
         got = impl->source->pull(out, frames);
     }
     if (got < frames) {
@@ -1260,8 +1342,10 @@ PipeWireSink::~PipeWireSink() {
 // interpretation.
 SinkCapabilities PipeWireSink::capabilities() const {
     SinkCapabilities caps;
-    if (!m_impl->connected) {
-        caps.deviceName    = "PipeWire unavailable (no daemon connection)";
+    if (!m_impl->connected || m_impl->daemonLost.load(std::memory_order_acquire)) {
+        caps.deviceName    = m_impl->connected
+                                 ? "PipeWire connection lost (restart rawform to reconnect)"
+                                 : "PipeWire unavailable (no daemon connection)";
         caps.currentRate   = 0;
         caps.canSwitchRate = false;
         return caps;
@@ -1430,6 +1514,14 @@ bool PipeWireSink::open(const AudioFormat& sourceFormat,
                 "PipeWireSink: open() refused, no daemon connection");
         return false;
     }
+    if (m_impl->daemonLost.load(std::memory_order_acquire)) {
+        // The core died under a previous session; a connect attempt would only
+        // wait out the negotiation timeout. Refuse at once with the reason.
+        sinkLog(m_impl->logOut,
+                "PipeWireSink: open() refused, PipeWire connection lost "
+                "(restart rawform to reconnect)");
+        return false;
+    }
     if (m_impl->opened) {
         close();
     }
@@ -1449,6 +1541,8 @@ bool PipeWireSink::open(const AudioFormat& sourceFormat,
     // rate, interposes its resampler; either way the process callback sees
     // interleaved float32 at the source rate, the engine's canonical format.
     pw_thread_loop_lock(m_impl->loop);
+    m_impl->closing         = false;  // a fresh open gets a fresh failure budget
+    m_impl->failureReported = false;
 
     struct pw_properties* props = pw_properties_new(
         PW_KEY_MEDIA_TYPE,     "Audio",
@@ -1744,10 +1838,11 @@ bool PipeWireSink::reconfigure(const AudioFormat& sourceFormat,
     m_impl->forcedThisOpen = forcing;
     m_impl->forcedRate     = forcing ? decision.deviceRate : 0;
 
-    // 3. Commit the working format under the lock (the loop thread is
-    // excluded, so the disarmed process callback's stride math never sees a
-    // torn update), then reactivate DISARMED so the renegotiation and the
-    // reclock actually happen.
+    // 3. Commit the working format, then reactivate DISARMED so the
+    // renegotiation and the reclock actually happen. The write is race-free
+    // because the stream is INACTIVE here (stop() deactivated it, which joined
+    // the data thread): no process callback can read the stride while it
+    // changes, and the activation below publishes it.
     m_impl->working  = sourceFormat;
     m_impl->channels = static_cast<std::size_t>(sourceFormat.channels);
     pw_stream_set_active(m_impl->stream, true);
@@ -1840,36 +1935,42 @@ bool PipeWireSink::reconfigure(const AudioFormat& sourceFormat,
 }
 
 // ---------------------------------------------------------------------------
-void PipeWireSink::start() {
-    if (m_impl->opened && !m_impl->started) {
-        // The stream is already live from open() (see the file header), so the
-        // arming is the real event here: the next process cycle pulls the
-        // source instead of writing silence. set_active is a no-op on the
-        // first start and the genuine reactivation on resume after a pause
-        // (stop() deactivates).
-        pw_thread_loop_lock(m_impl->loop);
-        m_impl->armed.store(true, std::memory_order_relaxed);
-        const int res = pw_stream_set_active(m_impl->stream, true);
-        pw_thread_loop_unlock(m_impl->loop);
-        if (res < 0) {
-            sinkLog(m_impl->logOut,
-                    "PipeWireSink: pw_stream_set_active(true) failed (%d)", res);
-            m_impl->armed.store(false, std::memory_order_relaxed);
-            return;
-        }
-        m_impl->started = true;
+bool PipeWireSink::start() {
+    if (!m_impl->opened) {
+        return false;
     }
+    if (m_impl->started) {
+        return true;
+    }
+    // The stream is already live from open() (see the file header), so the
+    // arming is the real event here: the next process cycle pulls the source
+    // instead of writing silence. set_active is a no-op on the first start and
+    // the genuine reactivation on resume after a pause (stop() deactivates).
+    // The arm is release-stored before the activation so a cycle the
+    // activation schedules acquires it.
+    pw_thread_loop_lock(m_impl->loop);
+    m_impl->armed.store(true, std::memory_order_release);
+    const int res = pw_stream_set_active(m_impl->stream, true);
+    pw_thread_loop_unlock(m_impl->loop);
+    if (res < 0) {
+        sinkLog(m_impl->logOut,
+                "PipeWireSink: pw_stream_set_active(true) failed (%d)", res);
+        m_impl->armed.store(false, std::memory_order_release);
+        return false;  // open and parked; the engine ends the session
+    }
+    m_impl->started = true;
+    return true;
 }
 
 void PipeWireSink::stop() {
     if (m_impl->started) {
-        // The join guarantee (file header): taking the loop lock excludes the
-        // loop thread from being mid-process, so the disarm below
-        // happens-before every subsequent process invocation, which then
-        // writes silence and never touches the source. Deactivation parks the
-        // stream; any straggling process during suspension is disarmed.
+        // The join (file header): disarm, then deactivate. set_active(false)
+        // returns only once the data thread has run the deactivation invokes,
+        // so no process callback is mid-pull when this returns and none runs
+        // until the next start(); a cycle that was already queued before the
+        // deactivation landed sees armed == false and writes silence.
         pw_thread_loop_lock(m_impl->loop);
-        m_impl->armed.store(false, std::memory_order_relaxed);
+        m_impl->armed.store(false, std::memory_order_release);
         const int res = pw_stream_set_active(m_impl->stream, false);
         pw_thread_loop_unlock(m_impl->loop);
         if (res < 0) {
@@ -1884,6 +1985,9 @@ void PipeWireSink::close() {
     stop();
     if (m_impl->stream != nullptr) {
         pw_thread_loop_lock(m_impl->loop);
+        // Our own disconnect emits state_changed(UNCONNECTED) synchronously
+        // on this thread; the flag keeps the failure funnel quiet for it.
+        m_impl->closing = true;
         // The watch dies with the open it verified; disarming first
         // also zeroes driverFormatRate so a later open is never judged
         // against this device's final format.
@@ -1907,8 +2011,9 @@ void PipeWireSink::close() {
         m_impl->forcedThisOpen = false;
         m_impl->forcedRate     = 0;
     }
-    m_impl->opened = false;
-    m_impl->source = nullptr;
+    m_impl->opened  = false;
+    m_impl->closing = false;
+    m_impl->source  = nullptr;
     m_impl->measuredRate.store(0, std::memory_order_relaxed);
 }
 

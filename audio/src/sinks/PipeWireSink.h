@@ -39,14 +39,20 @@
 // name a private nested type without a friend dance.
 //
 // Threading model, mapped onto the IAudioSink contract:
-//   - The pw_thread_loop owns the loop thread; the stream's process callback
-//     runs there and is the real-time consumer that calls IPullSource::pull().
+//   - The pw_thread_loop owns the loop thread, where the registry, metadata,
+//     and stream state callbacks run. The stream's process callback is the
+//     real-time consumer that calls IPullSource::pull(); connected with
+//     RT_PROCESS it runs on the stream's data thread, NOT the loop thread, and
+//     never takes the loop lock.
 //   - Every engine-thread entry point below (capabilities/enumerateDevices/
 //     selectDevice/open/reconfigure/start/stop/close) takes the thread-loop
-//     lock around PipeWire calls, which is the library's own required
-//     discipline AND the join guarantee stop() needs: holding the lock excludes
-//     the loop thread from any callback, so a flag flipped under it is observed
-//     by every subsequent process invocation.
+//     lock around PipeWire calls, the library's required discipline for every
+//     object created on the loop. The join guarantee stop() gives is a
+//     different mechanism: pw_stream_set_active(false) deactivates the node
+//     through blocking invokes on the data thread, so it returns only once no
+//     process callback is in flight or can follow (see the .cpp header).
+//   - The sink reports an output failure (device gone, stream error, daemon
+//     connection lost) through the event channel; the engine ends the session.
 //
 // The rate model: this sink can MOVE the graph. capabilities() resolves the
 // target sink node (the pinned one, else the session manager's default,
@@ -141,7 +147,12 @@ public:
     /// and a target-node driver format diverging from or re-
     /// converging with the graph clock, the last-mile verification);
     /// deliberately never onDefaultDeviceChanged (the session manager migrates
-    /// live streams itself) nor onRateDebtChanged (repayment is structural).
+    /// live streams itself) nor onRateDebtChanged (repayment is structural);
+    /// and onOutputFailed when an open session cannot continue: the pinned
+    /// node left the graph, the stream entered ERROR or lost its connection,
+    /// or the daemon connection itself died (after which capabilities() and
+    /// open() refuse at once instead of waiting out a negotiation timeout;
+    /// reconnecting means constructing a new sink).
     void                         setEventListener(ISinkEventListener* listener) override;
     bool             open(const AudioFormat&  sourceFormat,
                           const RateDecision& decision,
@@ -158,7 +169,10 @@ public:
     /// stream close.
     bool reconfigure(const AudioFormat&  sourceFormat,
                      const RateDecision& decision) override;
-    void start() override;
+    /// start() arms the pull and (re)activates the stream; false when the
+    /// activation call failed, the sink then left open and parked. stop()
+    /// disarms and deactivates, which is the RT join (see the .cpp header).
+    [[nodiscard]] bool start() override;
     void stop()  override;
     void close() override;
     [[nodiscard]] AudioFormat currentFormat() const override;

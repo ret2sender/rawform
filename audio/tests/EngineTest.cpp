@@ -49,8 +49,9 @@
 // selection with the reopen-at-position boundary, the sink event channel
 // (NullSink's fire* injectors call the engine from the test thread), the mode
 // gates that void the same-format fast paths after a rate-mode flip, the
-// device-outcome observers and the info-forwarding chain, and the
-// playNow/setQueue primitives with the device-unavailable and seek-rejected
+// device-outcome observers and the info-forwarding chain, the output-failure
+// paths (a sink-reported failure, a refused start(), the stall watchdog), and
+// the playNow/setQueue primitives with the device-unavailable and seek-rejected
 // hardening paths.
 //
 // Build with -DRAWFORM_SANITIZE=thread and run through ctest. The state and
@@ -328,12 +329,16 @@ public:
         return true;
     }
 
-    void start() override {
-        if (m_opened && !m_running.load(std::memory_order_relaxed)) {
+    bool start() override {
+        if (!m_opened) {
+            return false;
+        }
+        if (!m_running.load(std::memory_order_relaxed)) {
             m_armed.store(true, std::memory_order_release);  // capture the next pull
             m_running.store(true, std::memory_order_release);
             m_thread = std::thread(&CapturingSink::pumpLoop, this);
         }
+        return true;
     }
 
     void stop() override {
@@ -458,11 +463,15 @@ public:
         return true;
     }
 
-    void start() override {
-        if (m_opened && !m_running.load(std::memory_order_relaxed)) {
+    bool start() override {
+        if (!m_opened) {
+            return false;
+        }
+        if (!m_running.load(std::memory_order_relaxed)) {
             m_running.store(true, std::memory_order_release);
             m_thread = std::thread(&RecordingSink::pumpLoop, this);
         }
+        return true;
     }
 
     void stop() override {
@@ -547,7 +556,7 @@ public:
     bool open(const AudioFormat&, const RateDecision&, IPullSource*) override {
         return false;  // device unavailable: the engine must treat this as a start failure
     }
-    void        start() override {}
+    bool        start() override { return false; }  // never open, so never started
     void        stop()  override {}
     void        close() override {}
     [[nodiscard]] AudioFormat currentFormat() const override { return AudioFormat{}; }
@@ -727,6 +736,17 @@ void configure(Engine& engine, RampDecoderFactory& factory,
 struct NoGaplessEnvGuard {
     NoGaplessEnvGuard()  { ::setenv("RAWFORM_NO_GAPLESS", "1", 1); }
     ~NoGaplessEnvGuard() { ::unsetenv("RAWFORM_NO_GAPLESS"); }
+};
+
+// Scoped knob for the output stall watchdog threshold (RAWFORM_OUTPUT_STALL_MS),
+// read by the Engine constructor exactly like the gapless switch. The default
+// threshold is ten seconds, far too long for a unit test; the stall scenarios
+// shorten it, and the "0 disables" scenario proves the off switch.
+struct StallMsEnvGuard {
+    explicit StallMsEnvGuard(const char* ms) {
+        ::setenv("RAWFORM_OUTPUT_STALL_MS", ms, 1);
+    }
+    ~StallMsEnvGuard() { ::unsetenv("RAWFORM_OUTPUT_STALL_MS"); }
 };
 
 // ---------------------------------------------------------------------------
@@ -1739,6 +1759,186 @@ void testDeviceListAndDebtEventsRelay() {
 }
 
 // ---------------------------------------------------------------------------
+// OUTPUT FAILURE SCENARIOS: the session ending from the sink's side. Three
+// shapes, all ending in the same place (onError, Stopped, the device released,
+// the track remembered so a play() retries): a sink-reported failure through
+// onOutputFailed (NullSink's injector, fired from the test thread like the
+// other events), a start() that returns false (fresh open and resume), and the
+// engine's own stall watchdog catching a consumer that stopped pulling.
+// ---------------------------------------------------------------------------
+
+// A reported failure mid-track: one error, Stopped, the device closed exactly
+// once, the pending queue untouched, and the current track replayable.
+void testOutputFailedEventStopsAndRetries() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    engine.enqueue("ramp:44100:2:600000");
+    engine.enqueue("ramp:44100:2:1000");  // stays pending across the failure
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+
+    sinkPtr->fireOutputFailed("test device unplugged");
+    CHECK(waitForState(engine, State::Stopped));
+    settle();
+    CHECK(listener.errors() == 1);
+    CHECK(sinkPtr->closeCount() == 1);
+    CHECK(engine.position() == 0.0);
+
+    // The remembered track replays from frame 0; the device opens afresh.
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    settle();
+    CHECK(sinkPtr->recordedDecisions().size() == 2);
+    const auto paths = listener.trackPaths();
+    CHECK(paths.size() == 2);
+    if (paths.size() == 2) {
+        CHECK(paths[1] == "ramp:44100:2:600000");
+    }
+    CHECK(listener.errors() == 1);  // the retry itself is clean
+
+    engine.stop();
+    settle();
+}
+
+// A failure event that arrives while nothing is open (Stopped, or racing the
+// engine's own close) is dropped: no error, no state change.
+void testOutputFailedWhileStoppedIgnored() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    sinkPtr->fireOutputFailed("stale");
+    settle();
+    CHECK(engine.state() == State::Stopped);
+    CHECK(listener.errors() == 0);
+
+    // Same after a session ended normally: the stop closed the device first.
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    engine.stop();
+    CHECK(waitForState(engine, State::Stopped));
+    sinkPtr->fireOutputFailed("stale after stop");
+    settle();
+    CHECK(engine.state() == State::Stopped);
+    CHECK(listener.errors() == 0);
+    CHECK(listener.states().size() == 2);  // Playing, Stopped; nothing else
+}
+
+// A device that negotiates but will not start pulling: the fresh open reports
+// the failure, releases the device, and settles Stopped with no track announced
+// (nothing became audible). The same refusal on a resume ends the session too.
+void testStartFailureEndsSession() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    sinkPtr->setStartFails(true);
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    settle(60);
+    CHECK(engine.state() == State::Stopped);
+    CHECK(listener.errors() == 1);
+    CHECK(listener.trackPaths().empty());
+    CHECK(sinkPtr->closeCount() == 1);  // opened, then released by the failure
+
+    // Resume path: a healthy start, a pause, then the platform refuses the restart.
+    sinkPtr->setStartFails(false);
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    engine.pause();
+    CHECK(waitForState(engine, State::Paused));
+    sinkPtr->setStartFails(true);
+    engine.play();
+    CHECK(waitForState(engine, State::Stopped));
+    settle();
+    CHECK(listener.errors() == 2);
+    CHECK(sinkPtr->closeCount() == 2);
+}
+
+// The stall watchdog: the consumer stops pulling with frames still in the ring,
+// and after the (shortened) threshold the engine ends the session as if the
+// sink had reported the failure. Cleared of the stall, a play() retries fine.
+void testOutputStallWatchdogStops() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    StallMsEnvGuard    stallMs("300");
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    sinkPtr->setStallAfterFrames(8192);  // a handful of blocks, then silence
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    CHECK(waitForState(engine, State::Stopped, 3000));
+    settle();
+    CHECK(listener.errors() == 1);
+    CHECK(sinkPtr->closeCount() == 1);
+
+    sinkPtr->setStallAfterFrames(0);
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    settle(400);  // longer than the threshold: a healthy consumer never trips it
+    CHECK(engine.state() == State::Playing);
+    CHECK(listener.errors() == 1);
+
+    engine.stop();
+    settle();
+}
+
+// RAWFORM_OUTPUT_STALL_MS=0 disables the watchdog: the same stall leaves the
+// engine Playing (the honest Playing-on-a-dead-device of a build that opted
+// out), with no error.
+void testOutputStallWatchdogDisabled() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    StallMsEnvGuard    stallMs("0");
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    sinkPtr->setStallAfterFrames(8192);
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    settle(600);
+    CHECK(engine.state() == State::Playing);
+    CHECK(listener.errors() == 0);
+
+    engine.stop();
+    settle();
+}
+
+// ---------------------------------------------------------------------------
 // GAPLESS SCENARIOS: gapless playback. These use the recording sink, whose decision
 // COUNT distinguishes a stitch (no open) from a reconfigure (an open) and whose
 // channel-0 capture proves sample-contiguity across a boundary. Tracks are kept
@@ -2613,6 +2813,12 @@ int main() {
     testDefaultDeviceChangeReopensWhenFollowing();
     testDefaultDeviceChangeIgnoredWhenPinned();
     testDeviceListAndDebtEventsRelay();
+
+    testOutputFailedEventStopsAndRetries();
+    testOutputFailedWhileStoppedIgnored();
+    testStartFailureEndsSession();
+    testOutputStallWatchdogStops();
+    testOutputStallWatchdogDisabled();
 
     testGaplessStitchSameFormat();
     testGaplessNoStitchDifferentRate();

@@ -69,14 +69,31 @@
 // Wait strategy on the engine thread. Each iteration it either has
 // immediate producer work (room in the ring and input not exhausted, while
 // Playing or Paused) and does one decode/write step with no wait, or it sleeps:
-//   - bounded (a few ms) while Playing, because the RT thread changes the world
-//     without signaling us (it drains the ring, advances the consumed counter,
-//     and sets finished at EOS) and is forbidden from waking the producer, so we
-//     must periodically re-check; this same bounded wake also drives the
-//     position tick and the seam-crossing watch on cadence;
+//   - bounded while Playing, because the RT thread changes the world without
+//     signaling us (it drains the ring, advances the consumed counter, and sets
+//     finished at EOS) and is forbidden from waking the producer, so we must
+//     periodically re-check. The bound is adaptive: with the ring full it is
+//     the time the consumer needs to free one decode block (measured from the
+//     consumed counter, floored at the source's realtime rate, never assumed),
+//     capped by the time to the next position tick, so a realtime device sees
+//     roughly one top-up wake per block plus the ten position ticks a second
+//     instead of a fixed fast poll. The fast poll (kPollIntervalMs) is kept
+//     exactly where latency matters: while the input is exhausted (the drain
+//     to finished), while a seam threshold is within one block of being
+//     crossed (the onTrackChanged boundary), and until the consumer's speed has
+//     been measured. A consumer faster than realtime (the paced NullSink in the
+//     tests) measures as such and gets the fast poll back by arithmetic.
 //   - indefinite otherwise (Stopped, or Paused with a full ring), because only a
 //     command can change anything and commands notify.
 // A command always wakes the wait promptly via the condition variable.
+//
+// Output failure. While Playing the consumer must consume: a sink reports a
+// dead device or stream through ISinkEventListener::onOutputFailed (posted
+// as a command like every sink event), and the engine's own stall watchdog
+// catches whatever no event covers (frames in the ring, consumed counter
+// frozen for kOutputStallMs). Both end the session the same way: onError,
+// teardown, Stopped, the current track remembered for a retry. A sink whose
+// start() returns false is treated identically.
 //
 // Transport-to-sink mapping:
 //   - pause = sink.stop() (joins the RT thread; ring and decoder untouched);
@@ -108,9 +125,14 @@
 // only once no pull() is in flight or will follow, per the IAudioSink lifetime
 // invariant); only THEN is the ring reset and the decoder dropped. ~Engine
 // signals shutdown and joins the engine thread; the engine thread runs that
-// same teardown before exiting, so by the time Impl's members destruct the
-// sink is closed, the RT thread is gone, and nothing references the ring
-// source.
+// same teardown before exiting, so the sink is closed and the RT thread gone
+// before anything else happens. ~Engine then detaches the sink from the event
+// and log channels and DESTROYS it, still inside requestShutdownAndJoin, while
+// the command mutex and queue are alive: a platform thread (the PipeWire loop
+// thread, a CoreAudio notification thread) can keep delivering events until
+// the sink's own destructor stops it, and every one of those events is a
+// post() onto that queue. Only once the sink is gone do Impl's members
+// destruct, with nothing left that could call into them.
 
 #include "rawform/audio/Engine.h"
 
@@ -123,6 +145,7 @@
 #include "EngineRingSource.h"
 #include "DecoderFactory.h"
 
+#include <algorithm>  // std::max in the consumer-speed estimate
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -138,6 +161,10 @@
 #include <vector>
 #include <version>  // __cpp_lib_atomic_shared_ptr feature-test macro
 
+#if defined(__linux__) || defined(__APPLE__)
+#include <pthread.h>  // pthread_setname_np is POSIX (per-platform signature), not in <thread>
+#endif
+
 namespace rawform::audio {
 
 namespace {
@@ -146,19 +173,36 @@ namespace {
 // rate, enough runway that a scheduling hiccup on the engine thread never
 // starves the RT pull; the producer decodes in kBlockFrames-frame granules, a
 // size that keeps each decode call short so the loop stays responsive to
-// commands; and the engine wakes at most every kPollIntervalMs while Playing to
-// top the ring up, to notice EOS, and to process seam crossings.
+// commands; and kPollIntervalMs is the fast poll the engine falls back to
+// while Playing whenever latency matters (the EOS drain, an imminent seam, an
+// unmeasured consumer); see the wait strategy in the file header for when the
+// wait is longer than this.
 constexpr std::uint32_t kTargetLatencyMs = 400;
 constexpr std::size_t   kBlockFrames     = 4096;
-constexpr int           kPollIntervalMs  = 5;  // << ring latency; bounds top-up, EOS, and seam gaps
+constexpr int           kPollIntervalMs  = 5;  // << ring latency; bounds EOS, seam gaps
 
 // Position notification cadence. The engine fires onPositionChanged
 // at most this often while Playing, gated on a steady_clock timestamp checked
-// each loop iteration. Because the loop wakes at least every kPollIntervalMs
-// while Playing, the gate lands within a few ms of target, well inside one tick.
-// 10 Hz is the default for a smooth progress bar; change this one constant
-// to retune.
+// each loop iteration. The adaptive wait never sleeps past the next due tick,
+// so the gate lands within a few ms of target. 10 Hz is the default for a
+// smooth progress bar; change this one constant to retune.
 constexpr int kPositionIntervalMs = 100;
+
+// Consumer-speed measurement window. The engine re-anchors its estimate of how
+// many frames the consumer takes per millisecond once per window of continuous
+// Playing; one window is long enough that a device delivering 1024-frame
+// quanta every 21 ms averages out, short enough that the estimate exists
+// before the second position tick.
+constexpr int kConsumeAnchorMs = 100;
+
+// Output stall watchdog default: frames sit in the ring and the consumer has
+// not taken one for this long while Playing. Ten seconds is past any device
+// reconfiguration a session manager performs on a live stream (a Bluetooth
+// re-pair included) and far inside what a user experiences as "it hung".
+// Overridable through RAWFORM_OUTPUT_STALL_MS, read once at construction (0
+// disables the watchdog); the tests use the override to make the timeout
+// short.
+constexpr int kOutputStallMsDefault = 10000;
 
 // Ring capacity in frames from a target latency, with a floor so a full decode
 // block (and slack) always fits even at very low sample rates.
@@ -200,6 +244,22 @@ bool gaplessEnabledFromEnv() noexcept {
     return !disabled;
 }
 
+// Read the RAWFORM_OUTPUT_STALL_MS knob once, the same shape as the gapless
+// switch: unset or unparsable means the default, an explicit 0 disables the
+// watchdog. A decimal millisecond count otherwise.
+int outputStallMsFromEnv() noexcept {
+    const char* v = std::getenv("RAWFORM_OUTPUT_STALL_MS");
+    if (v == nullptr || v[0] == '\0') {
+        return kOutputStallMsDefault;
+    }
+    char* end = nullptr;
+    const long parsed = std::strtol(v, &end, 10);
+    if (end == v || parsed < 0 || parsed > 3600000L) {
+        return kOutputStallMsDefault;
+    }
+    return static_cast<int>(parsed);
+}
+
 // Build the engine-to-controller description for a track from its decoder. A
 // pure function of its two arguments (no engine state consulted), hence a free
 // helper rather than an Impl member. Used both by the fresh-start path
@@ -230,11 +290,12 @@ TrackInfo makeTrackInfo(const std::string& path, const IDecoder& dec) {
 enum class CommandType { Enqueue, PlayNow, SetQueue, Play, Pause, Stop, Next, ClearQueue, Seek,
                          RequestOutputDevices, SelectOutputDevice,
                          ExternalRateChanged, DefaultDeviceChanged, DeviceListChanged,
-                         RateDebtChanged };
+                         RateDebtChanged, OutputFailed };
 
 struct Command {
     CommandType              type;
-    std::string              path;           // used by Enqueue, PlayNow, and SelectOutputDevice (device id)
+    std::string              path;           // Enqueue/PlayNow path, device id (Select,
+                                             // RateDebt), or the OutputFailed reason
     double                   seconds = 0.0;  // used only by Seek
     std::vector<std::string> paths;          // used only by SetQueue
     std::uint32_t            rateA = 0;      // Sink event payloads: ExternalRateChanged's
@@ -266,9 +327,12 @@ struct SeamMarker {
 // Two interchangeable backends, selected by the STANDARD LIBRARY feature-test
 // macro for std::atomic<std::shared_ptr<>> (P0718), so the choice tracks the
 // stdlib's capability rather than a hardcoded platform name:
-//   - lock-free (preferred): an immutable snapshot swapped through
+//   - standard: an immutable snapshot swapped through
 //     std::atomic<std::shared_ptr<const TrackInfo>>. Present on libstdc++,
-//     the Linux build's standard library.
+//     the Linux build's standard library. Not lock-free there (libstdc++
+//     serializes on a lock bit inside the control-block pointer and
+//     is_lock_free() reports false), which is fine for the same reason the
+//     fallback is fine: this box is never on the RT path.
 //   - mutex fallback: the same snapshot behind a tiny BOX-LOCAL mutex. Used on
 //     libc++ (AppleClang, the macOS toolchain), which does not ship the
 //     atomic<shared_ptr> specialization.
@@ -345,14 +409,14 @@ private:
 
 // ===========================================================================
 // Impl: everything that is not the four-line public forwarding layer.
-// Impl doubles as the sink's ILogOutput: the sink's
+// Impl doubles as the sink's ILogOutput and ISinkEventListener: the sink's
 // diagnostic lines land in logLine (engine thread, per the ILogOutput
-// contract) and are forwarded to Listener::onInfo. Implemented on Impl itself
-// rather than a separate adapter object because the lifetime is then free:
-// the Engine owns the sink, so the Impl outlives every sink it installs
-// itself into, including through the close() the sink runs during Impl
-// destruction (members destroy in reverse order, and `listener` going first
-// is harmless: notifyInfo just reads a null and drops the line).
+// contract) and are forwarded to Listener::onInfo; the sink's events land in
+// the overrides below and become commands. Implemented on Impl itself rather
+// than a separate adapter object because the lifetime is then free: the
+// Engine owns the sink, and requestShutdownAndJoin detaches both channels and
+// destroys the sink before any Impl member destructs, so no sink ever holds a
+// pointer into a partially destroyed Impl.
 struct Engine::Impl : ILogOutput, ISinkEventListener {
     // ----- the real-time surface ----------------------------------------------
     // Declared FIRST, before `sink`, so that on Impl destruction `sink` (which
@@ -440,6 +504,28 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     // ----- position tick bookkeeping (engine thread only) ----------------------
     std::chrono::steady_clock::time_point lastPositionFire{};
 
+    // ----- consumer tracking (engine thread only) ----------------------------
+    // The engine never assumes the consumer runs at the source rate: it measures
+    // it. consumeFramesPerMs is the consumer's observed draw, floored at the
+    // source's realtime rate (a Playing device is never slower than realtime
+    // unless it has stalled, which the watchdog below owns), re-estimated once
+    // per kConsumeAnchorMs window of continuous Playing from the two anchors;
+    // 0 means "not measured yet", which keeps the fast poll. The estimate
+    // survives pauses, seeks and track changes (the consumer's speed is a
+    // property of the sink, not the track); only the anchors are re-taken at
+    // every sink start, so a window never spans a parked RT thread.
+    //
+    // The stall watchdog: lastConsumedSeen / lastConsumedChange record when the
+    // consumed counter last moved. Playing, frames written but not consumed,
+    // and no movement for outputStallMs is a dead consumer. outputStallMs == 0
+    // disables it.
+    std::uint64_t                         consumeAnchorFrames = 0;
+    std::chrono::steady_clock::time_point consumeAnchorTime{};
+    double                                consumeFramesPerMs  = 0.0;
+    std::uint64_t                         lastConsumedSeen    = 0;
+    std::chrono::steady_clock::time_point lastConsumedChange{};
+    int                                   outputStallMs = kOutputStallMsDefault;
+
     // ----- observable atomics (read by thread 1) ------------------------------
     std::atomic<State>         stateAtomic{State::Stopped};
     std::atomic<std::uint64_t> formatBits{0};  // packed AudioFormat; 0 == invalid
@@ -508,6 +594,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void doDeviceListChanged();                          // push a fresh enumeration
     void doRateDebtChanged(const std::string& deviceId,  // forward for persistence
                            std::uint32_t originalRateHz, std::uint32_t borrowedRateHz);
+    void doOutputFailed(const std::string& reason);      // error, teardown, Stopped
     void reopenAtPosition();                             // the shared audible-change boundary
 
     // ----- ISinkEventListener ------------------------------------
@@ -529,11 +616,15 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
         post(Command{CommandType::RateDebtChanged, deviceId, 0.0, {}, originalRateHz,
                      borrowedRateHz});
     }
+    void onOutputFailed(const std::string& reason) override {
+        post(Command{CommandType::OutputFailed, reason, 0.0, {}, 0, 0});
+    }
 
     bool startTrack(std::unique_ptr<IDecoder> dec, const std::string& path);  // configure ring, open sink, play
     bool openAndStart(const std::string& path);          // factory open then startTrack
     bool cutOrStartTo(std::unique_ptr<IDecoder> dec, const std::string& path); // HOLD-CUT or reconfigure to an opened decoder
     void advanceToPendingOrStop();                       // pop next openable, else Stopped
+    bool startSink();                                    // re-anchor tracking, then sink->start()
     void teardownCurrent();                              // stop + CLOSE sink, then flush (stop/error/shutdown paths)
     void parkForTransition();                            // stop sink, KEEP device open, then flush (transition boundaries)
     void flushEngineState();                             // the shared post-park flush (ring, decoder, seams, readouts)
@@ -541,6 +632,11 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void primeUpTo(std::size_t thresholdFrames);         // pre-buffer before start
     void handleProducerEos();                            // Stitch next track gaplessly, or mark exhausted
     void crossSeam(const SeamMarker& marker);            // Fire onTrackChanged + position rebase at a boundary
+
+    // --- the engine thread's wait and consumer tracking ---
+    std::chrono::milliseconds playingWait() const;       // adaptive bound while Playing
+    void resetConsumeTracking();                         // re-anchor at every sink start
+    bool trackConsumption();                             // refresh estimate; true == stalled
 
     // --- publication / notification (engine thread) ---
     void      setState(State s);
@@ -569,9 +665,19 @@ void Engine::Impl::post(Command c) {
 void Engine::Impl::start() {
     factory        = &defaultFactory;
     gaplessEnabled = gaplessEnabledFromEnv(); // Read the A/B knob once, before the thread runs
+    outputStallMs  = outputStallMsFromEnv();  // Likewise the watchdog threshold
     thread         = std::thread(&Engine::Impl::run, this);
 }
 
+// Shutdown, then the sink's end of life, in that order and in THIS method (the
+// file header has the ordering argument). After the join the engine thread
+// has closed the sink and the RT thread is gone; detaching the event and log
+// channels under the sink's own lock then fences any platform-thread handler
+// still holding our pointers, and destroying the sink stops those threads for
+// good, all while the command mutex and queue they post to are still alive.
+// Nothing here runs under `mtx`: a sink destructor stops its platform thread
+// under its own lock, and that thread may be inside a post() waiting for
+// `mtx`, which is the inversion setSink documents.
 void Engine::Impl::requestShutdownAndJoin() {
     {
         std::lock_guard<std::mutex> lock(mtx);
@@ -581,11 +687,21 @@ void Engine::Impl::requestShutdownAndJoin() {
     if (thread.joinable()) {
         thread.join();
     }
+    if (sink) {
+        sink->setEventListener(nullptr);
+        sink->setLogOutput(nullptr);
+        sink.reset();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // The engine thread. See the file header for the wait strategy.
 void Engine::Impl::run() {
+#if defined(__linux__)
+    pthread_setname_np(pthread_self(), "rawform-engine");  // 15-char limit on Linux
+#elif defined(__APPLE__)
+    pthread_setname_np("rawform-engine");
+#endif
     for (;;) {
         {
             std::unique_lock<std::mutex> lock(mtx);
@@ -610,7 +726,8 @@ void Engine::Impl::run() {
             // right now. While Playing we must still wake periodically even with
             // no work, because the RT thread drains the ring, advances the
             // consumed counter (which we watch for seam crossings), and sets
-            // finished without signaling us, and because the position tick is due.
+            // finished without signaling us, and because the position tick is
+            // due; playingWait() sizes that wake to what is actually pending.
             const State st = stateAtomic.load(std::memory_order_relaxed);
             const bool active = (st == State::Playing || st == State::Paused);
             const bool producerHasWork =
@@ -618,7 +735,7 @@ void Engine::Impl::run() {
 
             if (!producerHasWork) {
                 if (st == State::Playing) {
-                    cv.wait_for(lock, std::chrono::milliseconds(kPollIntervalMs),
+                    cv.wait_for(lock, playingWait(),
                                 [this] { return !commands.empty() || shutdown; });
                 } else {
                     cv.wait(lock, [this] { return !commands.empty() || shutdown; });
@@ -626,13 +743,23 @@ void Engine::Impl::run() {
             }
         }
 
-        // 3. Producer step, seam-crossing watch, and end-of-stream advance, all
-        // outside the lock. The state is re-read because a command in step 1 may
-        // have changed it.
-        const State st = stateAtomic.load(std::memory_order_relaxed);
+        // 3. Producer step, consumer watch, seam-crossing watch, and end-of-stream
+        // advance, all outside the lock. The state is re-read because a command
+        // in step 1 may have changed it.
+        State st = stateAtomic.load(std::memory_order_relaxed);
         const bool active = (st == State::Playing || st == State::Paused);
         if (active && !ringSource.inputExhausted()) {
             produceOneStep();
+        }
+
+        // Consumer watch: refresh the speed estimate the wait is sized from, and
+        // catch a consumer that has gone silent with frames waiting. A stall ends
+        // the session exactly as a sink-reported failure does; the state is
+        // re-read afterwards so the steps below see Stopped.
+        if (st == State::Playing && trackConsumption()) {
+            doOutputFailed("output stalled (no frames consumed for " +
+                           std::to_string(outputStallMs) + " ms)");
+            st = stateAtomic.load(std::memory_order_relaxed);
         }
 
         // Gapless seam crossings. As the consumer drains past each pending
@@ -699,19 +826,22 @@ void Engine::Impl::process(const Command& c) {
         case CommandType::DefaultDeviceChanged: doDefaultDeviceChanged(); break;
         case CommandType::DeviceListChanged:    doDeviceListChanged(); break;
         case CommandType::RateDebtChanged:      doRateDebtChanged(c.path, c.rateA, c.rateB); break;
+        case CommandType::OutputFailed:         doOutputFailed(c.path); break;
     }
 }
 
 // play(): resume from Paused, or (from Stopped) replay the remembered track from
-// frame 0, or pop the next queued path. A no-op while Playing.
+// frame 0, or pop the next queued path. A no-op while Playing. A resume whose
+// start() fails ends the session like any other output failure.
 void Engine::Impl::doPlay() {
     const State st = stateAtomic.load(std::memory_order_relaxed);
     if (st == State::Playing) {
         return;
     }
     if (st == State::Paused) {
-        if (sink) {
-            sink->start();
+        if (sink && !startSink()) {
+            doOutputFailed("could not restart the output device");
+            return;
         }
         setState(State::Playing);
         return;
@@ -1000,6 +1130,24 @@ void Engine::Impl::doRateDebtChanged(const std::string& deviceId,
     }
 }
 
+// The session ended from the output side: a sink-reported failure (the
+// device vanished, the stream errored, the daemon went away), the stall
+// watchdog, or a start() that returned false. One reaction for all of them:
+// report, full teardown (the device, if any is left, gets its restore), settle
+// in Stopped with currentPath remembered so a play() retries the same track.
+// Nothing is re-targeted silently: a pinned device that disappeared stays the
+// user's choice until the user changes it. The deviceOpen guard drops a stale
+// event that raced our own close (a sink may emit while being torn down by a
+// stop) and makes duplicates from several emission paths harmless.
+void Engine::Impl::doOutputFailed(const std::string& reason) {
+    if (!deviceOpen) {
+        return;
+    }
+    notifyError("output failed: " + reason);
+    teardownCurrent();
+    enterStopped();
+}
+
 // Bring an already-opened decoder current and Playing, choosing the cheapest
 // transition: a HOLD-CUT (keep the device open, park the RT thread, swap the
 // decoder, reprime, resume) when the source format is IDENTICAL to what is
@@ -1059,8 +1207,13 @@ bool Engine::Impl::cutOrStartTo(std::unique_ptr<IDecoder> dec,
 
         lastPositionFire = std::chrono::steady_clock::now() -
                            std::chrono::milliseconds(kPositionIntervalMs);
-        if (sink) {
-            sink->start();
+        if (!startSink()) {
+            // The held device would not resume: end the session rather than
+            // announce a track nothing is pulling. The caller sees false with
+            // the device already closed, the same shape as a failed open.
+            notifyError("output failed: could not restart the output device");
+            teardownCurrent();
+            return false;
         }
         setState(State::Playing);  // no-op if already Playing; Paused -> Playing on a cut
         announceTrack(cutInfo);
@@ -1160,9 +1313,11 @@ void Engine::Impl::doSeek(double seconds) {
     primeUpTo(capacity / 2);
 
     // Resume the RT thread only if we were Playing; a Paused seek stays Paused
-    // with the sink parked and resumes from the new spot on the next play().
-    if (entryState == State::Playing && sink) {
-        sink->start();
+    // with the sink parked and resumes from the new spot on the next play(). A
+    // device that will not resume ends the session like any output failure.
+    if (entryState == State::Playing && sink && !startSink()) {
+        doOutputFailed("could not restart the output device");
+        return;
     }
 
     // Reflect the new position at once (Playing or Paused) and rebase the tick
@@ -1297,7 +1452,13 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
     lastPositionFire =
         std::chrono::steady_clock::now() - std::chrono::milliseconds(kPositionIntervalMs);
 
-    sink->start();
+    if (!startSink()) {
+        // Negotiated but not pulling: a Playing state here would be a lie the
+        // user could only escape with Stop. Same exit as a failed open.
+        notifyError("output failed: could not start the output device");
+        teardownCurrent();
+        return false;
+    }
 
     setState(State::Playing);
     announceTrack(startedInfo);
@@ -1356,6 +1517,91 @@ void Engine::Impl::parkForTransition() {
         sink->stop();  // join only; the device stays open
     }
     flushEngineState();
+}
+
+// Every sink start goes through here so the consumer tracking is re-anchored
+// at the instant pulling (re)begins: the speed estimate must never average a
+// window in which the RT thread was parked, and the stall clock must not count
+// a pause. Returns the sink's own verdict; the callers decide how to fail.
+bool Engine::Impl::startSink() {
+    resetConsumeTracking();
+    return sink->start();
+}
+
+// ---------------------------------------------------------------------------
+// The adaptive wait and the consumer tracking behind it (engine thread only).
+
+void Engine::Impl::resetConsumeTracking() {
+    const auto now = std::chrono::steady_clock::now();
+    const std::uint64_t consumed = ringSource.totalFramesConsumed();
+    consumeAnchorFrames = consumed;
+    consumeAnchorTime   = now;
+    lastConsumedSeen    = consumed;
+    lastConsumedChange  = now;
+}
+
+// Called once per loop iteration while Playing. Re-estimates the consumer's
+// draw once per window (floored at realtime: a slower reading means the
+// window caught a quantum boundary, not a slow device), and reports a stall
+// when frames sit in the ring and the consumed counter has not moved for
+// outputStallMs. A counter that does not move because the ring is EMPTY is
+// not a stall; it is the producer's problem (an underrun), or the EOS drain.
+bool Engine::Impl::trackConsumption() {
+    const auto          now      = std::chrono::steady_clock::now();
+    const std::uint64_t consumed = ringSource.totalFramesConsumed();
+
+    if (consumed != lastConsumedSeen) {
+        lastConsumedSeen   = consumed;
+        lastConsumedChange = now;
+    } else if (outputStallMs > 0 && ringSource.totalFramesWritten() > consumed &&
+               now - lastConsumedChange >= std::chrono::milliseconds(outputStallMs)) {
+        return true;
+    }
+
+    if (now - consumeAnchorTime >= std::chrono::milliseconds(kConsumeAnchorMs)) {
+        if (consumed > consumeAnchorFrames) {
+            const double windowMs = std::chrono::duration<double, std::milli>(
+                                        now - consumeAnchorTime).count();
+            const double observed =
+                static_cast<double>(consumed - consumeAnchorFrames) / windowMs;
+            const double realtime = static_cast<double>(format.sampleRate) / 1000.0;
+            consumeFramesPerMs    = std::max(observed, realtime);
+        }
+        consumeAnchorFrames = consumed;
+        consumeAnchorTime   = now;
+    }
+    return false;
+}
+
+// How long the Playing loop may sleep with nothing to produce. The fast poll
+// wherever a late wake would be audible or visible: the EOS drain (finished
+// must be noticed promptly), a seam within one block of the consumed counter
+// (its onTrackChanged must land on the boundary), an unmeasured consumer.
+// Otherwise the time the consumer needs to free one decode block, so each
+// wake does one block of work, capped by the time to the next position tick
+// so the 10 Hz cadence holds, and never below the fast poll. The seam bound
+// is what keeps seam latency at one poll: a wait sized to one block of
+// consumption cannot carry the consumer across a threshold that is more than
+// a block away, and once it is within a block the poll takes over.
+std::chrono::milliseconds Engine::Impl::playingWait() const {
+    const auto poll = std::chrono::milliseconds(kPollIntervalMs);
+    if (ringSource.inputExhausted() || consumeFramesPerMs <= 0.0) {
+        return poll;
+    }
+    const std::uint64_t consumed = ringSource.totalFramesConsumed();
+    if (!seams.empty() && seams.front().thresholdFrame <= consumed + kBlockFrames) {
+        return poll;
+    }
+    const auto blockMs = static_cast<long long>(
+        static_cast<double>(kBlockFrames) / consumeFramesPerMs);
+    const auto sinceTick = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - lastPositionFire);
+    const long long untilTick = kPositionIntervalMs - sinceTick.count();
+    long long wait = std::min(blockMs, untilTick);
+    if (wait < kPollIntervalMs) {
+        wait = kPollIntervalMs;
+    }
+    return std::chrono::milliseconds(wait);
 }
 
 // The shared flush: with the RT thread parked (by either caller above), reset

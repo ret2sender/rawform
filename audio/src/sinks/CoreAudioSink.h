@@ -67,8 +67,10 @@
 // UID, and selectDevice() pins one; the pin redirects what capabilities(),
 // open(), and reconfigure()'s device check resolve, and the engine drives the
 // reopen that makes a change audible. System-wide listeners report
-// default-device and device-list changes, and a per-open listener on the bound
-// device reports external nominal-rate changes, which forgive the ledger.
+// default-device and device-list changes; per-open listeners on the bound
+// device report external nominal-rate changes (which forgive the ledger), the
+// device going dead (an output failure the engine ends the session on), and IO
+// processor overloads (a stderr breadcrumb).
 
 #pragma once
 
@@ -106,8 +108,10 @@ public:
     /// the session's final close), configures an interleaved float32 AUHAL at
     /// the SOURCE rate, and records the honest measured bit-perfect outcome.
     /// Returns false on any CoreAudio failure with a message on stderr.
-    /// start()/stop() run and park the HAL IO thread; AudioOutputUnitStop in
-    /// stop() is the synchronization point the lifetime invariant relies on.
+    /// start()/stop() run and park the HAL IO thread; start() returns false
+    /// when AudioOutputUnitStart failed (unit left open and parked), and
+    /// AudioOutputUnitStop in stop() is the synchronization point the lifetime
+    /// invariant relies on.
     [[nodiscard]] SinkCapabilities capabilities() const override;
     /// enumerateDevices lists every output-capable device, UID-keyed
     /// (the persistent id AudioDeviceInfo promises); selectDevice pins by UID,
@@ -116,11 +120,14 @@ public:
     /// engine drives the audible reopen.
     [[nodiscard]] std::vector<AudioDeviceInfo> enumerateDevices() const override;
     bool                         selectDevice(const std::string& deviceId) override;
-    /// Install the engine's event channel. This sink emits all four
-    /// events: default-device and device-list changes from system-wide
-    /// listeners alive for the sink's life, external nominal-rate changes
-    /// (with ledger forgiveness) from a per-open listener on the bound
-    /// device, and restore-ledger changes for the ledger persistence.
+    /// Install the engine's event channel. This sink emits every event:
+    /// default-device and device-list changes from system-wide listeners alive
+    /// for the sink's life, external nominal-rate changes (with ledger
+    /// forgiveness) from a per-open listener on the bound device,
+    /// restore-ledger changes for the ledger persistence, and an output
+    /// failure when the bound device reports it is no longer alive (unplugged,
+    /// or gone across a sleep). Every emission runs under the sink's state
+    /// mutex, so detaching the listener fences an in-flight call.
     void                         setEventListener(ISinkEventListener* listener) override;
     /// The crash-recovery restore; resolves by UID and repays iff the
     /// device still sits at the borrowed rate. Pre-injection, pre-open.
@@ -141,9 +148,9 @@ public:
     /// and re-opens per the IAudioSink contract.
     bool             reconfigure(const AudioFormat&  sourceFormat,
                                  const RateDecision& decision) override;
-    void             start() override;
-    void             stop()  override;
-    void             close() override;
+    [[nodiscard]] bool start() override;
+    void               stop()  override;
+    void               close() override;
     [[nodiscard]] AudioFormat currentFormat() const override;
 
     /// The measured-outcome diagnostic: true when the hardware reached

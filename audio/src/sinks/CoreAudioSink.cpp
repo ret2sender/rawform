@@ -70,10 +70,16 @@
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
 // property listeners live for the sink's whole life and report default-device
-// and device-list changes to the engine; a third listener is installed per
-// open() on the bound device for the nominal-rate watch above. All listener
-// callbacks arrive on CoreAudio's own thread and hand off through the
-// implementation's mutex, never touching the render path.
+// and device-list changes to the engine; three more are installed per open()
+// on the bound device: the nominal-rate watch above, the liveness watch
+// (kAudioDevicePropertyDeviceIsAlive going false is the device unplugged or
+// lost across a sleep, reported as an output failure the engine ends the
+// session on), and the IO overload watch (a stderr breadcrumb; the audible
+// side shows up in the engine's underrun report). All listener callbacks
+// arrive on CoreAudio's own threads and never touch the render path; every
+// call they make into the engine's event channel runs under the state mutex,
+// so detaching the listener (setEventListener(nullptr)) fences a call in
+// flight, which is what lets the engine destroy this sink safely at shutdown.
 //
 // stop() calls AudioOutputUnitStop, which is synchronous: after it returns the
 // HAL IO thread will not invoke the callback again. THAT is the
@@ -167,7 +173,11 @@ struct CoreAudioSinkImpl {
     double              pendingSelfRate    = 0.0;
     bool                systemListeners    = false;  // ctor-installed pair
     bool                deviceListener     = false;  // per-open nominal-rate listener
+    bool                aliveListener      = false;  // per-open liveness listener
+    bool                overloadListener   = false;  // per-open IO overload listener
+    bool                failureReported    = false;  // one onOutputFailed per open
     std::string         deviceUidStr;                // bound device's UID, for debt events
+    std::string         deviceNameStr;               // bound device's name, for failure text
     bool                lastDebtActive     = false;  // last published debt shape
     std::uint32_t       lastDebtBorrowed   = 0;
 };
@@ -491,8 +501,13 @@ namespace {
 // Property-listener procs and the debt publication helper. The procs
 // run on CoreAudio's internal notification threads: everything they touch is
 // stateMtx-guarded or atomic, the event-listener calls are enqueues by
-// contract, and diagnostics go to stderr ONLY (the ILogOutput funnel is an
-// engine-thread facility; the engine's own reaction prints the console line).
+// contract and are made WITH stateMtx held (the listener only posts to the
+// engine's command queue, and the engine never calls into this sink while
+// holding that queue's mutex, so the order stateMtx -> engine mutex is the
+// only one that exists; holding it across the call is what makes
+// setEventListener(nullptr) a fence against a call in flight), and
+// diagnostics go to stderr ONLY (the ILogOutput funnel is an engine-thread
+// facility; the engine's own reaction prints the console line).
 
 OSStatus onSystemObjectEvent(AudioObjectID /*objectId*/, UInt32 nAddrs,
                              const AudioObjectPropertyAddress* addrs,
@@ -507,19 +522,61 @@ OSStatus onSystemObjectEvent(AudioObjectID /*objectId*/, UInt32 nAddrs,
             listChanged = true;
         }
     }
-    ISinkEventListener* l = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(impl->stateMtx);
-        l = impl->events;
-    }
-    if (l != nullptr) {
+    std::lock_guard<std::mutex> lock(impl->stateMtx);
+    if (impl->events != nullptr) {
         if (defChanged) {
-            l->onDefaultDeviceChanged();
+            impl->events->onDefaultDeviceChanged();
         }
         if (listChanged) {
-            l->onDeviceListChanged();
+            impl->events->onDeviceListChanged();
         }
     }
+    return noErr;
+}
+
+// The liveness watch on the bound device: kAudioDevicePropertyDeviceIsAlive
+// reading false means the hardware is gone (unplugged, or not back after a
+// sleep). The render callback simply stops being invoked in that case, which
+// the engine cannot tell from a healthy pause; this is the event that tells
+// it. Reported once per open; the engine ends the session and keeps the pin.
+OSStatus onDeviceAliveEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
+                            const AudioObjectPropertyAddress* /*addrs*/,
+                            void* clientData) {
+    auto* impl = static_cast<CoreAudioSinkImpl*>(clientData);
+    AudioObjectPropertyAddress addr{kAudioDevicePropertyDeviceIsAlive,
+                                    kAudioObjectPropertyScopeGlobal,
+                                    kAudioObjectPropertyElementMain};
+    UInt32 alive = 1;
+    UInt32 size  = sizeof(alive);
+    const OSStatus s = AudioObjectGetPropertyData(
+        static_cast<AudioDeviceID>(objectId), &addr, 0, nullptr, &size, &alive);
+    // A read failure on a device that was alive a moment ago is the same news.
+    if (s == noErr && alive != 0) {
+        return noErr;
+    }
+    std::lock_guard<std::mutex> lock(impl->stateMtx);
+    if (impl->failureReported) {
+        return noErr;
+    }
+    impl->failureReported = true;
+    const std::string reason =
+        "output device '" + impl->deviceNameStr + "' disconnected";
+    std::fprintf(stderr, "CoreAudioSink: output failed: %s\n", reason.c_str());
+    if (impl->events != nullptr) {
+        impl->events->onOutputFailed(reason);
+    }
+    return noErr;
+}
+
+// The IO overload watch: the HAL missed an IO cycle deadline on the bound
+// device (the device-side counterpart of an engine underrun). Breadcrumb
+// only; nothing to decide here, and the audible consequence is counted by the
+// engine's own underrun report.
+OSStatus onDeviceOverloadEvent(AudioObjectID /*objectId*/, UInt32 /*nAddrs*/,
+                               const AudioObjectPropertyAddress* /*addrs*/,
+                               void* /*clientData*/) {
+    std::fprintf(stderr,
+                 "CoreAudioSink: IO processor overload (device missed a cycle)\n");
     return noErr;
 }
 
@@ -542,37 +599,27 @@ OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     if (newRate <= 0.0) {
         return noErr;
     }
-    ISinkEventListener* l        = nullptr;
-    bool                external = false;
-    {
-        std::lock_guard<std::mutex> lock(impl->stateMtx);
-        if (impl->hasPendingSelfRate &&
-            ratesEqual(newRate, impl->pendingSelfRate)) {
-            impl->hasPendingSelfRate = false;  // our own set landing; no event
-        } else {
-            external           = true;
-            impl->originalRate = newRate;
-            impl->rateChanged  = false;
-            impl->deviceRate.store(newRate, std::memory_order_relaxed);
-            impl->bitPerfect.store(
-                ratesEqual(newRate,
-                           static_cast<double>(impl->working.sampleRate)),
-                std::memory_order_relaxed);
-            impl->lastDebtActive   = false;
-            impl->lastDebtBorrowed = 0;
-            l = impl->events;
-        }
+    std::lock_guard<std::mutex> lock(impl->stateMtx);
+    if (impl->hasPendingSelfRate && ratesEqual(newRate, impl->pendingSelfRate)) {
+        impl->hasPendingSelfRate = false;  // our own set landing; no event
+        return noErr;
     }
-    if (external) {
-        std::fprintf(stderr,
-                     "CoreAudioSink: external device rate change to %.0f Hz "
-                     "(rate debt forgiven)\n",
-                     newRate);
-        if (l != nullptr) {
-            l->onExternalRateChanged(
-                static_cast<std::uint32_t>(std::lround(newRate)));
-            l->onRateDebtChanged(std::string{}, 0, 0);  // cleared
-        }
+    impl->originalRate = newRate;
+    impl->rateChanged  = false;
+    impl->deviceRate.store(newRate, std::memory_order_relaxed);
+    impl->bitPerfect.store(
+        ratesEqual(newRate, static_cast<double>(impl->working.sampleRate)),
+        std::memory_order_relaxed);
+    impl->lastDebtActive   = false;
+    impl->lastDebtBorrowed = 0;
+    std::fprintf(stderr,
+                 "CoreAudioSink: external device rate change to %.0f Hz "
+                 "(rate debt forgiven)\n",
+                 newRate);
+    if (impl->events != nullptr) {
+        impl->events->onExternalRateChanged(
+            static_cast<std::uint32_t>(std::lround(newRate)));
+        impl->events->onRateDebtChanged(std::string{}, 0, 0);  // cleared
     }
     return noErr;
 }
@@ -760,10 +807,12 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
     }
     {
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-        m_impl->device       = dev;
-        m_impl->originalRate = deviceNominalRate(dev);
-        m_impl->rateChanged  = false;
-        m_impl->deviceUidStr = deviceUid(dev);  // the debt events' persistent key
+        m_impl->device          = dev;
+        m_impl->originalRate    = deviceNominalRate(dev);
+        m_impl->rateChanged     = false;
+        m_impl->deviceUidStr    = deviceUid(dev);   // the debt events' persistent key
+        m_impl->deviceNameStr   = deviceName(dev);  // the failure event's label
+        m_impl->failureReported = false;            // a fresh open, a fresh budget
     }
 
     // 2. Create the AUHAL and bind it to the device.
@@ -870,10 +919,12 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
 
     m_impl->opened = true;
 
-    // With the device configured, start listening for nominal-rate
-    // changes on it (external assertions between here and close; our own
-    // reconfigure sets are recognized by the marker). Then publish the ledger
-    // shape this open produced.
+    // With the device configured, start listening on it: nominal-rate
+    // changes (external assertions between here and close; our own
+    // reconfigure sets are recognized by the marker), liveness (the output
+    // failure event), and IO overloads (breadcrumb). A listener that fails to
+    // install is logged and leaves the sink deaf to that one event, never a
+    // failed open. Then publish the ledger shape this open produced.
     {
         AudioObjectPropertyAddress rateAddr{
             kAudioDevicePropertyNominalSampleRate,
@@ -881,6 +932,26 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
         m_impl->deviceListener =
             (AudioObjectAddPropertyListener(dev, &rateAddr, onDeviceRateEvent,
                                             m_impl.get()) == noErr);
+        AudioObjectPropertyAddress aliveAddr{
+            kAudioDevicePropertyDeviceIsAlive,
+            kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+        m_impl->aliveListener =
+            (AudioObjectAddPropertyListener(dev, &aliveAddr, onDeviceAliveEvent,
+                                            m_impl.get()) == noErr);
+        AudioObjectPropertyAddress overloadAddr{
+            kAudioDeviceProcessorOverload,
+            kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+        m_impl->overloadListener =
+            (AudioObjectAddPropertyListener(dev, &overloadAddr, onDeviceOverloadEvent,
+                                            m_impl.get()) == noErr);
+        if (!m_impl->deviceListener || !m_impl->aliveListener ||
+            !m_impl->overloadListener) {
+            sinkLog(m_impl->logOut,
+                    "CoreAudioSink: device listeners not all installed (rate %d, "
+                    "alive %d, overload %d)",
+                    m_impl->deviceListener ? 1 : 0, m_impl->aliveListener ? 1 : 0,
+                    m_impl->overloadListener ? 1 : 0);
+        }
     }
     publishDebt(m_impl.get());
     return true;
@@ -1021,13 +1092,19 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
 }
 
 // ---------------------------------------------------------------------------
-void CoreAudioSink::start() {
-    if (m_impl->opened && !m_impl->started) {
-        if (osOk(AudioOutputUnitStart(m_impl->unit), "AudioOutputUnitStart",
-                 m_impl->logOut)) {
-            m_impl->started = true;
-        }
+bool CoreAudioSink::start() {
+    if (!m_impl->opened) {
+        return false;
     }
+    if (m_impl->started) {
+        return true;
+    }
+    if (!osOk(AudioOutputUnitStart(m_impl->unit), "AudioOutputUnitStart",
+              m_impl->logOut)) {
+        return false;  // open and parked; the engine ends the session
+    }
+    m_impl->started = true;
+    return true;
 }
 
 void CoreAudioSink::stop() {
@@ -1041,7 +1118,9 @@ void CoreAudioSink::stop() {
 void CoreAudioSink::close() {
     // Stop listening to the device BEFORE the restore below, so the
     // restore's own notification never needs suppressing (and a race between
-    // an external change and this close resolves as "closing anyway").
+    // an external change and this close resolves as "closing anyway"). The
+    // liveness and overload listeners go at the same time, so a device dying
+    // during its own close reports nothing.
     if (m_impl->deviceListener) {
         AudioObjectPropertyAddress rateAddr{
             kAudioDevicePropertyNominalSampleRate,
@@ -1049,6 +1128,22 @@ void CoreAudioSink::close() {
         AudioObjectRemovePropertyListener(m_impl->device, &rateAddr,
                                           onDeviceRateEvent, m_impl.get());
         m_impl->deviceListener = false;
+    }
+    if (m_impl->aliveListener) {
+        AudioObjectPropertyAddress aliveAddr{
+            kAudioDevicePropertyDeviceIsAlive,
+            kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+        AudioObjectRemovePropertyListener(m_impl->device, &aliveAddr,
+                                          onDeviceAliveEvent, m_impl.get());
+        m_impl->aliveListener = false;
+    }
+    if (m_impl->overloadListener) {
+        AudioObjectPropertyAddress overloadAddr{
+            kAudioDeviceProcessorOverload,
+            kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+        AudioObjectRemovePropertyListener(m_impl->device, &overloadAddr,
+                                          onDeviceOverloadEvent, m_impl.get());
+        m_impl->overloadListener = false;
     }
     if (m_impl->unit != nullptr) {
         if (m_impl->started) {
