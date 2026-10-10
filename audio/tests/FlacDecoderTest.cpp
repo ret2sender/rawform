@@ -36,6 +36,9 @@
 //     staging buffer's post-seek front-trim is what this exercises)
 //   - read at EOS returns 0; a straddling read returns the true remainder; one
 //     oversized read returns exactly totalFrames (the "fill fully" rule)
+//   - a damaged frame (bytes flipped inside the first frame's body) is counted
+//     in recoveredErrors() and the decoder plays on to the real end of the
+//     file with lastError() empty, instead of ending the stream at the damage
 //   - a nonexistent path yields nullptr and a non-empty error
 //
 // The ramp values are k/2048 for integer k, and 2^(bits-1)/2048 is itself an
@@ -55,6 +58,7 @@
 #include <cmath>
 #include <cstdint>  // NOLINT: std::int*_t
 #include <cstdio>
+#include <fstream>  // the damage test rewrites bytes in place
 #include <memory>
 #include <string>
 #include <vector>
@@ -347,6 +351,72 @@ void testEosAndPartial() {
 }
 
 // ---------------------------------------------------------------------------
+// Damage recovery. Flip a few bytes inside the FIRST audio frame's body (past
+// the metadata blocks, which the header walk below skips exactly; 64 bytes into
+// the frame is past its header and CRC-8, well inside subframe data). libFLAC
+// fails that frame's CRC-16, reports it, resyncs on the next frame and keeps
+// decoding. The decoder must: count at least one recovered error, report no
+// lastError(), deliver either the full length (libFLAC pads a detected gap with
+// silence) or the length minus the one dropped block, and decode the tail of
+// the file correctly, which is what proves it played on rather than stopping.
+void testDamagedFrameRecovers() {
+    const std::string path = "rf_flac_damaged.flac";
+    constexpr std::uint64_t frames = 20000;  // five 4096-sample frames at level 5
+    constexpr int           ch     = 2;
+    const float             tol    = integerTolerance(16);
+    CHECK(writeFlac(path, ch, 44100, 16, frames));
+
+    // Walk "fLaC" plus the metadata block headers (1 byte last-flag+type, 3
+    // bytes length) to the first audio frame, then damage its body.
+    std::vector<unsigned char> bytes;
+    {
+        std::ifstream in(path, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+    }
+    std::size_t pos = 4;
+    bool        last = false;
+    while (!last && pos + 4 <= bytes.size()) {
+        last = (bytes[pos] & 0x80u) != 0;
+        const std::size_t len = (static_cast<std::size_t>(bytes[pos + 1]) << 16) |
+                                (static_cast<std::size_t>(bytes[pos + 2]) << 8) |
+                                static_cast<std::size_t>(bytes[pos + 3]);
+        pos += 4 + len;
+    }
+    const std::size_t damageAt = pos + 64;
+    CHECK(last);
+    CHECK(damageAt + 4 < bytes.size());
+    if (last && damageAt + 4 < bytes.size()) {
+        for (std::size_t i = 0; i < 4; ++i) {
+            bytes[damageAt + i] ^= 0xFFu;
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+    }
+
+    std::unique_ptr<IDecoder> dec = FlacDecoder::open(path);
+    CHECK(dec != nullptr);
+    if (dec) {
+        CHECK(dec->totalFrames() == frames);
+        const std::vector<float> all = readAll(*dec);
+        const std::uint64_t got = all.size() / ch;
+        CHECK(got == frames || got == frames - 4096);
+        CHECK(dec->recoveredErrors() >= 1);
+        CHECK(dec->lastError().empty());
+        // The tail is the file's last 1024 frames whichever way libFLAC handled
+        // the damaged block: silence in place keeps the alignment, a drop
+        // shifts the output but the last frames are still the last frames.
+        if (got >= 1024) {
+            const std::size_t tailFloats = 1024 * ch;
+            CHECK(firstMismatch(all.data() + (all.size() - tailFloats), tailFloats,
+                                (frames - 1024) * ch, tol) < 0);
+        }
+    }
+    std::remove(path.c_str());
+}
+
+// ---------------------------------------------------------------------------
 // Open failure: a missing path yields nullptr and a non-empty error.
 void testOpenFailure() {
     std::string err;
@@ -364,6 +434,7 @@ int main() {
     testFlac16Mono();
     testSeek();
     testEosAndPartial();
+    testDamagedFrameRecovers();
     testOpenFailure();
 
     if (g_failures == 0) {

@@ -790,7 +790,19 @@ int runPlay(const std::string& inputPath, PlayRateFlag rateFlag) {
     }
 
     listener.endPosLine();
-    std::printf(interrupted ? "Interrupted.\n" : "Done.\n");
+    // The session's underrun total rides on the closing line: every counted
+    // frame reached the device as silence, so a non-zero figure is the audible
+    // dropout tally for this run. The engine also reports each increment
+    // through onInfo as it happens, which this listener does not print (it
+    // leaves onInfo alone, see the class comment), so the total is the CLI's
+    // one report of it.
+    const unsigned long long underruns = engine.underrunFrames();
+    if (underruns > 0) {
+        std::printf("%s (underruns: %llu frames)\n",
+                    interrupted ? "Interrupted." : "Done.", underruns);
+    } else {
+        std::printf(interrupted ? "Interrupted.\n" : "Done.\n");
+    }
     return 0;
     // engine destructs here: stop + close the sink (restoring the rate), then
     // drop the ring and decoder. No explicit teardown needed.

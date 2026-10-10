@@ -96,10 +96,19 @@ public:
     /// figure. See the .cpp read() for how the per-frame bytes are measured.
     [[nodiscard]] std::uint32_t currentBitrateKbps() const override;
 
+    /// Error observers (IDecoder.h has the contract). libFLAC resyncs past a
+    /// lost sync, a bad frame header, or a frame whose CRC fails, and this
+    /// decoder keeps going when it does, counting each in recoveredErrors();
+    /// only an unparseable stream, or a decoder state libFLAC cannot continue
+    /// from, ends the track early and lands in lastError().
+    [[nodiscard]] std::string   lastError() const override;
+    [[nodiscard]] std::uint64_t recoveredErrors() const noexcept override;
+
 private:
     /// Defined in the .cpp; holds the FLAC__StreamDecoder*, the staging buffer,
-    /// the channel/depth facts from STREAMINFO, the int-to-float scale, and the
-    /// live-bitrate meter, so every const accessor stays a trivial return.
+    /// the channel/depth facts from STREAMINFO, the int-to-float scale, the
+    /// live-bitrate meter, and the error observers' state, so every const
+    /// accessor stays a trivial return.
     struct Impl;
 
     /// Private: only open() constructs this, handing over an already-populated

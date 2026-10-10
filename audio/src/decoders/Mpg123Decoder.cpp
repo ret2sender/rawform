@@ -99,6 +99,7 @@ struct Mpg123Decoder::Impl {
     std::uint64_t  total    = 0;   // gapless-trimmed length in frames, 0 unknown
     int            channels = 0;   // cached for the read() frame<->byte math
     bool           seekable = false;
+    std::string    lastError;      // set by a failed read, cleared by a seek
 
     // Live VBR bitrate. Fed per read() from mpg123_info()'s current
     // frame bitrate; read back by currentBitrateKbps(). Engine-thread only, like
@@ -240,6 +241,10 @@ std::uint32_t Mpg123Decoder::currentBitrateKbps() const {
     return m_impl->meter.value();
 }
 
+std::string Mpg123Decoder::lastError() const {
+    return m_impl->lastError;
+}
+
 // ---------------------------------------------------------------------------
 // Decode. mpg123_read fills as many bytes as we ask while data remains, so the
 // loop accumulates until the request is satisfied or the stream ends. We honor
@@ -277,7 +282,11 @@ std::size_t Mpg123Decoder::read(float* dst, std::size_t frames) {
             continue;
         }
         // MPG123_DONE (end of stream) or any error: stop. Any bytes returned on
-        // this final call are already counted in totalBytes.
+        // this final call are already counted in totalBytes; an error keeps the
+        // library's message for the engine's report.
+        if (err != MPG123_DONE) {
+            m_impl->lastError = mpg123_plain_strerror(err);
+        }
         break;
     }
 
@@ -319,8 +328,10 @@ bool Mpg123Decoder::seek(std::uint64_t frame) {
         return false;
     }
     // Discard the pre-seek window so the live readout reflects the new position
-    // rather than blending across the jump.
+    // rather than blending across the jump; a successful seek is also a fresh
+    // start for the error observer.
     m_impl->meter.reset(m_impl->src.bitrateKbps);
+    m_impl->lastError.clear();
     return true;
 }
 

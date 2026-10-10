@@ -50,9 +50,10 @@
 // (NullSink's fire* injectors call the engine from the test thread), the mode
 // gates that void the same-format fast paths after a rate-mode flip, the
 // device-outcome observers and the info-forwarding chain, the output-failure
-// paths (a sink-reported failure, a refused start(), the stall watchdog), and
-// the playNow/setQueue primitives with the device-unavailable and seek-rejected
-// hardening paths.
+// paths (a sink-reported failure, a refused start(), the stall watchdog), the
+// decode-outcome report (the ramp's damage faults) and the underrun report,
+// and the playNow/setQueue primitives with the device-unavailable and
+// seek-rejected hardening paths.
 //
 // Build with -DRAWFORM_SANITIZE=thread and run through ctest. The state and
 // position assertions catch transport-logic regressions; TSan catches any race
@@ -137,18 +138,41 @@ inline float enc(std::uint64_t sampleIndex) noexcept {
     return static_cast<float>(sampleIndex & 0xFFFFFFu);
 }
 
+// The damage shapes a ramp can model, for the engine's decode-outcome report:
+//   Damaged:   plays in full but reports three recovered errors (a FLAC with
+//              three bad frames the library resynced past).
+//   Truncated: declares `totalFrames` as an exact PCM source but ends cleanly
+//              at half of it (a WAV cut short of its header's length).
+//   Broken:    ends at half with a lastError() (a stream the decoder could not
+//              continue).
+//   Slow:      every read() sleeps, starving the ring (an underrun generator).
+enum class RampFault { None, Damaged, Truncated, Broken, Slow };
+
 class RampDecoder final : public IDecoder {
 public:
     RampDecoder(std::uint32_t rate, std::uint16_t channels,
                 std::uint64_t totalFrames, bool seekable,
-                std::uint64_t valueBase = 0, bool seekFails = false)
+                std::uint64_t valueBase = 0, bool seekFails = false,
+                RampFault fault = RampFault::None)
         : m_fmt{rate, channels}, m_total(totalFrames), m_seekable(seekable),
-          m_valueBase(valueBase), m_seekFails(seekFails) {}
+          m_valueBase(valueBase), m_seekFails(seekFails), m_fault(fault) {}
 
     [[nodiscard]] AudioFormat   format()      const override { return m_fmt; }
-    [[nodiscard]] SourceInfo    sourceInfo()  const override { return SourceInfo{}; }
+    [[nodiscard]] SourceInfo    sourceInfo()  const override {
+        SourceInfo info;
+        // The truncation check applies to exact sources only; the truncated
+        // ramp claims to be one, every other ramp stays Unknown as before.
+        if (m_fault == RampFault::Truncated) {
+            info.codec = rawform::audio::Codec::Pcm;
+        }
+        return info;
+    }
     [[nodiscard]] std::uint64_t totalFrames() const override { return m_total; }
     [[nodiscard]] bool          seekable()    const override { return m_seekable; }
+    [[nodiscard]] std::string   lastError()   const override { return m_lastError; }
+    [[nodiscard]] std::uint64_t recoveredErrors() const noexcept override {
+        return m_fault == RampFault::Damaged ? 3u : 0u;
+    }
 
     bool seek(std::uint64_t frame) override {
         if (!m_seekable) {
@@ -169,14 +193,26 @@ public:
 
     std::size_t read(float* dst, std::size_t frames) override {
         const std::size_t ch = m_fmt.channels;
-        std::size_t       produced = 0;
-        while (produced < frames && m_pos < m_total) {
+        // The faults that end the stream early stop at half the declared
+        // length; Broken also records why. Slow starves the caller first.
+        std::uint64_t end = m_total;
+        if (m_fault == RampFault::Truncated || m_fault == RampFault::Broken) {
+            end = m_total / 2;
+        }
+        if (m_fault == RampFault::Slow) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+        std::size_t produced = 0;
+        while (produced < frames && m_pos < end) {
             const std::uint64_t base = m_valueBase + m_pos * ch;
             for (std::size_t c = 0; c < ch; ++c) {
                 dst[produced * ch + c] = enc(base + c);
             }
             ++m_pos;
             ++produced;
+        }
+        if (m_fault == RampFault::Broken && m_pos >= end && produced < frames) {
+            m_lastError = "simulated decode failure";
         }
         return produced;
     }
@@ -187,6 +223,8 @@ private:
     bool          m_seekable;
     std::uint64_t m_valueBase;
     bool          m_seekFails;
+    RampFault     m_fault;
+    std::string   m_lastError;
     std::uint64_t m_pos = 0;
 };
 
@@ -201,6 +239,8 @@ private:
 //   "noseek:<rate>:<channels>:<frames>:<base>"   -> NOT seekable, value base
 //   "seekfail:<frames>" (+ the rate/ch/base forms) -> seekable() true but seek()
 //                                                   is rejected (the abandon path)
+//   "damaged:", "truncated:", "broken:", "slow:" (+ the same forms) -> seekable,
+//                                                   with that RampFault (above)
 // Anything else fails to open (returns nullptr), which is how the open-failure
 // skip path is exercised. The factory is stateless and reentrant; the engine
 // thread is its only caller, but reentrancy keeps it honest.
@@ -220,8 +260,9 @@ public:
         }
         parts.push_back(cur);
 
-        bool seekable  = true;
-        bool seekFails = false;
+        bool      seekable  = true;
+        bool      seekFails = false;
+        RampFault fault     = RampFault::None;
         if (!parts.empty() && parts[0] == "ramp") {
             seekable = true;
         } else if (!parts.empty() && parts[0] == "noseek") {
@@ -231,6 +272,14 @@ public:
             // takes its "decoder rejected the target" abandon path.
             seekable  = true;
             seekFails = true;
+        } else if (!parts.empty() && parts[0] == "damaged") {
+            fault = RampFault::Damaged;
+        } else if (!parts.empty() && parts[0] == "truncated") {
+            fault = RampFault::Truncated;
+        } else if (!parts.empty() && parts[0] == "broken") {
+            fault = RampFault::Broken;
+        } else if (!parts.empty() && parts[0] == "slow") {
+            fault = RampFault::Slow;
         } else {
             if (error) {
                 *error = "unknown test path";
@@ -266,7 +315,7 @@ public:
             return nullptr;
         }
         return std::make_unique<RampDecoder>(rate, channels, frames, seekable,
-                                             valueBase, seekFails);
+                                             valueBase, seekFails, fault);
     }
 
 private:
@@ -593,9 +642,10 @@ public:
         std::lock_guard<std::mutex> lock(m_mtx);
         m_positions.push_back(seconds);
     }
-    void onError(const std::string&) override {
+    void onError(const std::string& message) override {
         std::lock_guard<std::mutex> lock(m_mtx);
         ++m_errors;
+        m_errorMessages.push_back(message);
     }
     void onInfo(const std::string& message) override {
         std::lock_guard<std::mutex> lock(m_mtx);
@@ -654,6 +704,10 @@ public:
         std::lock_guard<std::mutex> lock(m_mtx);
         return m_errors;
     }
+    std::vector<std::string> errorMessages() const {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        return m_errorMessages;
+    }
     std::vector<std::string> infos() const {
         std::lock_guard<std::mutex> lock(m_mtx);
         return m_infos;
@@ -669,6 +723,7 @@ private:
     std::vector<double>      m_positions;
     std::vector<double>      m_trackChangePositions;
     std::vector<std::string> m_infos;
+    std::vector<std::string> m_errorMessages;
     const Engine*            m_engine = nullptr;
     int                      m_errors = 0;
 };
@@ -1939,6 +1994,123 @@ void testOutputStallWatchdogDisabled() {
 }
 
 // ---------------------------------------------------------------------------
+// DECODE OUTCOME AND UNDERRUN SCENARIOS: what the engine says about a track
+// when its decoder retires, and about the ring running dry.
+// ---------------------------------------------------------------------------
+
+// Three damaged tracks in a queue, each a different shape: the engine plays
+// all three to the end (the transport is untouched by damage), announces all
+// three, and reports exactly one error per track at its end, naming it. The
+// formats differ so each boundary is a drain, never a stitch.
+void testDecoderDamageReported() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+    configure(engine, factory, listener, NullSink::Mode::Paced);
+
+    const std::string damaged   = "damaged:44100:2:20000";
+    const std::string truncated = "truncated:48000:2:20000";
+    const std::string broken    = "broken:96000:2:20000";
+    engine.enqueue(damaged);
+    engine.enqueue(truncated);
+    engine.enqueue(broken);
+    engine.play();
+
+    CHECK(waitForCompletion(engine));
+    settle();
+
+    CHECK(listener.trackPaths().size() == 3);
+    CHECK(listener.errors() == 3);
+    const auto msgs = listener.errorMessages();
+    CHECK(msgs.size() == 3);
+    if (msgs.size() == 3) {
+        CHECK(msgs[0].find("3 decode error(s) recovered") != std::string::npos);
+        CHECK(msgs[0].find(damaged) != std::string::npos);
+        CHECK(msgs[1].find("ended early at 10000 of 20000 frames") != std::string::npos);
+        CHECK(msgs[1].find(truncated) != std::string::npos);
+        CHECK(msgs[2].find("decode error in") != std::string::npos);
+        CHECK(msgs[2].find("simulated decode failure") != std::string::npos);
+        CHECK(msgs[2].find(broken) != std::string::npos);
+    }
+    CHECK(engine.state() == State::Stopped);
+}
+
+// The same report lands at a gapless seam: a damaged track stitched into a
+// healthy same-format one is reported when it retires (at the stitch), the
+// healthy one is not, and the run is still one open.
+void testDecoderDamageReportedAtStitch() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto           sink    = std::make_unique<RecordingSink>();
+    RecordingSink* sinkPtr = sink.get();
+    sinkPtr->setCapabilities(makeCaps({44100}, 44100, /*canSwitch=*/true));
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    engine.enqueue("damaged:44100:2:4000:1048576");
+    engine.enqueue("ramp:44100:2:4000:2097152");
+    engine.play();
+
+    CHECK(waitForCompletion(engine));
+    settle();
+
+    CHECK(sinkPtr->recordedDecisions().size() == 1);  // stitched
+    CHECK(listener.trackPaths().size() == 2);
+    CHECK(listener.errors() == 1);
+    const auto msgs = listener.errorMessages();
+    CHECK(msgs.size() == 1 && msgs[0].find("damaged:44100") != std::string::npos);
+}
+
+// A healthy track reports nothing: no error line for a clean end, and a clean
+// ramp claims no damage. (The transport suite covers this implicitly; this
+// pins the negative against the three positives above.)
+void testCleanTrackReportsNothing() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+    configure(engine, factory, listener, NullSink::Mode::Paced);
+
+    engine.enqueue("ramp:44100:2:20000");
+    engine.play();
+    CHECK(waitForCompletion(engine));
+    settle();
+    CHECK(listener.errors() == 0);
+    CHECK(engine.underrunFrames() == 0);
+}
+
+// Underruns: a decoder slower than the consumer starves the ring, the sink
+// zero-pads, and the engine says so: at least one "underrun:" info line and a
+// non-zero session total. The EOS drain's final short pull is not counted,
+// which the clean track above proves (its total is 0).
+void testUnderrunsReported() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+    configure(engine, factory, listener, NullSink::Mode::Paced);
+
+    // 30 ms per 4096-frame read against a consumer taking 1024 frames per
+    // millisecond: the ring cannot stay ahead.
+    engine.enqueue("slow:44100:2:40000");
+    engine.play();
+    CHECK(waitForCompletion(engine, kPacedDrainTimeoutMs));
+    settle();
+
+    CHECK(engine.underrunFrames() > 0);
+    bool sawUnderrunLine = false;
+    for (const std::string& line : listener.infos()) {
+        if (line.rfind("underrun: ", 0) == 0) {
+            sawUnderrunLine = true;
+            break;
+        }
+    }
+    CHECK(sawUnderrunLine);
+    CHECK(listener.errors() == 0);  // an underrun is information, not an error
+}
+
+// ---------------------------------------------------------------------------
 // GAPLESS SCENARIOS: gapless playback. These use the recording sink, whose decision
 // COUNT distinguishes a stitch (no open) from a reconfigure (an open) and whose
 // channel-0 capture proves sample-contiguity across a boundary. Tracks are kept
@@ -2819,6 +2991,11 @@ int main() {
     testStartFailureEndsSession();
     testOutputStallWatchdogStops();
     testOutputStallWatchdogDisabled();
+
+    testDecoderDamageReported();
+    testDecoderDamageReportedAtStitch();
+    testCleanTrackReportsNothing();
+    testUnderrunsReported();
 
     testGaplessStitchSameFormat();
     testGaplessNoStitchDifferentRate();

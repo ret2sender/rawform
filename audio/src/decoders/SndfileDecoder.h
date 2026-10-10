@@ -78,9 +78,15 @@ public:
     [[nodiscard]] bool seekable() const override;
     bool seek(std::uint64_t frame) override;
 
+    /// Error observer (IDecoder.h has the contract): libsndfile's own message
+    /// when a read failed short of the end of the file. PCM has nothing to
+    /// resync past, so recoveredErrors() keeps its default of 0.
+    [[nodiscard]] std::string lastError() const override;
+
 private:
-    /// Defined in the .cpp; holds the SNDFILE*, the channel count, and the facts
-    /// computed once at open time so every const accessor stays a trivial return.
+    /// Defined in the .cpp; holds the SNDFILE*, the channel count, the last read
+    /// error, and the facts computed once at open time so every const accessor
+    /// stays a trivial return.
     struct Impl;
 
     /// Private: only open() constructs this, handing over an already-populated

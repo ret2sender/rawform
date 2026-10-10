@@ -94,9 +94,16 @@ public:
     /// here because MP3 is the canonical variable-rate case.
     [[nodiscard]] std::uint32_t currentBitrateKbps() const override;
 
+    /// Error observer (IDecoder.h has the contract): libmpg123's own message
+    /// when a read failed short of the end of the stream. libmpg123 resyncs
+    /// past damaged frames internally and reports nothing per frame, so
+    /// recoveredErrors() keeps its default of 0.
+    [[nodiscard]] std::string lastError() const override;
+
 private:
     /// Defined in the .cpp; holds the mpg123_handle*, the channel count for the
-    /// interleave math, the live-bitrate meter, and the facts cached at open time.
+    /// interleave math, the live-bitrate meter, the last read error, and the
+    /// facts cached at open time.
     struct Impl;
 
     /// Private: only open() constructs this, handing over an already-populated

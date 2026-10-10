@@ -95,6 +95,16 @@
 // teardown, Stopped, the current track remembered for a retry. A sink whose
 // start() returns false is treated identically.
 //
+// Decode damage and dropouts. A decoder's short read is the end of its
+// stream whatever the cause (IDecoder's rule), so the engine asks why at the
+// moment it retires a decoder: a lastError() is a track cut short, an exact
+// source (PCM, FLAC) that produced fewer frames than it declared is a
+// truncated file, and a recoveredErrors() tally is damage played through.
+// Each is one onError line naming the track; none changes the transport.
+// Underruns (the RT pull finding the ring empty mid-track, zero-padded by the
+// sink) are tallied by the ring source and reported through onInfo on the
+// position cadence, with a session total readable through underrunFrames().
+//
 // Transport-to-sink mapping:
 //   - pause = sink.stop() (joins the RT thread; ring and decoder untouched);
 //     resume = sink.start(); instant, no flush.
@@ -162,7 +172,7 @@
 #include <version>  // __cpp_lib_atomic_shared_ptr feature-test macro
 
 #if defined(__linux__) || defined(__APPLE__)
-#include <pthread.h>  // pthread_setname_np is POSIX (per-platform signature), not in <thread>
+#include <pthread.h>  // pthread_setname_np is POSIX, not in <thread>
 #endif
 
 namespace rawform::audio {
@@ -550,6 +560,18 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     // private mutex otherwise; see CurrentTrackBox.
     CurrentTrackBox            currentInfo;
 
+    // ----- decode outcome and underrun bookkeeping (engine thread only) -------
+    // framesProducedThisTrack counts what the current decoder has delivered
+    // into the ring (reset at every fresh start, cut and stitch; set to the
+    // target by a seek), so retiring an exact decoder can compare it against
+    // totalFrames(). lastUnderrunSeen is the ring source's tally as last
+    // published; the tally resets with the ring, which the publish routine
+    // detects by the count going backwards. underrunTotal is the session sum
+    // behind Engine::underrunFrames().
+    std::uint64_t              framesProducedThisTrack = 0;
+    std::uint64_t              lastUnderrunSeen        = 0;
+    std::atomic<std::uint64_t> underrunTotal{0};
+
     // ----- live bitrate -------------------------------------------
     // The moment-to-moment decode bitrate for the player status line. firePosition
     // publishes it (from the active decoder's currentBitrateKbps()) on the same
@@ -624,19 +646,21 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     bool openAndStart(const std::string& path);          // factory open then startTrack
     bool cutOrStartTo(std::unique_ptr<IDecoder> dec, const std::string& path); // HOLD-CUT or reconfigure to an opened decoder
     void advanceToPendingOrStop();                       // pop next openable, else Stopped
-    bool startSink();                                    // re-anchor tracking, then sink->start()
+    bool startSink();                                    // re-anchor, then sink->start()
     void teardownCurrent();                              // stop + CLOSE sink, then flush (stop/error/shutdown paths)
     void parkForTransition();                            // stop sink, KEEP device open, then flush (transition boundaries)
     void flushEngineState();                             // the shared post-park flush (ring, decoder, seams, readouts)
     std::size_t produceOneStep();                        // one decode/write granule
     void primeUpTo(std::size_t thresholdFrames);         // pre-buffer before start
     void handleProducerEos();                            // Stitch next track gaplessly, or mark exhausted
+    void reportDecoderOutcome();                         // onError for a retiring decoder
+    void publishUnderruns();                             // onInfo + total for new underruns
     void crossSeam(const SeamMarker& marker);            // Fire onTrackChanged + position rebase at a boundary
 
     // --- the engine thread's wait and consumer tracking ---
     std::chrono::milliseconds playingWait() const;       // adaptive bound while Playing
     void resetConsumeTracking();                         // re-anchor at every sink start
-    bool trackConsumption();                             // refresh estimate; true == stalled
+    bool trackConsumption();                             // refresh; true == stalled
 
     // --- publication / notification (engine thread) ---
     void      setState(State s);
@@ -1187,15 +1211,17 @@ bool Engine::Impl::cutOrStartTo(std::unique_ptr<IDecoder> dec,
         // A responsive, click-free cut with only a brief sub-buffer gap, and no
         // RateManager / sink->open round trip.
         sink->stop();        // joins the RT thread; ring + device otherwise untouched
+        publishUnderruns();  // the outgoing track's tally, before the reset drops it
         ringSource.reset();  // RT parked: flush, clear EOS flags, counters + position origin to 0
 
         decoder     = std::move(dec);
         currentPath = path;
         // format and channels are unchanged (the gate guaranteed it), so the
         // existing ring (same capacity) and the staging buffer stay valid.
-        stagedFrames      = 0;
-        stagedOffset      = 0;
-        pendingFinalBlock = false;
+        stagedFrames            = 0;
+        stagedOffset            = 0;
+        pendingFinalBlock       = false;
+        framesProducedThisTrack = 0;
 
         const std::size_t capacity = ringSource.writableFrames();  // empty ring: exact capacity
         // Snapshot before priming for the same reason as startTrack: a held track
@@ -1285,6 +1311,7 @@ void Engine::Impl::doSeek(double seconds) {
     // backward seek out of a near-EOS drain is correct), reset the counters and
     // position origin, clear pending stitch state, and drop any staged
     // pre-seek decode block so its stale samples never bleed into the fresh ring.
+    publishUnderruns();  // before the reset drops the tally
     ringSource.reset();
     seams.clear();
     stagedFrames      = 0;
@@ -1303,8 +1330,12 @@ void Engine::Impl::doSeek(double seconds) {
     }
 
     // Map the next sample heard to the post-seek source frame BEFORE refilling, so
-    // the first frames pulled after start() report the right position.
+    // the first frames pulled after start() report the right position. The
+    // produced count follows: what the decoder delivers from here continues
+    // from `target`, which is what the retiring comparison against
+    // totalFrames() needs.
     ringSource.setPlayhead(target);
+    framesProducedThisTrack = target;
 
     // Re-prime so the restart does not underrun, the same half-ring threshold as
     // a fresh open. The ring is empty here, so writableFrames() is the exact
@@ -1348,9 +1379,10 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
 
     // Producer scratch and staged-block carry, fresh for this track.
     staging.assign(kBlockFrames * (channels == 0 ? 1u : channels), 0.0f);
-    stagedFrames      = 0;
-    stagedOffset      = 0;
-    pendingFinalBlock = false;
+    stagedFrames            = 0;
+    stagedOffset            = 0;
+    pendingFinalBlock       = false;
+    framesProducedThisTrack = 0;
 
     const std::size_t capacity =
         computeCapacityFrames(format.sampleRate, kTargetLatencyMs, kBlockFrames);
@@ -1611,6 +1643,7 @@ std::chrono::milliseconds Engine::Impl::playingWait() const {
 // ring.reset() also resets the counters and position origin, so a subsequent
 // position() reads 0 once the format goes invalid.
 void Engine::Impl::flushEngineState() {
+    publishUnderruns();  // the session total keeps what the reset is about to drop
     ringSource.reset();  // RT parked: safe to flush, clear the EOS flags, reset counters/origin
     decoder.reset();
     seams.clear();       // Any pending gapless stitch state is void after a teardown
@@ -1643,6 +1676,7 @@ std::size_t Engine::Impl::produceOneStep() {
         stagedFrames      = got;
         stagedOffset      = 0;
         pendingFinalBlock = (got < kBlockFrames);  // short read == final block
+        framesProducedThisTrack += got;
     }
 
     const std::size_t remaining = stagedFrames - stagedOffset;
@@ -1680,6 +1714,11 @@ std::size_t Engine::Impl::produceOneStep() {
 // descriptive facts differ, which the marker carries for the deferred
 // onTrackChanged.
 void Engine::Impl::handleProducerEos() {
+    // The retiring decoder's verdict first, whatever follows: a stitch swaps
+    // it out below, a drain drops it at the teardown, and either way this is
+    // the last moment its observers are readable against this track.
+    reportDecoderOutcome();
+
     if (!gaplessEnabled) {
         ringSource.markInputExhausted();
         return;
@@ -1730,8 +1769,9 @@ void Engine::Impl::handleProducerEos() {
         marker.info           = makeTrackInfo(nextPath, *dec);
         seams.push_back(std::move(marker));
 
-        decoder     = std::move(dec);
-        currentPath = nextPath;  // producer-logical current (what a seek targets)
+        decoder                 = std::move(dec);
+        currentPath             = nextPath;  // producer-logical current (a seek's target)
+        framesProducedThisTrack = 0;
         // format / channels unchanged (gate guaranteed dec->format() == format).
         pending.pop_front();
         return;  // the next produceOneStep reads the new decoder into the ring
@@ -1755,6 +1795,65 @@ void Engine::Impl::crossSeam(const SeamMarker& marker) {
     announceTrack(marker.info);
     lastPositionFire =
         std::chrono::steady_clock::now() - std::chrono::milliseconds(kPositionIntervalMs);
+}
+
+// The retiring decoder's damage report, one onError line per finding, naming
+// the track. Three findings: a lastError() is the stream cut short of its end
+// by something the decoder could not continue from; a recoveredErrors() tally
+// is damage the decoder played through (a dropout or a click the user heard),
+// with the frames it cost named when the source is exact; and an EXACT source
+// (PCM, FLAC: decoders whose declared length is the real sample count) that
+// produced fewer frames than it declared with no error to explain it is a
+// truncated file, caught even when the library reported a clean end. Lossy
+// and estimated-length sources skip the length comparison, since their
+// totalFrames() is a container figure. The decoder is `decoder` (the
+// producer-logical current) and still live here.
+void Engine::Impl::reportDecoderOutcome() {
+    if (!decoder) {
+        return;
+    }
+    const std::string   reason    = decoder->lastError();
+    const std::uint64_t recovered = decoder->recoveredErrors();
+    const SourceInfo    source    = decoder->sourceInfo();
+    const std::uint64_t total     = decoder->totalFrames();
+    const bool exact = (source.codec == Codec::Pcm || source.codec == Codec::Flac);
+    const bool shortOfLength = exact && total > 0 && framesProducedThisTrack < total;
+
+    if (!reason.empty()) {
+        notifyError("decode error in '" + currentPath + "': " + reason);
+    }
+    if (recovered > 0) {
+        std::string line = std::to_string(recovered) + " decode error(s) recovered in '" +
+                           currentPath + "'";
+        if (shortOfLength) {
+            line += " (" + std::to_string(total - framesProducedThisTrack) +
+                    " frames lost)";
+        }
+        notifyError(line);
+    } else if (reason.empty() && shortOfLength) {
+        notifyError("'" + currentPath + "' ended early at " +
+                    std::to_string(framesProducedThisTrack) + " of " +
+                    std::to_string(total) + " frames (truncated file)");
+    }
+}
+
+// Underruns: publish what the ring source has tallied since the last look, as
+// one onInfo line (rate-limited by its callers: the position tick, and the
+// ring resets, where the tally is about to be dropped) and into the session
+// total. The tally resets to zero with the ring; a reading below the last one
+// means that happened, and the whole reading is new.
+void Engine::Impl::publishUnderruns() {
+    const std::uint64_t now = ringSource.underrunFrames();
+    if (now < lastUnderrunSeen) {
+        lastUnderrunSeen = 0;
+    }
+    if (now == lastUnderrunSeen) {
+        return;
+    }
+    const std::uint64_t delta = now - lastUnderrunSeen;
+    lastUnderrunSeen          = now;
+    underrunTotal.fetch_add(delta, std::memory_order_relaxed);
+    notifyInfo("underrun: " + std::to_string(delta) + " frames of silence inserted");
 }
 
 // Decode and write until at least thresholdFrames are buffered or the source
@@ -1866,6 +1965,7 @@ void Engine::Impl::logLine(const std::string& line) {
 // HOLD-CUT, every one of which holds a valid `format`, so
 // currentPositionSeconds() reads a real rate.
 void Engine::Impl::firePosition() {
+    publishUnderruns();  // the same cadence: one line per tick at most
     // Refresh the live decode bitrate on the same cadence as position.
     // The decoder reports 0 when it publishes no live figure (PCM, the test ramp),
     // in which case the track nominal stands in. `decoder` is valid in every
@@ -2112,6 +2212,13 @@ bool Engine::outputBitPerfect() const noexcept {
         m_impl->outcomeBits.load(std::memory_order_acquire);
     return (bits & (std::uint64_t{1} << 33)) != 0 &&
            (bits & (std::uint64_t{1} << 32)) != 0;
+}
+
+// The session underrun total, accumulated on the engine thread by
+// publishUnderruns (which also folds in what a ring reset is about to drop),
+// read lock-free by whoever wants the end-of-run figure.
+std::uint64_t Engine::underrunFrames() const noexcept {
+    return m_impl->underrunTotal.load(std::memory_order_relaxed);
 }
 
 }  // namespace rawform::audio

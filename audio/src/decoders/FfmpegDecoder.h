@@ -110,11 +110,19 @@ public:
     /// container-average figure in sourceInfo().
     [[nodiscard]] std::uint32_t currentBitrateKbps() const override;
 
+    /// Error observers (IDecoder.h has the contract). A packet the codec
+    /// rejects as invalid data is skipped and counted in recoveredErrors(),
+    /// as is a decoded frame whose channel count disagrees with the stream's;
+    /// a demuxer, codec, or conversion failure the pump cannot continue from
+    /// ends the track early and lands in lastError().
+    [[nodiscard]] std::string   lastError() const override;
+    [[nodiscard]] std::uint64_t recoveredErrors() const noexcept override;
+
 private:
     /// Defined in the .cpp; holds the AVFormatContext*, AVCodecContext*,
-    /// SwrContext*, the reusable AVFrame/AVPacket, the staging buffer, the running
-    /// output position used by seek and the remainder math, and the facts cached
-    /// at open time so every const accessor stays a trivial return.
+    /// SwrContext*, the reusable AVFrame/AVPacket, the staging buffer, the error
+    /// observers' state, and the facts cached at open time so every const
+    /// accessor stays a trivial return.
     struct Impl;
 
     /// Private: only open() constructs this, handing over an already-populated

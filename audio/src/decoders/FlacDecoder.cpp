@@ -43,6 +43,15 @@
 // the exact compressed size of one FLAC frame over the audio it produced, so the
 // trailing-window average is an accurate "current bitrate". The static
 // sourceInfo().bitrateKbps stays the whole-file average.
+//
+// Damage. libFLAC's error callback is advisory for everything except an
+// unparseable stream: on a lost sync, a bad frame header, bad metadata, or a
+// frame whose CRC does not match, the library has already resynced (or
+// delivered the frame as silence) and will carry on if asked. This decoder asks:
+// those statuses are counted in recoveredErrors() and decoding continues, so a
+// file with one damaged frame plays to its end with one dropout instead of
+// ending there. Only UNPARSEABLE_STREAM, a false return from the pump, or a
+// terminal decoder state ends the track, with the reason kept in lastError().
 
 #include "decoders/FlacDecoder.h"
 
@@ -92,10 +101,14 @@ struct FlacDecoder::Impl {
     // trim the landed block so read() resumes exactly at the requested sample.
     std::uint64_t lastFrameStart = 0;
 
-    // Sticky decode-error flag set by the error callback. read() treats a set
-    // flag as end of stream (a short read), matching the "errors surface as a
-    // clean stop" rule SndfileDecoder follows for a negative sf_readf return.
-    bool errored = false;
+    // Error observers. `terminal` is set by the error callback for the one
+    // status libFLAC cannot continue from (and by read() for a failed pump or
+    // a terminal decoder state), with the reason in `lastError`; read() then
+    // ends the stream with a short read. `recovered` counts the statuses the
+    // library resynced past on its own; read() keeps pumping through them.
+    bool          terminal  = false;
+    std::string   lastError;
+    std::uint64_t recovered = 0;
 
     // Set when seek() lands exactly on totalFrames (a "go to end" request, which
     // the contract allows since libsndfile permits seeking to the length).
@@ -187,13 +200,20 @@ struct FlacDecoder::Impl {
     }
 
     static void errorCallback(const FLAC__StreamDecoder* /*dec*/,
-                              FLAC__StreamDecoderErrorStatus /*status*/,
+                              FLAC__StreamDecoderErrorStatus status,
                               void* client) {
-        // Mid-stream decode error: flag it so read() stops cleanly on the next
-        // pump. We do not try to recover or resync; the contract turns this into
-        // a short read, exactly like SndfileDecoder surfacing a negative read as
-        // EOS.
-        static_cast<Impl*>(client)->errored = true;
+        auto* impl = static_cast<Impl*>(client);
+        if (status == FLAC__STREAM_DECODER_ERROR_STATUS_UNPARSEABLE_STREAM) {
+            // The stream uses a feature this libFLAC cannot decode: nothing
+            // to resync to. End the track with the library's own words.
+            impl->terminal  = true;
+            impl->lastError = FLAC__StreamDecoderErrorStatusString[status];
+            return;
+        }
+        // LOST_SYNC, BAD_HEADER, FRAME_CRC_MISMATCH, BAD_METADATA: the library
+        // has resynced (or silenced the frame) and continues. Count it; read()
+        // keeps pumping.
+        ++impl->recovered;
     }
 };
 
@@ -312,11 +332,16 @@ std::uint32_t FlacDecoder::currentBitrateKbps() const {
     return m_impl->meter.value();
 }
 
+// Error observers: trivial reads of the state the callback and read() keep.
+std::string   FlacDecoder::lastError()       const { return m_impl->lastError; }
+std::uint64_t FlacDecoder::recoveredErrors() const noexcept { return m_impl->recovered; }
+
 // ---------------------------------------------------------------------------
 // Decode. Drains the staging buffer first; when it runs dry, pumps libFLAC for
 // one more frame and tries again. Honors "fill fully, short only at EOS, 0 ==
 // EOS": the loop ends only when the request is satisfied or the decoder reaches
-// end of stream / an error with nothing left to hand back.
+// end of stream, or a terminal error with nothing left to hand back (recovered
+// errors do not end it; see the file header).
 std::size_t FlacDecoder::read(float* dst, std::size_t frames) {
     if (frames == 0) {
         return 0;
@@ -347,19 +372,30 @@ std::size_t FlacDecoder::read(float* dst, std::size_t frames) {
             continue;
         }
 
-        // 2) Staging is empty. A prior error or a terminal decoder state means
-        //    end of stream: stop and return the short count.
-        if (m_impl->errored) {
+        // 2) Staging is empty. A terminal error or a terminal decoder state
+        //    means the stream is over: stop and return the short count. The
+        //    error states past END_OF_STREAM (seek error, aborted, allocation
+        //    failure) record their name as the reason; END_OF_STREAM itself is
+        //    the clean end and records nothing.
+        if (m_impl->terminal) {
             break;
         }
         const FLAC__StreamDecoderState state =
             FLAC__stream_decoder_get_state(m_impl->dec);
         if (state >= FLAC__STREAM_DECODER_END_OF_STREAM) {
-            break;  // END_OF_STREAM or any of the error states
+            if (state != FLAC__STREAM_DECODER_END_OF_STREAM &&
+                m_impl->lastError.empty()) {
+                m_impl->terminal  = true;
+                m_impl->lastError = FLAC__StreamDecoderStateString[state];
+            }
+            break;
         }
 
         // 3) Pump exactly one frame. The write callback appends to staging; a
-        //    false return is a hard error, which we also turn into a clean stop.
+        //    false return is a hard error (a read or allocation failure, per
+        //    libFLAC), which ends the stream with the decoder state as the
+        //    reason. A frame the error callback merely counted leaves the pump
+        //    returning true with nothing staged, and the loop pumps again.
         //
         //    Bracket the pump with the decode-position byte offset so
         //    we know how many compressed bytes this one frame cost, and pair that
@@ -372,6 +408,11 @@ std::size_t FlacDecoder::read(float* dst, std::size_t frames) {
         const std::size_t stageBefore = m_impl->staging.size();
 
         if (!FLAC__stream_decoder_process_single(m_impl->dec)) {
+            m_impl->terminal = true;
+            if (m_impl->lastError.empty()) {
+                m_impl->lastError = FLAC__StreamDecoderStateString[
+                    FLAC__stream_decoder_get_state(m_impl->dec)];
+            }
             break;
         }
 
@@ -404,10 +445,13 @@ bool FlacDecoder::seek(std::uint64_t frame) {
     }
 
     // Start clean: drop anything staged so the only block present afterwards is
-    // the one the seek lands on, which keeps lastFrameStart unambiguous.
+    // the one the seek lands on, which keeps lastFrameStart unambiguous. A
+    // successful seek is a fresh start for the terminal flag and its reason;
+    // the recovered tally is cumulative by contract and stays.
     m_impl->staging.clear();
     m_impl->stagePos = 0;
-    m_impl->errored  = false;
+    m_impl->terminal = false;
+    m_impl->lastError.clear();
 
     // Seek-to-end parity. When the length is known and the target is at or past
     // it, libFLAC's seek_absolute would fail (total is one past the last valid

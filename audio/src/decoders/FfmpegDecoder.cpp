@@ -56,6 +56,15 @@
 // and front-trim the landing block so read() resumes at `frame`. Position is
 // frame-accurate; it is NOT bit-exact for lossy codecs, because inter-frame
 // filter state differs across the seek boundary (the same caveat libmpg123 has).
+//
+// Damage. A packet the codec refuses with AVERROR_INVALIDDATA is one corrupt
+// packet, not a broken stream: it is dropped, counted in recoveredErrors(), and
+// the pump moves to the next one, so a damaged file plays to its end with a
+// dropout where the damage is. A decoded frame whose channel count disagrees
+// with the stream's (a mid-stream parameter change the staging math cannot
+// absorb) is dropped the same way. Anything else negative from the demuxer or
+// the codec is a stream the pump cannot continue, which ends the track with
+// the libav* message in lastError().
 
 #include "decoders/FfmpegDecoder.h"
 
@@ -173,9 +182,9 @@ std::uint16_t losslessDepth(AVCodecID id, const AVCodecParameters* par) {
 // ---------------------------------------------------------------------------
 // The pimpl. Owns every FFmpeg object (freed in its destructor so FfmpegDecoder's
 // own destructor stays the defaulted one), the staging buffer that bridges the
-// variable frame size to read(), and the facts cached at open time. The running
-// outputPos is the absolute frame index the next read() will return; it is the
-// backbone of both the post-seek front-trim and the EOS bookkeeping.
+// variable frame size to read(), the error observers, and the facts cached at
+// open time. Position is not tracked here: the engine owns the playhead, and
+// seek() lands by decoding forward from the demuxer's own timestamps.
 struct FfmpegDecoder::Impl {
     // ---- FFmpeg objects -----------------------------------------------------
     AVFormatContext* fmtCtx      = nullptr;
@@ -209,15 +218,28 @@ struct FfmpegDecoder::Impl {
     // ---- decode/pull state --------------------------------------------------
     // staging holds interleaved float32 produced by the converter but not yet
     // handed to read(); stagePos is the read cursor in FLOATS from the front,
-    // exactly the FlacDecoder layout. outputPos is the absolute frame index of
-    // staging's front, so it is also the index the next read() returns.
+    // exactly the FlacDecoder layout.
     std::vector<float> staging;
-    std::size_t        stagePos  = 0;
-    std::uint64_t      outputPos = 0;
+    std::size_t        stagePos = 0;
 
     bool swrReady  = false;  // resampler configured from the first decoded frame
     bool eof       = false;  // decoder fully drained (receive returned EOF)
     bool draining  = false;  // the NULL flush packet has been sent
+
+    // Error observers. lastError is set where the pump gives up on the stream
+    // (and cleared by a successful seek, a fresh start); recovered counts the
+    // packets and frames dropped while decoding continued.
+    std::string   lastError;
+    std::uint64_t recovered = 0;
+
+    // Give up on the stream: record the reason (first one wins) and mark the
+    // decoder drained so read() returns short from here on.
+    void fail(const std::string& reason) {
+        if (lastError.empty()) {
+            lastError = reason;
+        }
+        eof = true;
+    }
 
     // True when pkt still holds a packet the codec refused with
     // AVERROR(EAGAIN); supplyPacket re-sends it before reading further, so a
@@ -318,15 +340,19 @@ struct FfmpegDecoder::Impl {
     // Drive the send-packet / receive-frame state machine until ONE decoded
     // frame is available in `frame`, returning true. Returns false when the
     // stream is fully drained or an unrecoverable decode error occurs (both
-    // surface to read() as a clean short read, the engine-wide rule). The caller
-    // owns the frame on a true return and must unref it (directly, or via
-    // appendCurrentFrame which leaves the unref to the caller).
+    // surface to read() as a short read; lastError tells them apart). The
+    // caller owns the frame on a true return and must unref it (directly, or
+    // via appendCurrentFrame which leaves the unref to the caller).
     //
     // The loop receives first and only feeds a packet when the decoder reports
     // it is hungry (EAGAIN). Because a packet is sent only right after the
     // decoder said it had no output queued, a send-EAGAIN is nearly impossible
     // for audio codecs; supplyPacket still handles it by retaining the packet
-    // for resend rather than unreffing it, so nothing is ever dropped.
+    // for resend rather than unreffing it, so nothing is ever dropped. A
+    // receive that reports invalid data (a codec that decodes on receive met a
+    // corrupt packet) is counted and treated as hunger: the next packet goes
+    // in; a wedged codec that refuses both ways is caught by supplyPacket's
+    // double-refusal rule, so this cannot spin.
     bool receiveOneFrame() {
         if (eof) {
             return false;
@@ -340,11 +366,13 @@ struct FfmpegDecoder::Impl {
                 eof = true;
                 return false;
             }
-            if (r != AVERROR(EAGAIN)) {
-                eof = true;  // genuine decode error: stop cleanly, like the others
+            if (r == AVERROR_INVALIDDATA) {
+                ++recovered;  // one bad packet's worth of output; feed the next
+            } else if (r != AVERROR(EAGAIN)) {
+                fail("decode failed: " + avErr(r));
                 return false;
             }
-            // EAGAIN: the decoder needs input. Supply one packet, or enter drain.
+            // The decoder needs input. Supply one packet, or enter drain.
             if (!supplyPacket()) {
                 // Input exhausted and the flush packet has been sent; the next
                 // receive will hand back the remaining frames and then EOF. Loop.
@@ -362,9 +390,10 @@ struct FfmpegDecoder::Impl {
     // retained for resend, see below). The send return is checked: the
     // receive-first design in read() makes send-EAGAIN close to impossible for
     // audio codecs (the decoder is always drained before being fed), so the
-    // EAGAIN arm is a correctness backstop rather than a hot path, and any other
-    // negative return means a wedged or broken codec, which ends the track
-    // cleanly instead of looping against it.
+    // EAGAIN arm is a correctness backstop rather than a hot path; a packet
+    // refused as invalid data is dropped and counted (the next one may be
+    // fine); any other negative return means a wedged or broken codec, which
+    // ends the track with the reason recorded instead of looping against it.
     bool supplyPacket() {
         if (draining) {
             return false;  // flush packet already sent; nothing left to feed
@@ -373,6 +402,12 @@ struct FfmpegDecoder::Impl {
             if (!resend) {
                 const int r = av_read_frame(fmtCtx, pkt);
                 if (r < 0) {
+                    if (r != AVERROR_EOF) {
+                        // A demuxer failure short of the end: the remainder of
+                        // the file is unreadable. Drain what the codec holds
+                        // and record why the track ends here.
+                        fail("demux failed: " + avErr(r));
+                    }
                     avcodec_send_packet(codecCtx, nullptr);  // enter drain mode
                     draining = true;
                     return false;
@@ -402,10 +437,20 @@ struct FfmpegDecoder::Impl {
                 resend = true;
                 return true;
             }
+            if (sent == AVERROR_INVALIDDATA) {
+                // One corrupt packet. Drop it, count it, and read the next; the
+                // codec context is intact and the stream goes on.
+                ++recovered;
+                resend = false;
+                av_packet_unref(pkt);
+                continue;
+            }
             if (sent < 0) {
                 // Hard send failure: the codec context is broken for this
-                // stream. Flush what it may still hold and end the track; read()
-                // drains the remainder and reports EOS, and the engine advances.
+                // stream. Flush what it may still hold and end the track with
+                // the reason; read() drains the remainder and returns short,
+                // and the engine reports and advances.
+                fail("codec rejected the stream: " + avErr(sent));
                 resend = false;
                 av_packet_unref(pkt);
                 avcodec_send_packet(codecCtx, nullptr);
@@ -429,17 +474,25 @@ struct FfmpegDecoder::Impl {
     }
 
     // Convert the frame currently held in `frame` to packed float32 and append
-    // it to staging. Returns false only on a conversion failure (treated as a
-    // clean stop). An empty frame appends nothing and is not an error. swr runs
+    // it to staging. Returns false only on a conversion failure (the caller
+    // ends the track). An empty frame appends nothing and is not an error, and
+    // neither is a frame whose channel count disagrees with the stream's: the
+    // staging math and the converter are sized for the stream's count, so such
+    // a frame (a mid-stream parameter change, a dependent substream) is dropped
+    // and counted rather than written past the staging buffer. swr runs
     // one-to-one here (equal in/out rate, packed-float out), so the produced
     // count equals nb_samples; we trim to the actual count defensively.
     bool appendCurrentFrame() {
-        if (!swrReady && !configureSwr()) {
-            return false;
-        }
         const int inSamples = frame->nb_samples;
         if (inSamples <= 0) {
             return true;
+        }
+        if (frame->ch_layout.nb_channels != static_cast<int>(channels)) {
+            ++recovered;
+            return true;
+        }
+        if (!swrReady && !configureSwr()) {
+            return false;
         }
         const std::size_t base = staging.size();
         staging.resize(base + static_cast<std::size_t>(inSamples) * channels);
@@ -587,8 +640,17 @@ std::unique_ptr<IDecoder> FfmpegDecoder::open(const std::string& path,
             total = exact;
         }
         // The scan ran the demuxer to EOF; rewind to the start so the first read()
-        // begins at frame 0. The codec is already open, so flush it too.
-        av_seek_frame(impl->fmtCtx, si, 0, AVSEEK_FLAG_BACKWARD);
+        // begins at frame 0. A demuxer that cannot rewind (through either seek
+        // entry point) would hand the first read() an EOF, so that is an open
+        // failure, not a silently empty track. The codec is already open, so
+        // flush it too.
+        if (av_seek_frame(impl->fmtCtx, si, 0, AVSEEK_FLAG_BACKWARD) < 0 &&
+            avformat_seek_file(impl->fmtCtx, si, INT64_MIN, 0, INT64_MAX, 0) < 0) {
+            if (error) {
+                *error = "ffmpeg could not rewind '" + path + "' after the duration scan";
+            }
+            return nullptr;
+        }
         avcodec_flush_buffers(impl->codecCtx);
     }
     impl->total = total;
@@ -642,6 +704,12 @@ std::uint32_t FfmpegDecoder::currentBitrateKbps() const {
     return m_impl->meter.value();
 }
 
+// Error observers: trivial reads of the state the pump keeps.
+std::string   FfmpegDecoder::lastError()       const { return m_impl->lastError; }
+std::uint64_t FfmpegDecoder::recoveredErrors() const noexcept {
+    return m_impl->recovered;
+}
+
 // ---------------------------------------------------------------------------
 // Decode. Drains the staging buffer first; when it runs dry, pumps one more
 // decoded+converted frame and tries again. Honors "fill fully, short only at
@@ -668,9 +736,8 @@ std::size_t FfmpegDecoder::read(float* dst, std::size_t frames) {
             for (std::size_t i = 0; i < take * ch; ++i) {
                 dstPtr[i] = srcPtr[i];
             }
-            m_impl->stagePos  += take * ch;
-            done              += take;
-            m_impl->outputPos += take;
+            m_impl->stagePos += take * ch;
+            done             += take;
             if (m_impl->stagePos >= m_impl->staging.size()) {
                 m_impl->clearStaging();
             }
@@ -688,7 +755,7 @@ std::size_t FfmpegDecoder::read(float* dst, std::size_t frames) {
         const bool ok = m_impl->appendCurrentFrame();
         av_frame_unref(m_impl->frame);
         if (!ok) {
-            m_impl->eof = true;
+            m_impl->fail("sample format conversion failed");
             break;
         }
         // Pair the compressed bytes consumed for this frame (summed in
@@ -737,7 +804,6 @@ bool FfmpegDecoder::seek(std::uint64_t frame) {
         if (frame == m_impl->total) {
             m_impl->forcedEos = true;
             m_impl->eof       = true;
-            m_impl->outputPos = m_impl->total;
             return true;
         }
         m_impl->forcedEos = false;
@@ -768,6 +834,7 @@ bool FfmpegDecoder::seek(std::uint64_t frame) {
     m_impl->clearStaging();
     m_impl->eof      = false;
     m_impl->draining = false;
+    m_impl->lastError.clear();  // a successful seek is a fresh start for the stream
     // A packet retained for resend belongs to the pre-seek position; drop
     // it, or the first post-seek supply would feed stale compressed data into
     // the freshly flushed codec.
@@ -793,7 +860,6 @@ bool FfmpegDecoder::seek(std::uint64_t frame) {
             // structural seek-to-end behavior.
             m_impl->eof       = true;
             m_impl->forcedEos = true;
-            m_impl->outputPos = m_impl->total > 0 ? m_impl->total : frame;
             return true;
         }
 
@@ -827,14 +893,13 @@ bool FfmpegDecoder::seek(std::uint64_t frame) {
         const bool ok = m_impl->appendCurrentFrame();
         av_frame_unref(m_impl->frame);
         if (!ok) {
-            m_impl->eof = true;
+            m_impl->fail("sample format conversion failed");
             return true;  // landed, but no audio could be produced; read() stops
         }
         const std::uint64_t skip = frame > start ? frame - start : 0;
         const std::size_t   skipFloats =
             static_cast<std::size_t>(skip) * m_impl->channels;
-        m_impl->stagePos  = std::min(skipFloats, m_impl->staging.size());
-        m_impl->outputPos = frame;
+        m_impl->stagePos     = std::min(skipFloats, m_impl->staging.size());
         m_impl->pendingBytes = 0;  // decode-forward bytes are not a real read frame
         return true;
     }

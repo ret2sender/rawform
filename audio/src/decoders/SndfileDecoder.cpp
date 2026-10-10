@@ -112,6 +112,7 @@ struct SndfileDecoder::Impl {
     SourceInfo    src{};
     std::uint64_t total    = 0;
     bool          seekable = false;
+    std::string   lastError;         // set by a failed read, cleared by a seek
 
     ~Impl() {
         if (snd) {
@@ -213,6 +214,7 @@ AudioFormat   SndfileDecoder::format()      const { return m_impl->fmt; }
 SourceInfo    SndfileDecoder::sourceInfo()  const { return m_impl->src; }
 std::uint64_t SndfileDecoder::totalFrames() const { return m_impl->total; }
 bool          SndfileDecoder::seekable()    const { return m_impl->seekable; }
+std::string   SndfileDecoder::lastError()   const { return m_impl->lastError; }
 
 // ---------------------------------------------------------------------------
 // Decode. Honors the "fill fully, short only at EOS, 0 == EOS" contract by
@@ -230,8 +232,13 @@ std::size_t SndfileDecoder::read(float* dst, std::size_t frames) {
         const auto want = static_cast<sf_count_t>(frames - done);
         const sf_count_t got = sf_readf_float(m_impl->snd, dst + done * ch, want);
         if (got <= 0) {
-            break;  // 0 is end of stream; a negative would be an error, which we
-                    // also surface as a short read so the caller stops cleanly.
+            // 0 is end of stream. A negative is a read error, also surfaced
+            // as a short read so the caller stops cleanly, with libsndfile's
+            // message kept for the engine's report.
+            if (got < 0) {
+                m_impl->lastError = sf_strerror(m_impl->snd);
+            }
+            break;
         }
         done += static_cast<std::size_t>(got);
     }
@@ -248,7 +255,11 @@ bool SndfileDecoder::seek(std::uint64_t frame) {
     }
     const auto target = static_cast<sf_count_t>(frame);
     const sf_count_t result = sf_seek(m_impl->snd, target, SEEK_SET);
-    return result == target;
+    if (result != target) {
+        return false;
+    }
+    m_impl->lastError.clear();  // a successful seek is a fresh start
+    return true;
 }
 
 }  // namespace rawform::audio

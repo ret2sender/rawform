@@ -28,11 +28,22 @@
 // downstream of the decoder.
 //
 // This header is intentionally as dependency-free as Types.h: it pulls in the
-// shared value types and the standard size/integer types, and nothing else. In
-// particular it never sees a codec library header, so the engine, the CLI, and
-// the tests can program against the decoder contract without inheriting any
-// third-party include. Concrete decoders keep their library headers private to
-// their own .cpp via pimpl.
+// shared value types and the standard size/integer/string types, and nothing
+// else. In particular it never sees a codec library header, so the engine, the
+// CLI, and the tests can program against the decoder contract without
+// inheriting any third-party include. Concrete decoders keep their library
+// headers private to their own .cpp via pimpl.
+//
+// Errors. The read contract below is deliberately shaped so the engine detects
+// end of stream from the read count alone; it therefore cannot tell a clean
+// end from a stream that broke. Two observers close that gap without changing
+// the pull loop: lastError() says why a decoder stopped when it was not the
+// end of the file, and recoveredErrors() counts the damage a decoder skipped
+// or silenced while decoding on. A decoder keeps playing through anything its
+// library can resync past (a FLAC frame with a bad CRC, a corrupt packet) and
+// stops only on what it cannot (an unparseable stream, a broken codec
+// context); the engine reads both observers when it retires the decoder and
+// reports through its own error channel.
 //
 // Construction is deliberately NOT part of this interface. Decoders are created
 // through a concrete non-throwing factory (SndfileDecoder::open, or the
@@ -46,6 +57,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>  // lastError
 
 namespace rawform::audio {
 
@@ -76,7 +88,10 @@ public:
     /// remains; a return value less than frames means end of stream was reached
     /// on this call, and a return of 0 means the stream was already at EOS. This
     /// "fill fully, short only at EOS" rule is what lets the decode thread detect
-    /// end of stream from the read count alone, with no separate EOS query.
+    /// end of stream from the read count alone, with no separate EOS query. A
+    /// stream that stops for a reason other than its end is ALSO a short read
+    /// (the loop must terminate either way); lastError() below tells the two
+    /// apart, and recoveredErrors() reports damage the decoder played through.
     virtual std::size_t read(float* dst, std::size_t frames) = 0;
 
     /// Whether seek() may be issued at all. For a regular file this is true; for
@@ -108,6 +123,24 @@ public:
     /// (never the RT thread, never concurrently with read()), so an implementation
     /// needs no locking of its own.
     [[nodiscard]] virtual std::uint32_t currentBitrateKbps() const { return 0; }
+
+    /// Why the stream stopped, when it stopped for any reason other than its
+    /// clean end: a short human-readable phrase (the library's own message
+    /// where it has one), empty otherwise. Set at the moment read() first
+    /// returns short because of it; cleared by a successful seek(), which
+    /// gives the stream a fresh start. The engine reads it when it retires a
+    /// decoder at end of stream and reports it through Listener::onError. The
+    /// default (never an error) suits a source that cannot fail mid-stream,
+    /// such as the test ramp.
+    [[nodiscard]] virtual std::string lastError() const { return {}; }
+
+    /// How many frames or packets the decoder had to skip, silence, or resync
+    /// past while still producing output: damage the user heard as a dropout
+    /// or a click but that did not end the stream. Cumulative for the life of
+    /// the decoder (a seek back across a damaged region counts it again), so
+    /// the engine compares against its own last reading. 0 by default and for
+    /// decoders whose libraries report nothing recoverable.
+    [[nodiscard]] virtual std::uint64_t recoveredErrors() const noexcept { return 0; }
 };
 
 }  // namespace rawform::audio

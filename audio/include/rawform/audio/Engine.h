@@ -162,6 +162,13 @@ public:
         virtual void onStateChanged(State /*state*/) {}
         virtual void onTrackChanged(const TrackInfo& /*track*/) {}
         virtual void onPositionChanged(double /*seconds*/) {}
+        /// Something went wrong that the user should know about: a path that
+        /// would not open, a refused seek, an output device that failed or
+        /// stalled (the engine then settles in Stopped), or a track whose
+        /// decoder reported damage when it ended (a decode error that cut it
+        /// short, an exact source that ended before its declared length, or
+        /// frames skipped mid-track); the last group changes nothing about the
+        /// transport, the track simply played with the damage it had.
         virtual void onError(const std::string& /*message*/) {}
         /// Informational diagnostics worth a console line but not an error: the
         /// output sink's device-negotiation lines (rate switches, measured
@@ -370,6 +377,16 @@ public:
     /// read them inside onTrackChanged for values coherent with that track.
     [[nodiscard]] std::uint32_t outputDeviceRateHz() const noexcept;
     [[nodiscard]] bool          outputBitPerfect() const noexcept;
+
+    /// Frames the output asked for and the engine could not supply, summed
+    /// over the engine's life: every one of them reached the device as
+    /// silence (the sink zero-pads a short pull), so a non-zero count is an
+    /// audible dropout tally. The engine also reports each increment through
+    /// Listener::onInfo ("underrun: N frames") on the position cadence as it
+    /// happens; this is the pull companion for an end-of-run summary (the
+    /// CLI's Done line). Not counted: the final short pull of a track (the EOS
+    /// drain) and anything while Paused or Stopped. Readable from any thread.
+    [[nodiscard]] std::uint64_t underrunFrames() const noexcept;
 
 private:
     struct Impl;                   ///< engine thread, command queue, state machine
