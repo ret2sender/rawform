@@ -46,12 +46,16 @@
 //
 // Damage. libFLAC's error callback is advisory for everything except an
 // unparseable stream: on a lost sync, a bad frame header, bad metadata, or a
-// frame whose CRC does not match, the library has already resynced (or
-// delivered the frame as silence) and will carry on if asked. This decoder asks:
-// those statuses are counted in recoveredErrors() and decoding continues, so a
-// file with one damaged frame plays to its end with one dropout instead of
-// ending there. Only UNPARSEABLE_STREAM, a false return from the pump, or a
-// terminal decoder state ends the track, with the reason kept in lastError().
+// frame whose CRC does not match, the library has already resynced and will
+// carry on if asked. This decoder asks: decoding continues, so a file with one
+// damaged frame plays to its end with one dropout instead of ending there, and
+// recoveredErrors() counts the damage by REGION, not by callback: one damaged
+// frame mid-file produces a CRC report, then a gap report when the next good
+// frame arrives and the library pads the gap with silence (a lost sync can
+// report several times before the next frame lands), so an error that arrives
+// with no frame written since the previous error belongs to the same region.
+// Only UNPARSEABLE_STREAM, a false return from the pump, or a terminal decoder
+// state ends the track, with the reason kept in lastError().
 
 #include "decoders/FlacDecoder.h"
 
@@ -104,11 +108,14 @@ struct FlacDecoder::Impl {
     // Error observers. `terminal` is set by the error callback for the one
     // status libFLAC cannot continue from (and by read() for a failed pump or
     // a terminal decoder state), with the reason in `lastError`; read() then
-    // ends the stream with a short read. `recovered` counts the statuses the
-    // library resynced past on its own; read() keeps pumping through them.
-    bool          terminal  = false;
+    // ends the stream with a short read. `recovered` counts the damaged
+    // REGIONS the library resynced past on its own (see the file header);
+    // `inDamagedRegion` is the callback-level latch that merges the several
+    // statuses one region produces, cleared by the next frame written.
+    bool          terminal        = false;
     std::string   lastError;
-    std::uint64_t recovered = 0;
+    std::uint64_t recovered       = 0;
+    bool          inDamagedRegion = false;
 
     // Set when seek() lands exactly on totalFrames (a "go to end" request, which
     // the contract allows since libsndfile permits seeking to the length).
@@ -143,6 +150,10 @@ struct FlacDecoder::Impl {
 
         const unsigned ch    = frame->header.channels;
         const unsigned block = frame->header.blocksize;
+
+        // A frame landed: whatever damage preceded it is over, and the next
+        // error status opens a new region.
+        impl->inDamagedRegion = false;
 
         // Record where this block starts, for the post-seek front-trim. libFLAC
         // reports a sample number for a fixed-blocksize stream (the common case)
@@ -210,10 +221,13 @@ struct FlacDecoder::Impl {
             impl->lastError = FLAC__StreamDecoderErrorStatusString[status];
             return;
         }
-        // LOST_SYNC, BAD_HEADER, FRAME_CRC_MISMATCH, BAD_METADATA: the library
-        // has resynced (or silenced the frame) and continues. Count it; read()
-        // keeps pumping.
-        ++impl->recovered;
+        // LOST_SYNC, BAD_HEADER, FRAME_CRC_MISMATCH, BAD_METADATA, and the
+        // gap and range reports newer libFLACs add: the library has resynced
+        // and continues. Count the region once; read() keeps pumping.
+        if (!impl->inDamagedRegion) {
+            impl->inDamagedRegion = true;
+            ++impl->recovered;
+        }
     }
 };
 
@@ -449,8 +463,9 @@ bool FlacDecoder::seek(std::uint64_t frame) {
     // successful seek is a fresh start for the terminal flag and its reason;
     // the recovered tally is cumulative by contract and stays.
     m_impl->staging.clear();
-    m_impl->stagePos = 0;
-    m_impl->terminal = false;
+    m_impl->stagePos        = 0;
+    m_impl->terminal        = false;
+    m_impl->inDamagedRegion = false;
     m_impl->lastError.clear();
 
     // Seek-to-end parity. When the length is known and the target is at or past

@@ -98,9 +98,11 @@ public:
 
     /// Error observers (IDecoder.h has the contract). libFLAC resyncs past a
     /// lost sync, a bad frame header, or a frame whose CRC fails, and this
-    /// decoder keeps going when it does, counting each in recoveredErrors();
-    /// only an unparseable stream, or a decoder state libFLAC cannot continue
-    /// from, ends the track early and lands in lastError().
+    /// decoder keeps going when it does, counting each damaged REGION once in
+    /// recoveredErrors() (the library reports one region through several
+    /// statuses; the .cpp header explains the merge); only an unparseable
+    /// stream, or a decoder state libFLAC cannot continue from, ends the track
+    /// early and lands in lastError().
     [[nodiscard]] std::string   lastError() const override;
     [[nodiscard]] std::uint64_t recoveredErrors() const noexcept override;
 

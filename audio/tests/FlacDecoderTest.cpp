@@ -36,9 +36,11 @@
 //     staging buffer's post-seek front-trim is what this exercises)
 //   - read at EOS returns 0; a straddling read returns the true remainder; one
 //     oversized read returns exactly totalFrames (the "fill fully" rule)
-//   - a damaged frame (bytes flipped inside the first frame's body) is counted
-//     in recoveredErrors() and the decoder plays on to the real end of the
-//     file with lastError() empty, instead of ending the stream at the damage
+//   - a damaged frame (bytes flipped inside a frame's body) is counted ONCE in
+//     recoveredErrors() and the decoder plays on to the real end of the file
+//     with lastError() empty, instead of ending the stream at the damage; both
+//     the first frame (no gap to pad) and a middle frame (libFLAC pads the gap
+//     with silence and reports it separately) are covered
 //   - a nonexistent path yields nullptr and a non-empty error
 //
 // The ramp values are k/2048 for integer k, and 2^(bits-1)/2048 is itself an
@@ -52,6 +54,7 @@
 #include "rawform/audio/IDecoder.h"
 #include "rawform/audio/Types.h"
 
+#include <FLAC/stream_decoder.h>  // frame boundaries for the damage fixture
 #include <FLAC/stream_encoder.h>
 
 #include <algorithm>
@@ -351,69 +354,109 @@ void testEosAndPartial() {
 }
 
 // ---------------------------------------------------------------------------
-// Damage recovery. Flip a few bytes inside the FIRST audio frame's body (past
-// the metadata blocks, which the header walk below skips exactly; 64 bytes into
-// the frame is past its header and CRC-8, well inside subframe data). libFLAC
-// fails that frame's CRC-16, reports it, resyncs on the next frame and keeps
-// decoding. The decoder must: count at least one recovered error, report no
-// lastError(), deliver either the full length (libFLAC pads a detected gap with
-// silence) or the length minus the one dropped block, and decode the tail of
-// the file correctly, which is what proves it played on rather than stopping.
-void testDamagedFrameRecovers() {
-    const std::string path = "rf_flac_damaged.flac";
-    constexpr std::uint64_t frames = 20000;  // five 4096-sample frames at level 5
-    constexpr int           ch     = 2;
-    const float             tol    = integerTolerance(16);
-    CHECK(writeFlac(path, ch, 44100, 16, frames));
+// Damage recovery fixtures. The byte offset at which each audio frame BEGINS,
+// taken from libFLAC's own decode position after each single-frame pump (a raw
+// scan for the frame sync could false-match inside subframe data). The first
+// entry is the end of the metadata; the vector has one entry per frame plus
+// the end of the last one.
+std::vector<std::uint64_t> frameStarts(const std::string& path) {
+    std::vector<std::uint64_t> starts;
+    FLAC__StreamDecoder* dec = FLAC__stream_decoder_new();
+    if (dec == nullptr) {
+        return starts;
+    }
+    const auto write = [](const FLAC__StreamDecoder*, const FLAC__Frame*,
+                          const FLAC__int32* const*, void*) {
+        return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+    };
+    const auto error = [](const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus,
+                          void*) {};
+    if (FLAC__stream_decoder_init_file(dec, path.c_str(), write, nullptr, error,
+                                       nullptr) == FLAC__STREAM_DECODER_INIT_STATUS_OK &&
+        FLAC__stream_decoder_process_until_end_of_metadata(dec)) {
+        FLAC__uint64 pos = 0;
+        while (FLAC__stream_decoder_get_decode_position(dec, &pos)) {
+            starts.push_back(pos);
+            const FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(dec);
+            if (st >= FLAC__STREAM_DECODER_END_OF_STREAM ||
+                !FLAC__stream_decoder_process_single(dec)) {
+                break;
+            }
+        }
+    }
+    FLAC__stream_decoder_finish(dec);
+    FLAC__stream_decoder_delete(dec);
+    return starts;
+}
 
-    // Walk "fLaC" plus the metadata block headers (1 byte last-flag+type, 3
-    // bytes length) to the first audio frame, then damage its body.
+// Flip four bytes 64 bytes into frame `frameIndex` of the file (past the frame
+// header and its CRC-8, well inside subframe data). Returns false when the
+// fixture could not be built.
+bool damageFrame(const std::string& path, std::size_t frameIndex) {
+    const std::vector<std::uint64_t> starts = frameStarts(path);
+    if (starts.size() < frameIndex + 2) {
+        return false;
+    }
     std::vector<unsigned char> bytes;
     {
         std::ifstream in(path, std::ios::binary);
         bytes.assign(std::istreambuf_iterator<char>(in),
                      std::istreambuf_iterator<char>());
     }
-    std::size_t pos = 4;
-    bool        last = false;
-    while (!last && pos + 4 <= bytes.size()) {
-        last = (bytes[pos] & 0x80u) != 0;
-        const std::size_t len = (static_cast<std::size_t>(bytes[pos + 1]) << 16) |
-                                (static_cast<std::size_t>(bytes[pos + 2]) << 8) |
-                                static_cast<std::size_t>(bytes[pos + 3]);
-        pos += 4 + len;
+    const auto damageAt = static_cast<std::size_t>(starts[frameIndex] + 64);
+    if (damageAt + 4 >= starts[frameIndex + 1] || damageAt + 4 >= bytes.size()) {
+        return false;
     }
-    const std::size_t damageAt = pos + 64;
-    CHECK(last);
-    CHECK(damageAt + 4 < bytes.size());
-    if (last && damageAt + 4 < bytes.size()) {
-        for (std::size_t i = 0; i < 4; ++i) {
-            bytes[damageAt + i] ^= 0xFFu;
-        }
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out.write(reinterpret_cast<const char*>(bytes.data()),
-                  static_cast<std::streamsize>(bytes.size()));
+    for (std::size_t i = 0; i < 4; ++i) {
+        bytes[damageAt + i] ^= 0xFFu;
     }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    return static_cast<bool>(out);
+}
+
+// One damaged frame: libFLAC fails its CRC-16, reports it, resyncs on the next
+// frame and keeps decoding. The decoder must count exactly ONE recovered error
+// (a mid-file frame also produces libFLAC's gap report when the next good frame
+// lands and the gap is padded with silence; that is the same damage, not a
+// second), report no lastError(), deliver `expectGot` frames, and decode the
+// tail of the file correctly, which is what proves it played on.
+void checkDamagedFrame(const std::string& path, std::size_t frameIndex,
+                       std::uint64_t frames, int ch, std::uint64_t expectGot, float tol) {
+    CHECK(writeFlac(path, ch, 44100, 16, frames));
+    CHECK(damageFrame(path, frameIndex));
 
     std::unique_ptr<IDecoder> dec = FlacDecoder::open(path);
     CHECK(dec != nullptr);
     if (dec) {
         CHECK(dec->totalFrames() == frames);
         const std::vector<float> all = readAll(*dec);
-        const std::uint64_t got = all.size() / ch;
-        CHECK(got == frames || got == frames - 4096);
-        CHECK(dec->recoveredErrors() >= 1);
+        const std::uint64_t got = all.size() / static_cast<std::size_t>(ch);
+        CHECK(got == expectGot);
+        CHECK(dec->recoveredErrors() == 1);
         CHECK(dec->lastError().empty());
-        // The tail is the file's last 1024 frames whichever way libFLAC handled
-        // the damaged block: silence in place keeps the alignment, a drop
-        // shifts the output but the last frames are still the last frames.
         if (got >= 1024) {
-            const std::size_t tailFloats = 1024 * ch;
+            const std::size_t tailFloats = 1024 * static_cast<std::size_t>(ch);
             CHECK(firstMismatch(all.data() + (all.size() - tailFloats), tailFloats,
-                                (frames - 1024) * ch, tol) < 0);
+                                (frames - 1024) * static_cast<std::uint64_t>(ch),
+                                tol) < 0);
         }
     }
     std::remove(path.c_str());
+}
+
+// Both placements of the damage. Level 5 at 44100 encodes 4096-sample frames,
+// so 20000 frames is five frames. Frame 0 damaged: there is no previous frame
+// for libFLAC to measure a gap from, so the block is simply dropped and the
+// file comes out one block short. Frame 2 damaged: the next good frame reveals
+// the gap, libFLAC pads it with 4096 samples of silence, and the length holds.
+void testDamagedFrameRecovers() {
+    constexpr std::uint64_t frames = 20000;
+    constexpr int           ch     = 2;
+    const float             tol    = integerTolerance(16);
+    checkDamagedFrame("rf_flac_damaged_first.flac", 0, frames, ch, frames - 4096, tol);
+    checkDamagedFrame("rf_flac_damaged_middle.flac", 2, frames, ch, frames, tol);
 }
 
 // ---------------------------------------------------------------------------
