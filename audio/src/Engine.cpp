@@ -244,6 +244,97 @@ AudioFormat unpackFormat(std::uint64_t bits) noexcept {
     return f;
 }
 
+// The device outcome word (Impl::outcomeBits documents the layout and when it
+// is written).
+constexpr std::uint64_t kOutcomeRateMatched = std::uint64_t{1} << 32;
+constexpr std::uint64_t kOutcomeValid       = std::uint64_t{1} << 33;
+constexpr unsigned      kOutcomeMaskShift   = 34;
+constexpr unsigned      kOutcomeDepthShift  = 42;
+
+// Compose the sink's facts with the engine's into the mask the outcome
+// publishes. Resampled is the engine's rate comparison. SystemGain (and
+// anything else a sink can see) is the sink's word. ReducedDepth is the
+// engine's comparison of the sink's realized depth against the source depth:
+// claimed when the device carries fewer bits than the source, or when the
+// source exceeds the 24 bits the float32 pipeline preserves (a 32-bit integer
+// source loses its low byte in the conversion; a 32-bit float WAV is caught by
+// the same test, the Pcm int/float ambiguity Types.h records). A source of
+// unknown depth (every lossy codec reports 0) never claims, and an unknown
+// device depth only leaves the pipeline rule.
+OutputAlterations composeAlterations(const IAudioSink& sink, bool rateMatched,
+                                     std::uint16_t sourceDepth,
+                                     std::uint16_t& realizedDepth) {
+    OutputAlterations mask = sink.outputAlterations();
+    if (!rateMatched) {
+        mask |= toMask(OutputAlteration::Resampled);
+    }
+    realizedDepth = sink.realizedDepthBits();
+    if (sourceDepth != 0 &&
+        ((realizedDepth != 0 && realizedDepth < sourceDepth) || sourceDepth > 24)) {
+        mask |= toMask(OutputAlteration::ReducedDepth);
+    }
+    return mask;
+}
+
+std::uint64_t packOutcome(std::uint32_t rate, bool rateMatched,
+                          OutputAlterations mask, std::uint16_t depth) {
+    return kOutcomeValid | (rateMatched ? kOutcomeRateMatched : 0u) |
+           (std::uint64_t{mask} << kOutcomeMaskShift) |
+           (std::uint64_t{depth & 0xFFu} << kOutcomeDepthShift) |
+           std::uint64_t{rate};
+}
+
+// The mask as a console phrase, for the info line that accompanies a
+// mid-track republication.
+std::string describeAlterations(OutputAlterations mask) {
+    if (mask == 0) {
+        return "none (bit-perfect)";
+    }
+    std::string out;
+    auto add = [&out](const char* word) {
+        if (!out.empty()) {
+            out += ", ";
+        }
+        out += word;
+    };
+    if (hasAlteration(mask, OutputAlteration::Resampled)) {
+        add("resampled");
+    }
+    if (hasAlteration(mask, OutputAlteration::SystemGain)) {
+        add("system volume or mute");
+    }
+    if (hasAlteration(mask, OutputAlteration::ReducedDepth)) {
+        add("reduced depth");
+    }
+    return out;
+}
+
+// The read side of the outcome word, shared by the public pull set and the
+// listener push so the two can never decode it differently.
+struct OutcomeView {
+    bool              valid = false;
+    std::uint32_t     rateHz = 0;
+    bool              rateMatched = false;
+    OutputAlterations mask = 0;
+    std::uint16_t     depthBits = 0;
+    [[nodiscard]] bool bitPerfect() const noexcept {
+        return valid && rateMatched && mask == 0;
+    }
+};
+
+OutcomeView unpackOutcome(std::uint64_t bits) noexcept {
+    OutcomeView v;
+    if ((bits & kOutcomeValid) == 0) {
+        return v;
+    }
+    v.valid       = true;
+    v.rateHz      = static_cast<std::uint32_t>(bits & 0xFFFFFFFFu);
+    v.rateMatched = (bits & kOutcomeRateMatched) != 0;
+    v.mask        = static_cast<OutputAlterations>((bits >> kOutcomeMaskShift) & 0xFFu);
+    v.depthBits   = static_cast<std::uint16_t>((bits >> kOutcomeDepthShift) & 0xFFu);
+    return v;
+}
+
 // Read the RAWFORM_NO_GAPLESS environment knob once (a runtime A/B
 // switch with no public interface change). Gapless is ON by default; it is
 // disabled when the variable is set to anything other than empty or "0". The CLI
@@ -300,7 +391,7 @@ TrackInfo makeTrackInfo(const std::string& path, const IDecoder& dec) {
 enum class CommandType { Enqueue, PlayNow, SetQueue, Play, Pause, Stop, Next, ClearQueue, Seek,
                          RequestOutputDevices, SelectOutputDevice,
                          ExternalRateChanged, DefaultDeviceChanged, DeviceListChanged,
-                         RateDebtChanged, OutputFailed };
+                         RateDebtChanged, OutputFailed, OutputAlterationsChanged };
 
 struct Command {
     CommandType              type;
@@ -543,14 +634,19 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     std::atomic<State>         stateAtomic{State::Stopped};
     std::atomic<std::uint64_t> formatBits{0};  // packed AudioFormat; 0 == invalid
 
-    // The output device outcome for the current open:
-    // [bit 33: valid][bit 32: bit-perfect][low 32: device rate in Hz], one word
-    // so the two public reads can never see each other's torn halves. Published
-    // in startTrack after each successful open (measurement-first, prediction
-    // fallback; see the publication site), untouched across stitches, HOLD-CUTs,
-    // seeks, and pause (the open persists through all of those), cleared by
-    // enterStopped (device released).
+    // The output device outcome for the current open, one word so the public
+    // reads can never see each other's torn halves:
+    //   [bits 42-49: realized device depth][bits 34-41: OutputAlterations mask]
+    //   [bit 33: valid][bit 32: device clocks the source rate][low 32: rate Hz]
+    // publishOutcome writes it in startTrack after each successful open
+    // (measurement-first, prediction fallback; see the publication site) and in
+    // the external-rate reaction; refreshOutcomeFlags recomposes the mask and
+    // depth, keeping the rate half, at every track announcement (the source
+    // depth follows the track, not the open) and on the sink's alterations
+    // nudge. Untouched across HOLD-CUTs, seeks, and pause (the open persists
+    // through all of those), cleared by enterStopped (device released).
     std::atomic<std::uint64_t> outcomeBits{0};
+    std::uint16_t              currentSourceDepth = 0;  // engine thread only
 
     // The current track's length in frames, published with formatBits at each
     // track change. duration() divides it by the published rate, the lock-
@@ -620,6 +716,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void doRateDebtChanged(const std::string& deviceId,  // forward for persistence
                            std::uint32_t originalRateHz, std::uint32_t borrowedRateHz);
     void doOutputFailed(const std::string& reason);      // error, teardown, Stopped
+    void doOutputAlterationsChanged();                   // re-read the sink, republish
     void reopenAtPosition();                             // the shared audible-change boundary
 
     // ----- ISinkEventListener ------------------------------------
@@ -643,6 +740,9 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     }
     void onOutputFailed(const std::string& reason) override {
         post(Command{CommandType::OutputFailed, reason, 0.0, {}, 0, 0});
+    }
+    void onOutputAlterationsChanged() override {
+        post(Command{CommandType::OutputAlterationsChanged, {}, 0.0, {}, 0, 0});
     }
 
     bool startTrack(std::unique_ptr<IDecoder> dec, const std::string& path,
@@ -671,6 +771,14 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void      setState(State s);
     void      enterStopped();                            // clear the gate origin + go Stopped
     void      publishFormat(const AudioFormat& f);
+    /// The device outcome word (see outcomeBits). publishOutcome composes the
+    /// whole word for a rate the caller resolved; refreshOutcomeFlags keeps the
+    /// rate half and recomposes the mask and depth from the sink and the current
+    /// source depth, returning whether the stored word changed. Both read the
+    /// sink, so both require it set and open.
+    void      publishOutcome(std::uint32_t outRate, bool rateMatched);
+    bool      refreshOutcomeFlags();
+    void      notifyDeviceOutcome() const;               // Listener push of the word
     void      announceTrack(const TrackInfo& info);      // Publish observers + notify listener
     void      notifyTrackChanged(const TrackInfo& info) const;
     void      notifyError(const std::string& message) const;
@@ -852,6 +960,7 @@ void Engine::Impl::process(const Command& c) {
         case CommandType::RequestOutputDevices: doRequestOutputDevices(); break;
         case CommandType::SelectOutputDevice:   doSelectOutputDevice(c.path); break;
         case CommandType::ExternalRateChanged:  doExternalRateChanged(c.rateA); break;
+        case CommandType::OutputAlterationsChanged: doOutputAlterationsChanged(); break;
         case CommandType::DefaultDeviceChanged: doDefaultDeviceChanged(); break;
         case CommandType::DeviceListChanged:    doDeviceListChanged(); break;
         case CommandType::RateDebtChanged:      doRateDebtChanged(c.path, c.rateA, c.rateB); break;
@@ -1111,16 +1220,29 @@ void Engine::Impl::doExternalRateChanged(std::uint32_t newRateHz) {
         notifyInfo("device rate changed externally (new rate unknown)");
         return;
     }
-    const bool outBitPerfect = format.isValid() && outRate == format.sampleRate;
-    outcomeBits.store((std::uint64_t{1} << 33) |
-                          (outBitPerfect ? (std::uint64_t{1} << 32) : 0u) |
-                          std::uint64_t{outRate},
-                      std::memory_order_release);
+    const bool rateMatched = format.isValid() && outRate == format.sampleRate;
+    publishOutcome(outRate, rateMatched);
     notifyInfo("device rate changed externally to " + std::to_string(outRate) +
-               " Hz (" + (outBitPerfect ? "bit-perfect" : "resampled") + ")");
-    if (Engine::Listener* l = listener.load(std::memory_order_acquire)) {
-        l->onDeviceOutcomeChanged(outRate, outBitPerfect);
+               " Hz (" + (rateMatched ? "clocking the source rate" : "resampled") +
+               ")");
+    notifyDeviceOutcome();
+}
+
+// The sink saw the platform's gain stage or device format move (a volume
+// slider, a mute, a depth change). Re-read it and republish only when the
+// composed mask or depth actually differs, so a volume drag that stays off
+// unity costs one republication, not one per tick; the sink is free to nudge
+// liberally for the same reason.
+void Engine::Impl::doOutputAlterationsChanged() {
+    if (!sink || !deviceOpen) {
+        return;  // stale nudge racing a close: nothing published, nothing to fix
     }
+    if (!refreshOutcomeFlags()) {
+        return;
+    }
+    const OutcomeView v = unpackOutcome(outcomeBits.load(std::memory_order_relaxed));
+    notifyInfo("output alterations now: " + describeAlterations(v.mask));
+    notifyDeviceOutcome();
 }
 
 // The default output moved and this sink cannot migrate a live stream itself
@@ -1511,13 +1633,11 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
         const std::uint32_t measured = sink->measuredDeviceRateHz();
         const std::uint32_t outRate =
             (measured != 0) ? measured : decision.deviceRate;
-        const bool outBitPerfect =
+        const bool rateMatched =
             (measured != 0) ? (measured == format.sampleRate)
                             : !decision.resampleNeeded;
-        outcomeBits.store((std::uint64_t{1} << 33) |
-                              (outBitPerfect ? (std::uint64_t{1} << 32) : 0u) |
-                              std::uint64_t{outRate},
-                          std::memory_order_release);
+        currentSourceDepth = startedInfo.source.bitsPerSample;
+        publishOutcome(outRate, rateMatched);
     }
 
     // Prime the position tick so the first loop iteration fires the start
@@ -1959,6 +2079,38 @@ void Engine::Impl::publishFormat(const AudioFormat& f) {
     formatBits.store(packFormat(f), std::memory_order_release);
 }
 
+void Engine::Impl::publishOutcome(std::uint32_t outRate, bool rateMatched) {
+    std::uint16_t           depth = 0;
+    const OutputAlterations mask =
+        composeAlterations(*sink, rateMatched, currentSourceDepth, depth);
+    outcomeBits.store(packOutcome(outRate, rateMatched, mask, depth),
+                      std::memory_order_release);
+}
+
+bool Engine::Impl::refreshOutcomeFlags() {
+    const std::uint64_t old = outcomeBits.load(std::memory_order_relaxed);
+    const OutcomeView   was = unpackOutcome(old);
+    if (!was.valid) {
+        return false;  // nothing published for this open yet
+    }
+    std::uint16_t           depth = 0;
+    const OutputAlterations mask =
+        composeAlterations(*sink, was.rateMatched, currentSourceDepth, depth);
+    const std::uint64_t fresh = packOutcome(was.rateHz, was.rateMatched, mask, depth);
+    if (fresh == old) {
+        return false;
+    }
+    outcomeBits.store(fresh, std::memory_order_release);
+    return true;
+}
+
+void Engine::Impl::notifyDeviceOutcome() const {
+    const OutcomeView v = unpackOutcome(outcomeBits.load(std::memory_order_relaxed));
+    if (Engine::Listener* l = listener.load(std::memory_order_acquire)) {
+        l->onDeviceOutcomeChanged(v.rateHz, v.bitPerfect(), v.mask);
+    }
+}
+
 // Publish the now-current track for the lock-free observers, then notify the
 // listener. The order matters: make currentTrackInfo()/duration() readable
 // BEFORE firing onTrackChanged, so a listener that reacts by pulling
@@ -1968,6 +2120,14 @@ void Engine::Impl::publishFormat(const AudioFormat& f) {
 void Engine::Impl::announceTrack(const TrackInfo& info) {
     currentInfo.publish(info);
     totalFramesAtomic.store(info.totalFrames, std::memory_order_release);
+    // The depth half of the outcome follows the TRACK, not the open: a 16-bit
+    // track stitched after a 24-bit one on a 16-bit device drops ReducedDepth
+    // with no device transition at all. Recomposed before the listener hears
+    // of the track, so the pull reads inside onTrackChanged are coherent.
+    currentSourceDepth = info.source.bitsPerSample;
+    if (sink && deviceOpen) {
+        refreshOutcomeFlags();
+    }
     // Seed the live bitrate with this track's nominal so the status
     // line shows a figure at once, before the first position tick refreshes it
     // from the decoder. This single funnel (startTrack, crossSeam, the HOLD-CUT)
@@ -2252,24 +2412,28 @@ std::uint32_t Engine::liveBitrateKbps() const noexcept {
     return m_impl->liveBitrateAtomic.load(std::memory_order_acquire);
 }
 
-// The device-outcome pull pair. One packed word backs both
-// (see Impl::outcomeBits for the layout), so each read is a single acquire
-// load; a cleared word (Stopped) reads as rate 0 / not bit-perfect, the
-// honest "no device open" answer.
+// The device-outcome pull set. One packed word backs every read (see
+// Impl::outcomeBits for the layout), so each is a single acquire load; a
+// cleared word (Stopped) reads as rate 0, empty mask, depth 0, not
+// bit-perfect, the honest "no device open" answer. Bit-perfect is the empty
+// mask, not the rate bit alone: a rate-matched device with a system volume on
+// the samples is not delivering the decoded bytes.
 std::uint32_t Engine::outputDeviceRateHz() const noexcept {
-    const std::uint64_t bits =
-        m_impl->outcomeBits.load(std::memory_order_acquire);
-    if ((bits & (std::uint64_t{1} << 33)) == 0) {
-        return 0;
-    }
-    return static_cast<std::uint32_t>(bits & 0xFFFFFFFFu);
+    return unpackOutcome(m_impl->outcomeBits.load(std::memory_order_acquire)).rateHz;
 }
 
 bool Engine::outputBitPerfect() const noexcept {
-    const std::uint64_t bits =
-        m_impl->outcomeBits.load(std::memory_order_acquire);
-    return (bits & (std::uint64_t{1} << 33)) != 0 &&
-           (bits & (std::uint64_t{1} << 32)) != 0;
+    return unpackOutcome(m_impl->outcomeBits.load(std::memory_order_acquire))
+        .bitPerfect();
+}
+
+OutputAlterations Engine::outputAlterations() const noexcept {
+    return unpackOutcome(m_impl->outcomeBits.load(std::memory_order_acquire)).mask;
+}
+
+std::uint16_t Engine::outputDepthBits() const noexcept {
+    return unpackOutcome(m_impl->outcomeBits.load(std::memory_order_acquire))
+        .depthBits;
 }
 
 // The session underrun total, accumulated on the engine thread by

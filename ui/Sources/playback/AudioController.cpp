@@ -165,8 +165,9 @@ constexpr bool   kBitPerfectDefault         = true;
 float computeReplayGainLinear(const replaygain::Values& v, int mode,
                               double preampDb, double untaggedPreampDb,
                               bool clipPrevention) {
-    if (mode == 0)  // Off
+    if (mode == 0) {  // Off
         return 1.0f;
+    }
 
     std::optional<double> gainDb;
     std::optional<double> peak;
@@ -187,8 +188,9 @@ float computeReplayGainLinear(const replaygain::Values& v, int mode,
     double linear = std::pow(10.0, totalDb / 20.0);
     if (clipPrevention && peak && *peak > 0.0) {
         const double cap = 1.0 / *peak;
-        if (linear > cap)
+        if (linear > cap) {
             linear = cap;
+        }
     }
     return static_cast<float>(linear);
 }
@@ -251,12 +253,15 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         f.totalFrames     = static_cast<quint64>(t.totalFrames);
         f.seekable        = t.seekable;
         f.durationSeconds = t.durationSeconds();
+        f.bitsPerSample   = static_cast<int>(t.source.bitsPerSample);
         // Device outcome: lock-free engine reads, sampled
         // here on the engine thread so they are coherent with THIS track's
         // announcement (the publication happens-before announceTrack), the same
         // pattern the live bitrate rides in onPositionChanged below.
         f.deviceRateHz    = static_cast<int>(m_owner->m_engine.outputDeviceRateHz());
         f.bitPerfect      = m_owner->m_engine.outputBitPerfect();
+        f.alterations     = static_cast<int>(m_owner->m_engine.outputAlterations());
+        f.outputDepthBits = static_cast<int>(m_owner->m_engine.outputDepthBits());
         publish();
         QMetaObject::invokeMethod(
             m_owner,
@@ -292,15 +297,18 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
 
     // A mid-track device outcome republication (the world changed the
     // rate underneath a live track); same marshal shape as everything here.
-    void onDeviceOutcomeChanged(std::uint32_t deviceRateHz,
-                                bool bitPerfect) override {
+    void onDeviceOutcomeChanged(std::uint32_t deviceRateHz, bool bitPerfect,
+                                rawform::audio::OutputAlterations alterations) override {
+        // The depth rides with the same publication; sampled here like the
+        // track facts, so the four arrive coherent.
+        const int depth = static_cast<int>(m_owner->m_engine.outputDepthBits());
         publish();
         QMetaObject::invokeMethod(
             m_owner,
             [owner = m_owner, bridge = this, rate = static_cast<int>(deviceRateHz),
-             bitPerfect] {
+             bitPerfect, alt = static_cast<int>(alterations), depth] {
                 bridge->receive();
-                owner->applyDeviceOutcome(rate, bitPerfect);
+                owner->applyDeviceOutcome(rate, bitPerfect, alt, depth);
             },
             Qt::QueuedConnection);
     }
@@ -587,7 +595,7 @@ QString AudioController::formatSummary() const {
         ch = QStringLiteral("%1 ch").arg(m_channels);
     }
     // e.g. "FLAC 961kbps 44100Hz Stereo" (the player-bar status line). The bitrate is the
-    // live, moment-to-moment figure while a track is being decoded (Feature A), frozen at
+    // live, moment-to-moment figure while a track is being decoded, frozen at
     // its last value on pause; it falls back to the nominal/average when stopped or
     // before the first position tick. displayBitrateKbps() owns that live-or-nominal
     // choice so the isolated digits the bar renders and this full string can never
@@ -609,31 +617,54 @@ QString AudioController::formatSummary() const {
                      .arg(suffix);
 }
 
-// The device-outcome suffix on its own (gain-truthful by design):
-// "(Bit Perfect)" when the hardware is clocking the source rate
-// AND the composed engine gain is exactly unity (the fast-path passthrough, so
-// the delivered bytes really are the decoded bytes). A rate-matched device
-// with a non-unity gain names the CAUSE, deliberately verbose so the remedy is
-// obvious: "(Muted)", "(Volume Adjusted)", "(ReplayGain Adjusted)", or
-// "(Volume + ReplayGain)". "(Resampled to N Hz)" with the actual device rate
-// on a rate mismatch WINS over the gain state, because the resample is the
-// bigger alteration and naming both would bury it. EMPTY while no device is
-// open (Stopped), because there is no outcome to report then. Measured-first
-// honesty comes from the engine's publication, so this never claims
-// bit-perfect on a misclocking device; gain honesty comes from
-// m_engineGainState, which pushGainToEngine classifies from the value it
-// actually pushed and its components. No leading space: each consumer owns
-// its own joining (formatSummary above, the player bar's format row tail).
+// The device-outcome suffix on its own, truthful about everything between the
+// decoded samples and the device: "(Bit Perfect)" only when the engine's
+// outcome mask is empty (the device clocks the source rate, nothing past the
+// engine multiplies the samples, the device carries the source's depth) AND
+// the composed engine gain is exactly unity (the fast-path passthrough, so the
+// delivered bytes really are the decoded bytes). Otherwise one cause is named,
+// the biggest alteration first so naming several would not bury it, and
+// deliberately verbose so the remedy is obvious:
+//   1. "(Resampled to N Hz)" with the actual device rate;
+//   2. "(Volume Adjusted by PipeWire)" / "(Volume Adjusted by System)": a
+//      software volume or mute outside rawform (the per-application or device
+//      slider in a Linux mixer, the system volume on macOS; the platform is
+//      the one this build's sink runs on);
+//   3. the engine's own gain, as classified by pushGainToEngine from the value
+//      it actually pushed: "(Muted)", "(Volume Adjusted)", "(ReplayGain
+//      Adjusted)", or "(Volume + ReplayGain)" (the slider, the Settings RG
+//      page, or the readout's slash is the remedy);
+//   4. "(N-bit source, M-bit output)": the device is fed fewer bits than the
+//      source carries, or a source past 24 bits meets the float32 pipeline,
+//      shown as 24-bit output since that is what float32 preserves.
+// EMPTY while no device is open (Stopped), because there is no outcome to
+// report then. Measured-first honesty comes from the engine's publication, so
+// this never claims bit-perfect on a misclocking device. No leading space:
+// each consumer owns its own joining (formatSummary above, the player bar's
+// format row tail).
 QString AudioController::outputSuffix() const {
     if (m_deviceRateHz <= 0) {
         return QString();
     }
-    if (!m_outputBitPerfect) {
+    using rawform::audio::hasAlteration;
+    using rawform::audio::OutputAlteration;
+    const auto mask = static_cast<rawform::audio::OutputAlterations>(m_outputAlterations);
+    if (hasAlteration(mask, OutputAlteration::Resampled)) {
         return QStringLiteral("(Resampled to %1Hz)").arg(m_deviceRateHz);
+    }
+    if (hasAlteration(mask, OutputAlteration::SystemGain)) {
+        // The same selection the sink construction above makes.
+#if RAWFORM_HAVE_COREAUDIO
+        return QStringLiteral("(Volume Adjusted by System)");
+#elif RAWFORM_HAVE_PIPEWIRE
+        return QStringLiteral("(Volume Adjusted by PipeWire)");
+#else
+        return QStringLiteral("(Volume Adjusted by System)");
+#endif
     }
     switch (m_engineGainState) {
         case GainState::Unity:
-            return QStringLiteral("(Bit Perfect)");
+            break;
         case GainState::Muted:
             return QStringLiteral("(Muted)");
         case GainState::Volume:
@@ -643,8 +674,15 @@ QString AudioController::outputSuffix() const {
         case GainState::VolumeAndReplayGain:
             return QStringLiteral("(Volume + ReplayGain)");
     }
-    return QString();  // unreachable with the exhaustive switch above; keeps
-                       // every compiler's missing-return analysis satisfied
+    if (hasAlteration(mask, OutputAlteration::ReducedDepth)) {
+        const bool deviceShallower =
+            m_outputDepthBits > 0 && m_outputDepthBits < m_sourceBitsPerSample;
+        const int shown = deviceShallower ? m_outputDepthBits : 24;
+        return QStringLiteral("(%1-bit source, %2-bit output)")
+            .arg(m_sourceBitsPerSample)
+            .arg(shown);
+    }
+    return m_outputBitPerfect ? QStringLiteral("(Bit Perfect)") : QString();
 }
 
 // Display name for the engine's Codec tag. Mirrors the CLI's codecName so the two
@@ -695,9 +733,11 @@ void AudioController::applyState(int s) {
         // resume until the first tick refreshes it). The device outcome drops
         // with it: the device is released on Stopped, so the
         // bit-perfect/resampled suffix would be a claim about nothing.
-        m_liveBitrateKbps  = 0;
-        m_deviceRateHz     = 0;
-        m_outputBitPerfect = false;
+        m_liveBitrateKbps    = 0;
+        m_deviceRateHz       = 0;
+        m_outputBitPerfect   = false;
+        m_outputAlterations  = 0;
+        m_outputDepthBits    = 0;
         emit formatSummaryChanged();
     }
     if (crossesStopped) {
@@ -736,8 +776,11 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
     m_positionSeconds = 0.0;  // a fresh track starts at 0 until the first tick
     resetSeekLatch();         // a keyboard seek targeted the PREVIOUS track
     m_liveBitrateKbps = 0;    // show the new track's nominal until the first tick
-    m_deviceRateHz     = f.deviceRateHz;   // device outcome, sampled with this track
-    m_outputBitPerfect = f.bitPerfect;
+    m_sourceBitsPerSample = f.bitsPerSample;
+    m_deviceRateHz        = f.deviceRateHz;   // device outcome, sampled with this track
+    m_outputBitPerfect    = f.bitPerfect;
+    m_outputAlterations   = f.alterations;
+    m_outputDepthBits     = f.outputDepthBits;
 
     // Move the cursor onto the track that just became current. Three cases:
     //   - an explicit start (startTrack / playQueueEntry) being confirmed: the
@@ -1026,12 +1069,14 @@ void AudioController::onPlayingColumnsAboutToBeRemoved() {
 void AudioController::onPlayingColumnsRemoved() {
     const int row = m_cursorRowAcrossColumnOp;
     m_cursorRowAcrossColumnOp = -1;
-    if (row < 0 || m_cursor.isValid())
+    if (row < 0 || m_cursor.isValid()) {
         return; // no cursor, or it survived (the removed column wasn't its anchor)
+    }
 
     PlaylistModel* m = m_playingModel.data();
-    if (!m || row >= m->rowCount())
+    if (!m || row >= m->rowCount()) {
         return; // model gone under us; the destroyed/reset paths own that case
+    }
 
     // Re-pin to (row, column 0). Pure bookkeeping, not a state transition: the
     // row playback consumes never observably changed, so no playingChanged and
@@ -1424,8 +1469,9 @@ bool  AudioController::replayGainScanSkipExistingDefault() const { return kRgSca
 
 void AudioController::setReplayGainMode(int mode) {
     const int clamped = (mode < 0) ? 0 : (mode > 2 ? 2 : mode);
-    if (clamped == m_replayGainMode)
+    if (clamped == m_replayGainMode) {
         return;
+    }
     m_replayGainMode = clamped;
     emit replayGainSettingsChanged();
     refreshReplayGain();        // recompute the factor and re-push the composed gain
@@ -1433,8 +1479,9 @@ void AudioController::setReplayGainMode(int mode) {
 }
 
 void AudioController::setReplayGainPreampDb(qreal db) {
-    if (qFuzzyCompare(db + 1.0, m_replayGainPreampDb + 1.0))
+    if (qFuzzyCompare(db + 1.0, m_replayGainPreampDb + 1.0)) {
         return;
+    }
     m_replayGainPreampDb = db;
     emit replayGainSettingsChanged();
     refreshReplayGain();
@@ -1442,8 +1489,9 @@ void AudioController::setReplayGainPreampDb(qreal db) {
 }
 
 void AudioController::setReplayGainUntaggedPreampDb(qreal db) {
-    if (qFuzzyCompare(db + 1.0, m_replayGainUntaggedPreampDb + 1.0))
+    if (qFuzzyCompare(db + 1.0, m_replayGainUntaggedPreampDb + 1.0)) {
         return;
+    }
     m_replayGainUntaggedPreampDb = db;
     emit replayGainSettingsChanged();
     refreshReplayGain();
@@ -1451,8 +1499,9 @@ void AudioController::setReplayGainUntaggedPreampDb(qreal db) {
 }
 
 void AudioController::setReplayGainClipPrevention(bool on) {
-    if (on == m_replayGainClipPrevention)
+    if (on == m_replayGainClipPrevention) {
         return;
+    }
     m_replayGainClipPrevention = on;
     emit replayGainSettingsChanged();
     refreshReplayGain();
@@ -1460,8 +1509,9 @@ void AudioController::setReplayGainClipPrevention(bool on) {
 }
 
 void AudioController::setReplayGainScanSkipExisting(bool on) {
-    if (on == m_replayGainScanSkipExisting)
+    if (on == m_replayGainScanSkipExisting) {
         return;
+    }
     m_replayGainScanSkipExisting = on;
     emit replayGainSettingsChanged();
     schedulePlaybackPersist();
@@ -1472,8 +1522,9 @@ void AudioController::setReplayGainScanSkipExisting(bool on) {
 bool AudioController::bitPerfectDefault() const { return kBitPerfectDefault; }
 
 void AudioController::setBitPerfect(bool on) {
-    if (on == m_bitPerfect)
+    if (on == m_bitPerfect) {
         return;
+    }
     m_bitPerfect = on;
     pushRateModeToEngine();
     emit bitPerfectChanged();
@@ -1492,8 +1543,9 @@ void AudioController::refreshOutputDevices() {
 }
 
 void AudioController::setOutputDeviceId(const QString& id) {
-    if (id == m_outputDeviceId)
+    if (id == m_outputDeviceId) {
         return;
+    }
     m_outputDeviceId = id;
     // Capture the friendly name from the enumeration the picker showed. A
     // stale intent applied without the device present keeps the previously
@@ -1555,15 +1607,19 @@ void AudioController::applyRateDebt(const QString& deviceId,
 // The mid-track suffix update. Guarded on an outcome being shown at
 // all: a republication racing a stop (applyTrack or the stop path already
 // cleared the suffix) must not resurrect one for a track that is gone.
-void AudioController::applyDeviceOutcome(int deviceRateHz, bool bitPerfect) {
+void AudioController::applyDeviceOutcome(int deviceRateHz, bool bitPerfect,
+                                         int alterations, int outputDepthBits) {
     if (m_deviceRateHz <= 0 || deviceRateHz <= 0) {
         return;
     }
-    if (m_deviceRateHz == deviceRateHz && m_outputBitPerfect == bitPerfect) {
+    if (m_deviceRateHz == deviceRateHz && m_outputBitPerfect == bitPerfect &&
+        m_outputAlterations == alterations && m_outputDepthBits == outputDepthBits) {
         return;  // no visible change
     }
-    m_deviceRateHz     = deviceRateHz;
-    m_outputBitPerfect = bitPerfect;
+    m_deviceRateHz      = deviceRateHz;
+    m_outputBitPerfect  = bitPerfect;
+    m_outputAlterations = alterations;
+    m_outputDepthBits   = outputDepthBits;
     emit formatSummaryChanged();
 }
 
@@ -1721,22 +1777,29 @@ void AudioController::loadPlaybackSettings() {
                 const int md = root["replaygain_mode"].as<int>();
                 m_replayGainMode = (md < 0) ? 0 : (md > 2 ? 2 : md);
             }
-            if (root["replaygain_preamp_db"])
+            if (root["replaygain_preamp_db"]) {
                 m_replayGainPreampDb = root["replaygain_preamp_db"].as<double>();
-            if (root["replaygain_preamp_untagged_db"])
+            }
+            if (root["replaygain_preamp_untagged_db"]) {
                 m_replayGainUntaggedPreampDb = root["replaygain_preamp_untagged_db"].as<double>();
-            if (root["replaygain_clip_prevention"])
+            }
+            if (root["replaygain_clip_prevention"]) {
                 m_replayGainClipPrevention = root["replaygain_clip_prevention"].as<bool>();
-            if (root["replaygain_scan_skip_existing"])
+            }
+            if (root["replaygain_scan_skip_existing"]) {
                 m_replayGainScanSkipExisting = root["replaygain_scan_skip_existing"].as<bool>();
-            if (root["bit_perfect"])
+            }
+            if (root["bit_perfect"]) {
                 m_bitPerfect = root["bit_perfect"].as<bool>();
-            if (root["output_device"])
+            }
+            if (root["output_device"]) {
                 m_outputDeviceId =
                     QString::fromStdString(root["output_device"].as<std::string>());
-            if (root["output_device_name"])
+            }
+            if (root["output_device_name"]) {
                 m_outputDeviceName = QString::fromStdString(
                     root["output_device_name"].as<std::string>());
+            }
         } catch (const YAML::Exception& e) {
             qWarning("rawform: ignoring malformed %s (%s)",
                      qUtf8Printable(playbackSettingsPath()), e.what());

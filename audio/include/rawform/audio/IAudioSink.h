@@ -66,11 +66,12 @@
 // Engine drives the reopen that makes a change audible. The event channel
 // (ISinkEventListener) is how a sink reports the world changing underneath a
 // session: an external rate assertion, a default-device change, a device-list
-// change, a ledger change, and the one event that ends a session from the
-// sink's side, an output failure (the device vanished, the stream errored, the
-// daemon went away). The defaults for all of these are honest no-ops, so a
-// sink with no device concept (NullSink's discard path) is a complete
-// IAudioSink without overriding them.
+// change, a ledger change, a change in what the platform does to the samples
+// (outputAlterations/realizedDepthBits), and the one event that ends a
+// session from the sink's side, an output failure (the device vanished, the
+// stream errored, the daemon went away). The defaults for all of these are
+// honest no-ops, so a sink with no device concept (NullSink's discard path) is
+// a complete IAudioSink without overriding them.
 //
 // Lifetime invariant, the reason the sink can hold the source non-owning:
 //   stop()/close() MUST guarantee the real-time thread has finished and will
@@ -156,6 +157,11 @@ struct IPullSource {
 ///     never for the sink's own stop()/close() transitions; the engine treats
 ///     it as the end of the listening session (teardown, Stopped, onError),
 ///     and tolerates duplicates and late arrivals racing its own close.
+///   - onOutputAlterationsChanged: what the sink reports through
+///     outputAlterations() or realizedDepthBits() changed (a system volume
+///     moved off or back to unity, the device format changed depth). A nudge
+///     with no payload: the engine re-reads both and republishes the outcome
+///     when the composed mask differs, so a sink may emit it liberally.
 struct ISinkEventListener {
     virtual ~ISinkEventListener() = default;
     virtual void onExternalRateChanged(std::uint32_t /*newRateHz*/) {}
@@ -165,6 +171,7 @@ struct ISinkEventListener {
                                    std::uint32_t /*originalRateHz*/,
                                    std::uint32_t /*borrowedRateHz*/) {}
     virtual void onOutputFailed(const std::string& /*reason*/) {}
+    virtual void onOutputAlterationsChanged() {}
 };
 
 /// A platform output device, configured for one interleaved float32 stream.
@@ -309,6 +316,24 @@ public:
     /// the Engine publishes measurement-first with prediction fallback for the
     /// UI's bit-perfect reporting. Engine-thread query, not on the RT path.
     [[nodiscard]] virtual std::uint32_t measuredDeviceRateHz() const { return 0; }
+
+    /// What the sink knows is altering the samples past the engine, for the
+    /// outcome's bit-perfect claim (OutputAlteration in Types.h). The sink
+    /// reports only what it can SEE: a software volume or mute applied by the
+    /// platform (SystemGain). The engine adds Resampled from its own rate
+    /// comparison and ReducedDepth from realizedDepthBits() against the source
+    /// depth, so a sink never composes those. Read by the engine after every
+    /// open() and reconfigure() and again on each onOutputAlterationsChanged;
+    /// the default (nothing known) is honest for a sink that cannot observe the
+    /// platform's gain stage, and such a sink's outcome simply omits the flag.
+    [[nodiscard]] virtual OutputAlterations outputAlterations() const { return 0; }
+
+    /// The sample depth, in bits, of the format the device is actually being
+    /// fed (the PipeWire target node's realized Format, the CoreAudio physical
+    /// stream format), or 0 when unknown (not open, or a sink that cannot see
+    /// the device format; the default). A float device format reports 32. Same
+    /// read discipline as outputAlterations(); engine thread, never the RT path.
+    [[nodiscard]] virtual std::uint16_t realizedDepthBits() const { return 0; }
 };
 
 }  // namespace rawform::audio

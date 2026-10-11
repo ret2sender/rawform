@@ -153,14 +153,17 @@ class AudioController : public QObject {
     Q_PROPERTY(int channels READ channels NOTIFY trackChanged)
     Q_PROPERTY(QString formatSummary READ formatSummary NOTIFY formatSummaryChanged)
 
-    /// The device-outcome suffix on its own (gain-truthful by design):
-    /// "(Bit Perfect)", "(Muted)", "(Volume Adjusted)",
-    /// "(ReplayGain Adjusted)", "(Volume + ReplayGain)", "(Resampled to N Hz)",
-    /// or empty while no device is open. The player bar renders the format line
-    /// as SPLIT items (so the live kbps sits in a fixed-width slot), so it
-    /// cannot consume formatSummary directly; this property is the piece it
-    /// appends, and formatSummary composes the SAME string, keeping the two
-    /// surfaces incapable of disagreeing (the displayBitrateKbps pattern).
+    /// The device-outcome suffix on its own (truthful about everything between
+    /// the decoded samples and the device): "(Bit Perfect)", "(Resampled to
+    /// N Hz)", "(Volume Adjusted by PipeWire)" / "(Volume Adjusted by System)",
+    /// "(Muted)", "(Volume Adjusted)", "(ReplayGain Adjusted)", "(Volume +
+    /// ReplayGain)", "(N-bit source, M-bit output)", or empty while no device
+    /// is open; outputSuffix() documents the precedence. The player bar renders
+    /// the format line as SPLIT items (so the live kbps sits in a fixed-width
+    /// slot), so it cannot consume formatSummary directly; this property is the
+    /// piece it appends, and formatSummary composes the SAME string, keeping
+    /// the two surfaces incapable of disagreeing (the displayBitrateKbps
+    /// pattern).
     /// Shares formatSummary's NOTIFY because they change at exactly the same
     /// moments (track change, Stopped, a mid-track outcome republication, and
     /// the gain classification changing; pushGainToEngine fires the NOTIFY for
@@ -527,14 +530,20 @@ private:
         quint64  totalFrames    = 0;
         bool     seekable       = false;
         double   durationSeconds = 0.0;
+        /// The source container depth (0 for lossy sources), for the
+        /// reduced-depth leg of the suffix.
+        int      bitsPerSample  = 0;
         /// The device outcome, sampled by the bridge from
         /// the engine's lock-free observers inside onTrackChanged (the same
         /// engine-thread-sampling pattern the live bitrate rides in
-        /// onPositionChanged), so the pair is coherent with this very track.
+        /// onPositionChanged), so the set is coherent with this very track.
         /// deviceRateHz 0 means "no open device"; the format line then shows no
-        /// suffix.
-        int      deviceRateHz   = 0;
-        bool     bitPerfect     = false;
+        /// suffix. alterations is the rawform::audio::OutputAlterations mask,
+        /// outputDepthBits the depth the device is fed (0 unknown).
+        int      deviceRateHz    = 0;
+        bool     bitPerfect      = false;
+        int      alterations     = 0;
+        int      outputDepthBits = 0;
     };
 
     // --- GUI-thread appliers (invoked queued from the bridge) --------------
@@ -544,7 +553,8 @@ private:
     void applyError(const QString& message);
     void applyInfo(const QString& message);
     void applyOutputDevices(const QVariantList& devices);
-    void applyDeviceOutcome(int deviceRateHz, bool bitPerfect);
+    void applyDeviceOutcome(int deviceRateHz, bool bitPerfect, int alterations,
+                            int outputDepthBits);
     void applyRateDebt(const QString& deviceId, quint32 originalRateHz,
                        quint32 borrowedRateHz); ///< Persist/clear the ledger
 
@@ -720,14 +730,20 @@ private:
     QString m_detachedTitle;
     QString m_detachedArtist;
 
-    /// The device outcome for the current open: the rate the output device is actually
-    /// running at and whether that equals the source rate, refreshed from
-    /// EngineTrackFacts on every track change and cleared on entering Stopped (device
-    /// released). outputSuffix() renders them as the "(Bit Perfect)" / "(Resampled to N
-    /// Hz)" suffix (with the bit-perfect leg further gated on the gain classification;
-    /// see m_engineGainState below); deviceRateHz 0 means no suffix.
-    int  m_deviceRateHz     = 0;
-    bool m_outputBitPerfect = false;
+    /// The device outcome for the current open: the rate the output device is
+    /// actually running at, whether the engine calls the output bit-perfect,
+    /// the rawform::audio::OutputAlterations mask behind that verdict, and the
+    /// depth the device is fed (0 unknown); plus the current track's source
+    /// depth for the reduced-depth leg. Refreshed from EngineTrackFacts on
+    /// every track change and by applyDeviceOutcome mid-track, cleared on
+    /// entering Stopped (device released). outputSuffix() renders them (with
+    /// the bit-perfect leg further gated on the gain classification; see
+    /// m_engineGainState below); deviceRateHz 0 means no suffix.
+    int  m_deviceRateHz        = 0;
+    bool m_outputBitPerfect    = false;
+    int  m_outputAlterations   = 0;
+    int  m_outputDepthBits     = 0;
+    int  m_sourceBitsPerSample = 0;
 
     /// Master volume state (GUI thread only). m_volume is the 0..1 slider fraction;
     /// it defaults to 1.0 so the engine starts at unity (a byte-identical

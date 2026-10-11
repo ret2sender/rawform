@@ -101,6 +101,9 @@ using rawform::audio::ILogOutput;
 using rawform::audio::IDecoderFactory;
 using rawform::audio::IPullSource;
 using rawform::audio::NullSink;
+using rawform::audio::OutputAlteration;
+using rawform::audio::OutputAlterations;
+using rawform::audio::toMask;
 using rawform::audio::RateDecision;
 using rawform::audio::RateManager;
 using rawform::audio::RateMode;
@@ -153,9 +156,10 @@ public:
     RampDecoder(std::uint32_t rate, std::uint16_t channels,
                 std::uint64_t totalFrames, bool seekable,
                 std::uint64_t valueBase = 0, bool seekFails = false,
-                RampFault fault = RampFault::None)
+                RampFault fault = RampFault::None, std::uint16_t depthBits = 0)
         : m_fmt{rate, channels}, m_total(totalFrames), m_seekable(seekable),
-          m_valueBase(valueBase), m_seekFails(seekFails), m_fault(fault) {}
+          m_valueBase(valueBase), m_seekFails(seekFails), m_fault(fault),
+          m_depthBits(depthBits) {}
 
     [[nodiscard]] AudioFormat   format()      const override { return m_fmt; }
     [[nodiscard]] SourceInfo    sourceInfo()  const override {
@@ -164,6 +168,12 @@ public:
         // ramp claims to be one, every other ramp stays Unknown as before.
         if (m_fault == RampFault::Truncated) {
             info.codec = rawform::audio::Codec::Pcm;
+        }
+        // A declared container depth (the "depthN:" form) makes the ramp a
+        // lossless source for the outcome's ReducedDepth comparison.
+        if (m_depthBits != 0) {
+            info.codec         = rawform::audio::Codec::Flac;
+            info.bitsPerSample = m_depthBits;
         }
         return info;
     }
@@ -224,6 +234,7 @@ private:
     std::uint64_t m_valueBase;
     bool          m_seekFails;
     RampFault     m_fault;
+    std::uint16_t m_depthBits;
     std::string   m_lastError;
     std::uint64_t m_pos = 0;
 };
@@ -241,6 +252,8 @@ private:
 //                                                   is rejected (the abandon path)
 //   "damaged:", "truncated:", "broken:", "slow:" (+ the same forms) -> seekable,
 //                                                   with that RampFault (above)
+//   "depth<N>:<frames>" (+ the rate/ch/base forms)  -> seekable, a lossless source
+//                                                   declaring N bits per sample
 // Anything else fails to open (returns nullptr), which is how the open-failure
 // skip path is exercised. The factory is stateless and reentrant; the engine
 // thread is its only caller, but reentrancy keeps it honest.
@@ -260,10 +273,13 @@ public:
         }
         parts.push_back(cur);
 
-        bool      seekable  = true;
-        bool      seekFails = false;
-        RampFault fault     = RampFault::None;
-        if (!parts.empty() && parts[0] == "ramp") {
+        bool          seekable  = true;
+        bool          seekFails = false;
+        RampFault     fault     = RampFault::None;
+        std::uint16_t depthBits = 0;
+        if (!parts.empty() && parts[0].rfind("depth", 0) == 0 && parts[0].size() > 5) {
+            depthBits = static_cast<std::uint16_t>(parseU64(parts[0].substr(5)));
+        } else if (!parts.empty() && parts[0] == "ramp") {
             seekable = true;
         } else if (!parts.empty() && parts[0] == "noseek") {
             seekable = false;
@@ -315,7 +331,7 @@ public:
             return nullptr;
         }
         return std::make_unique<RampDecoder>(rate, channels, frames, seekable,
-                                             valueBase, seekFails, fault);
+                                             valueBase, seekFails, fault, depthBits);
     }
 
 private:
@@ -656,9 +672,10 @@ public:
         std::lock_guard<std::mutex> lock(m_mtx);
         m_deviceLists.push_back(devices);
     }
-    void onDeviceOutcomeChanged(std::uint32_t deviceRateHz, bool bitPerfect) override {
+    void onDeviceOutcomeChanged(std::uint32_t deviceRateHz, bool bitPerfect,
+                                OutputAlterations alterations) override {
         std::lock_guard<std::mutex> lock(m_mtx);
-        m_outcomes.push_back({deviceRateHz, bitPerfect});
+        m_outcomes.push_back({deviceRateHz, bitPerfect, alterations});
     }
     void onRateDebtChanged(const std::string& deviceId, std::uint32_t originalRateHz,
                            std::uint32_t borrowedRateHz) override {
@@ -674,7 +691,11 @@ public:
         std::lock_guard<std::mutex> lock(m_mtx);
         return m_deviceLists;
     }
-    struct Outcome { std::uint32_t rateHz; bool bitPerfect; };
+    struct Outcome {
+        std::uint32_t     rateHz;
+        bool              bitPerfect;
+        OutputAlterations alterations;
+    };
     std::vector<Outcome> outcomes() const {
         std::lock_guard<std::mutex> lock(m_mtx);
         return m_outcomes;
@@ -1740,8 +1761,153 @@ void testExternalRateChangeRepublishesOutcome() {
     if (!outcomes.empty()) {
         CHECK(outcomes.back().rateHz == 96000);
         CHECK(outcomes.back().bitPerfect == false);
+        CHECK(outcomes.back().alterations == toMask(OutputAlteration::Resampled));
     }
+    CHECK(engine.outputAlterations() == toMask(OutputAlteration::Resampled));
     CHECK(sinkPtr->recordedDecisions().size() == 1);  // no reopen happened
+    CHECK(listener.errors() == 0);
+
+    engine.stop();
+    settle();
+}
+
+// Wait until the listener has announced `count` tracks (a stitch crossing is
+// asynchronous to everything the test can command).
+bool waitForAnnouncements(const RecordingListener& listener, std::size_t count,
+                          int timeoutMs = 5000) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (listener.trackPaths().size() >= count) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return listener.trackPaths().size() >= count;
+}
+
+// A platform volume reported by the sink takes the bit-perfect claim away on
+// a rate-matched device and gives it back when it returns to unity, each as
+// one republication; the sink's nudge for an unchanged mask republishes
+// nothing, and a nudge while Stopped is ignored.
+void testSystemGainAlterationRepublishes() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    sinkPtr->setCapabilities(makeCaps({44100, 48000}, 44100, /*canSwitch=*/true));
+
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    sinkPtr->fireOutputAlterationsChanged();  // Stopped: nothing to republish
+    settle();
+    CHECK(listener.outcomes().empty());
+
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    CHECK(engine.outputBitPerfect() == true);
+    CHECK(engine.outputAlterations() == 0);
+
+    sinkPtr->setOutputAlterations(toMask(OutputAlteration::SystemGain));
+    sinkPtr->fireOutputAlterationsChanged();  // the user dragged the mixer
+    settle();
+    CHECK(engine.state() == State::Playing);
+    CHECK(engine.outputDeviceRateHz() == 44100);  // the rate half is untouched
+    CHECK(engine.outputBitPerfect() == false);
+    CHECK(engine.outputAlterations() == toMask(OutputAlteration::SystemGain));
+    auto outcomes = listener.outcomes();
+    CHECK(outcomes.size() == 1);
+    if (!outcomes.empty()) {
+        CHECK(outcomes.back().rateHz == 44100);
+        CHECK(outcomes.back().bitPerfect == false);
+        CHECK(outcomes.back().alterations == toMask(OutputAlteration::SystemGain));
+    }
+
+    sinkPtr->fireOutputAlterationsChanged();  // another tick of the same drag
+    settle();
+    CHECK(listener.outcomes().size() == 1);  // nothing changed, nothing republished
+
+    sinkPtr->setOutputAlterations(0);
+    sinkPtr->fireOutputAlterationsChanged();  // back to unity
+    settle();
+    CHECK(engine.outputBitPerfect() == true);
+    outcomes = listener.outcomes();
+    CHECK(outcomes.size() == 2);
+    if (outcomes.size() == 2) {
+        CHECK(outcomes.back().bitPerfect == true);
+        CHECK(outcomes.back().alterations == 0);
+    }
+    CHECK(sinkPtr->recordedDecisions().size() == 1);  // no reopen for any of it
+    CHECK(listener.errors() == 0);
+
+    engine.stop();
+    settle();
+    CHECK(engine.outputAlterations() == 0);  // cleared with the device
+}
+
+// The depth comparison follows the TRACK: a 24-bit source on a device fed
+// 16 bits is ReducedDepth; a 16-bit source stitched gaplessly behind it (same
+// rate, same channels, so no device transition at all) is not, and the
+// announcement of each carries its own answer. A device of unknown depth
+// claims nothing for either; a source past the pipeline's 24 bits claims
+// regardless of the device. Lossy sources (depth 0) never claim.
+void testReducedDepthFollowsTheTrack() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto      sink    = std::make_unique<NullSink>(NullSink::Mode::Paced);
+    NullSink* sinkPtr = sink.get();
+    sinkPtr->setCapabilities(makeCaps({44100}, 44100, /*canSwitch=*/true));
+    sinkPtr->setRealizedDepthBits(16);
+
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    const std::string a = "depth24:44100:2:4000";
+    const std::string b = "depth16:44100:2:600000";
+    engine.enqueue(a);
+    engine.enqueue(b);
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    CHECK(engine.outputDepthBits() == 16);
+    CHECK(engine.outputAlterations() == toMask(OutputAlteration::ReducedDepth));
+    CHECK(engine.outputBitPerfect() == false);
+
+    CHECK(waitForAnnouncements(listener, 2));  // the stitch crossed into b
+    CHECK(engine.state() == State::Playing);
+    CHECK(sinkPtr->recordedDecisions().size() == 1);  // one open: it was a stitch
+    CHECK(engine.outputAlterations() == 0);
+    CHECK(engine.outputBitPerfect() == true);
+    CHECK(listener.outcomes().empty());  // announcements carry it; no republication
+
+    // A 32-bit source exceeds what float32 preserves, whatever the device.
+    engine.playNow("depth32:44100:2:600000");
+    CHECK(waitForAnnouncements(listener, 3));
+    CHECK(engine.outputAlterations() == toMask(OutputAlteration::ReducedDepth));
+
+    // Unknown device depth: only the pipeline rule remains.
+    sinkPtr->setRealizedDepthBits(0);
+    engine.playNow("depth24:44100:2:600000");
+    CHECK(waitForAnnouncements(listener, 4));
+    CHECK(engine.outputDepthBits() == 0);
+    CHECK(engine.outputAlterations() == 0);
+    engine.playNow("depth32:44100:2:600000");
+    CHECK(waitForAnnouncements(listener, 5));
+    CHECK(engine.outputAlterations() == toMask(OutputAlteration::ReducedDepth));
+
+    // A lossy source (depth 0) never claims, even on a shallow device.
+    sinkPtr->setRealizedDepthBits(8);
+    engine.playNow("ramp:44100:2:600000");
+    CHECK(waitForAnnouncements(listener, 6));
+    CHECK(engine.outputAlterations() == 0);
+    CHECK(engine.outputBitPerfect() == true);
     CHECK(listener.errors() == 0);
 
     engine.stop();
@@ -3108,6 +3274,8 @@ int main() {
     testSelectDeviceWhilePausedStaysPaused();
 
     testExternalRateChangeRepublishesOutcome();
+    testSystemGainAlterationRepublishes();
+    testReducedDepthFollowsTheTrack();
     testDefaultDeviceChangeReopensWhenFollowing();
     testDefaultDeviceChangeIgnoredWhenPinned();
     testDeviceListAndDebtEventsRelay();

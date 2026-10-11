@@ -298,6 +298,39 @@ void NullSink::fireOutputFailed(const std::string& reason) {
     }
 }
 
+void NullSink::fireOutputAlterationsChanged() {
+    ISinkEventListener* l = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        l = m_events;
+    }
+    if (l != nullptr) {
+        l->onOutputAlterationsChanged();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The alteration facts: plain settable state the two reads echo back.
+void NullSink::setOutputAlterations(OutputAlterations mask) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    m_alterations = mask;
+}
+
+void NullSink::setRealizedDepthBits(std::uint16_t bits) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    m_realizedDepth = bits;
+}
+
+OutputAlterations NullSink::outputAlterations() const {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_alterations;
+}
+
+std::uint16_t NullSink::realizedDepthBits() const {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_realizedDepth;
+}
+
 // ---------------------------------------------------------------------------
 // Failure shapes. Both are test knobs set from the test thread between
 // settled transport commands, like the other configuration setters.

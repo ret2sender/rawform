@@ -68,6 +68,11 @@
 //     external rate change moves the fake device first, so the sink is in the
 //     same forgiven state a real one is in when it reports; an injected output
 //     failure models a device that died underneath an open session.
+//   - Alterations: setOutputAlterations() and setRealizedDepthBits() set what
+//     the two IAudioSink reads report (a platform volume on the samples, the
+//     device's format depth), and fireOutputAlterationsChanged() is the nudge
+//     a real sink sends when either moves, so the engine's composed outcome
+//     and its republication are testable without a mixer.
 //   - Failure shapes: setStartFails() makes start() refuse (the platform would
 //     not start the RT thread), and setStallAfterFrames() makes the pump thread
 //     stop pulling after that many frames while staying alive (a device that
@@ -181,7 +186,17 @@ public:
                              std::uint32_t originalRateHz,
                              std::uint32_t borrowedRateHz);
     void fireOutputFailed(const std::string& reason);
+    void fireOutputAlterationsChanged();
 
+    // ----- output-alteration test configuration --------------------------------
+
+    /// What outputAlterations() and realizedDepthBits() report. Both default to
+    /// "nothing known" (0), the base-class answer, so every scenario that does
+    /// not set them keeps today's outcome. Settable at any time (a test models a
+    /// volume moving mid-track by setting the mask and firing the nudge); the
+    /// reads are mutex-guarded like the other fake-device state.
+    void setOutputAlterations(OutputAlterations mask);
+    void setRealizedDepthBits(std::uint16_t bits);
     // ----- failure-shape test configuration -----------------------------------
 
     /// Make every start() return false (the platform refused to start the RT
@@ -232,6 +247,8 @@ public:
     /// rate while open. Keeps the engine's measurement-first publication and
     /// mid-session republication testable without hardware.
     [[nodiscard]] std::uint32_t measuredDeviceRateHz() const override;
+    [[nodiscard]] OutputAlterations outputAlterations() const override;
+    [[nodiscard]] std::uint16_t     realizedDepthBits() const override;
 
 private:
     void pumpLoop();  ///< the consumer / pull thread
@@ -288,6 +305,11 @@ private:
     bool                       m_startFails = false;
     std::atomic<std::uint64_t> m_stallAfterFrames{0};
     std::atomic<std::uint64_t> m_pulledThisOpen{0};
+
+    /// The injected alteration facts, m_mtx discipline (set by the test thread,
+    /// read by the engine thread).
+    OutputAlterations m_alterations   = 0;
+    std::uint16_t     m_realizedDepth = 0;
 };
 
 }  // namespace rawform::audio

@@ -81,6 +81,39 @@ enum class State : std::uint8_t {
     Paused,   ///< source loaded and positioned, but the sink is not consuming
 };
 
+/// What stands between the decoded samples and the device, for the status
+/// line's "(Bit Perfect)" claim. The engine composes these from facts it holds
+/// (the rate comparison, the source depth) and facts the sink reports
+/// (IAudioSink::outputAlterations and realizedDepthBits), publishes the mask
+/// with the device outcome, and calls the output bit-perfect only when the mask
+/// is empty. A bitmask rather than an enum of states because the alterations
+/// are independent and can coexist; the UI picks what to name by its own
+/// precedence. OutputAlterations is the mask type; the enumerators are the bits.
+///   - Resampled: the device is not clocking the source rate, so the samples
+///     are interpolated somewhere between the engine and the DAC.
+///   - SystemGain: a volume or mute OUTSIDE the engine is multiplying the
+///     samples (the PipeWire stream or sink node's software volume, the system
+///     volume on macOS). The engine's own gain is reported separately (the
+///     controller classifies the value it pushes) and is not a flag here.
+///   - ReducedDepth: the device format carries fewer bits than the source
+///     (a 24-bit source on a 16-bit stream), or the source exceeds the float32
+///     pipeline's 24-bit mantissa. Lossy sources report depth 0 and never claim.
+enum class OutputAlteration : std::uint8_t {
+    None         = 0,
+    Resampled    = 1,
+    SystemGain   = 2,
+    ReducedDepth = 4,
+};
+using OutputAlterations = std::uint8_t;
+
+[[nodiscard]] constexpr OutputAlterations toMask(OutputAlteration a) noexcept {
+    return static_cast<OutputAlterations>(a);
+}
+[[nodiscard]] constexpr bool hasAlteration(OutputAlterations mask,
+                                           OutputAlteration  a) noexcept {
+    return (mask & toMask(a)) != 0;
+}
+
 /// Which point in the real-time pull chain the visualization tap (the spectrum
 /// analyzer's feed) samples. This selects WHERE in EngineRingSource::pull() the
 /// scope tap captures its mono block, relative to the master-gain multiply, and

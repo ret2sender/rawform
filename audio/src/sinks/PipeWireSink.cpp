@@ -95,6 +95,21 @@
 // format diverging from or re-converging with the graph clock); it never
 // emits onDefaultDeviceChanged or onRateDebtChanged, for the reasons above.
 //
+// What alters the samples past the engine (outputAlterations and
+// realizedDepthBits, for the engine's bit-perfect claim). A PipeWire volume is
+// applied in software by audioconvert at one of two places: on our own stream
+// node (the per-application slider; the stream's control_info events report
+// its softVolumes/softMute/mute controls) or on the target sink node (the
+// device slider when the hardware mixer cannot absorb it; the node's Props
+// param, watched on the same bound proxy as its Format). softVolumes is
+// precisely the multiplier audioconvert applies, so a hardware-mixer volume
+// leaves it at unity and the samples untouched, and the sink reports
+// SystemGain exactly when any soft volume on either node is off unity or a
+// mute is on. The target node's Format also names the sample format the
+// driver is fed, whose depth is the realized depth. Both facts are read by the
+// engine after open/reconfigure and re-read on onOutputAlterationsChanged,
+// which this sink emits whenever either moves.
+//
 // Output failure: the sink tells the engine when an open session cannot go
 // on, through ISinkEventListener::onOutputFailed, from three places: the
 // stream state machine entering ERROR or dropping to UNCONNECTED while open
@@ -140,6 +155,7 @@
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/audio/raw.h>
 #include <spa/param/format.h>  // SPA_FORMAT_AUDIO_rate (the EnumFormat rate key)
+#include <spa/param/props.h>   // SPA_PROP_softVolumes and friends (the Props watch)
 #include <spa/pod/iter.h>      // spa_pod_find_prop, spa_pod_get_values
 
 #include <algorithm>  // std::sort for the discrete rate set
@@ -292,6 +308,26 @@ struct PipeWireSinkImpl {
     std::uint32_t   driverCertRate     = 0;
     std::atomic<std::uint32_t> driverFormatRate{0};
 
+    // ----- output-alteration facts (see the file header) ---------------------
+    // The software gain state of each node that can multiply our samples: the
+    // target node (its Props, on the watch proxy above) and our own stream
+    // node (the stream's controls). Loop-lock-guarded plain state, folded into
+    // `alterations`, the published mask the engine reads locklessly;
+    // driverDepthBits is the target node's Format depth, same discipline as
+    // driverFormatRate. Both atomics reset with the watch.
+    struct SoftGain {
+        bool volumeOffUnity = false;  // any softVolumes entry != 1.0
+        bool softMute       = false;
+        bool mute           = false;
+        [[nodiscard]] bool any() const noexcept {
+            return volumeOffUnity || softMute || mute;
+        }
+    };
+    SoftGain                   targetGain;
+    SoftGain                   streamGain;
+    std::atomic<std::uint8_t>  alterations{0};
+    std::atomic<std::uint16_t> driverDepthBits{0};
+
     // armed gates the pull in process. Release-stored by start()/stop() on the
     // engine thread, acquire-loaded by process on the data thread; the join
     // itself is set_active(false), see the file header.
@@ -349,6 +385,135 @@ std::uint32_t parseRate(const char* value) {
     return static_cast<std::uint32_t>(std::strtoul(value, nullptr, 10));
 }
 
+// The sample depth a SPA audio format carries, for realizedDepthBits. The
+// endian variants collapse (depth is the same either way); the packed and
+// 32-bit-container 24-bit forms both carry 24 significant bits; float is 32.
+// Anything else (encoded, planar, law-coded) reports unknown rather than a
+// guess.
+std::uint16_t depthOfSpaFormat(std::uint32_t format) {
+    switch (format) {
+        case SPA_AUDIO_FORMAT_S8:
+        case SPA_AUDIO_FORMAT_U8:
+            return 8;
+        case SPA_AUDIO_FORMAT_S16_LE:
+        case SPA_AUDIO_FORMAT_S16_BE:
+        case SPA_AUDIO_FORMAT_U16_LE:
+        case SPA_AUDIO_FORMAT_U16_BE:
+            return 16;
+        case SPA_AUDIO_FORMAT_S18_LE:
+        case SPA_AUDIO_FORMAT_S18_BE:
+        case SPA_AUDIO_FORMAT_U18_LE:
+        case SPA_AUDIO_FORMAT_U18_BE:
+            return 18;
+        case SPA_AUDIO_FORMAT_S20_LE:
+        case SPA_AUDIO_FORMAT_S20_BE:
+        case SPA_AUDIO_FORMAT_U20_LE:
+        case SPA_AUDIO_FORMAT_U20_BE:
+            return 20;
+        case SPA_AUDIO_FORMAT_S24_LE:
+        case SPA_AUDIO_FORMAT_S24_BE:
+        case SPA_AUDIO_FORMAT_U24_LE:
+        case SPA_AUDIO_FORMAT_U24_BE:
+        case SPA_AUDIO_FORMAT_S24_32_LE:
+        case SPA_AUDIO_FORMAT_S24_32_BE:
+        case SPA_AUDIO_FORMAT_U24_32_LE:
+        case SPA_AUDIO_FORMAT_U24_32_BE:
+            return 24;
+        case SPA_AUDIO_FORMAT_S32_LE:
+        case SPA_AUDIO_FORMAT_S32_BE:
+        case SPA_AUDIO_FORMAT_U32_LE:
+        case SPA_AUDIO_FORMAT_U32_BE:
+        case SPA_AUDIO_FORMAT_F32_LE:
+        case SPA_AUDIO_FORMAT_F32_BE:
+        case SPA_AUDIO_FORMAT_F64_LE:
+        case SPA_AUDIO_FORMAT_F64_BE:
+            return 32;
+        default:
+            return 0;
+    }
+}
+
+// Whether any entry of a float array is off unity: the softVolumes test.
+// Exact comparison on purpose; audioconvert skips the multiply at exactly 1.0
+// and applies it at anything else, so this is its own test.
+bool anyOffUnity(const float* values, std::uint32_t count) {
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (values[i] != 1.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Fold a Props object (the target node's param) into a node's gain state.
+// Keys absent from this Props leave their field alone: audioconvert publishes
+// the full set in one object, but the fold stays correct for a partial one.
+void applySoftGainProps(const struct spa_pod* param,
+                        PipeWireSinkImpl::SoftGain& gain) {
+    if (!spa_pod_is_object_type(param, SPA_TYPE_OBJECT_Props)) {
+        return;
+    }
+    const auto* obj = reinterpret_cast<const struct spa_pod_object*>(param);
+    const struct spa_pod_prop* prop = nullptr;
+    SPA_POD_OBJECT_FOREACH(obj, prop) {
+        bool b = false;
+        switch (prop->key) {
+            case SPA_PROP_softVolumes: {
+                std::uint32_t n    = 0;
+                std::uint32_t size = 0;
+                std::uint32_t type = 0;
+                const void* values =
+                    spa_pod_get_array_full(&prop->value, &n, &size, &type);
+                if (values != nullptr && type == SPA_TYPE_Float &&
+                    size == sizeof(float)) {
+                    gain.volumeOffUnity =
+                        anyOffUnity(static_cast<const float*>(values), n);
+                }
+                break;
+            }
+            case SPA_PROP_softMute:
+                if (spa_pod_get_bool(&prop->value, &b) >= 0) {
+                    gain.softMute = b;
+                }
+                break;
+            case SPA_PROP_mute:
+                if (spa_pod_get_bool(&prop->value, &b) >= 0) {
+                    gain.mute = b;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+// Recompose the published alteration mask from both nodes' gain state and,
+// when it changed, nudge the engine to re-read. Loop lock held. Quiet while
+// not open: the engine reads the facts itself at the end of open(), and a
+// nudge for a closed session would be dropped on its side anyway.
+void publishAlterationsLocked(PipeWireSinkImpl* impl) {
+    const bool gain = impl->targetGain.any() || impl->streamGain.any();
+    const std::uint8_t mask =
+        gain ? toMask(OutputAlteration::SystemGain) : OutputAlterations{0};
+    if (impl->alterations.exchange(mask, std::memory_order_relaxed) == mask) {
+        return;
+    }
+    if (!impl->opened) {
+        return;
+    }
+    if (gain) {
+        std::fprintf(stderr, "PipeWireSink: software volume or mute applied %s\n",
+                     impl->streamGain.any() ? "on the rawform stream"
+                                            : "on the output device node");
+    } else {
+        std::fprintf(stderr, "PipeWireSink: software volume and mute back to "
+                             "unity; samples pass untouched\n");
+    }
+    if (impl->events != nullptr) {
+        impl->events->onOutputAlterationsChanged();
+    }
+}
+
 // Driver-format watch helpers, defined after the node event tables
 // they use; declared here because the registry-remove and default-metadata
 // handlers above them in the file need to tear down and re-arm the watch.
@@ -391,14 +556,14 @@ void onCoreError(void* data, std::uint32_t id, int seq, int res,
                  const char* message) {
     auto* impl = static_cast<PipeWireSinkImpl*>(data);
     // Expected first-contact artifact of the driver-format watch, not an
-    // error: arming subscribes the target node to SPA_PARAM_Format, and
-    // subscribe_params issues an immediate enum of it; a sink node still
-    // suspended (an ALSA device before anything has started it, i.e. the
-    // first play of a session) has no current Format and the daemon answers
-    // -EIO, which lands here naming the watch node's proxy. The subscription
-    // itself stands: param_changed delivers the real Format the moment our
-    // stream starts the node, so the last-mile verification only begins
-    // slightly later, which is within the watch's design. Squelched because
+    // error: arming subscribes the target node to SPA_PARAM_Format (and
+    // Props), and subscribe_params issues an immediate enum of each; a sink
+    // node still suspended (an ALSA device before anything has started it,
+    // i.e. the first play of a session) has no current Format and the daemon
+    // answers -EIO, which lands here naming the watch node's proxy. The
+    // subscription itself stands: param_changed delivers the real Format the
+    // moment our stream starts the node, so the last-mile verification only
+    // begins slightly later, which is within the watch's design. Squelched because
     // an error-shaped line users must learn to ignore trains them to ignore
     // error lines. Scope is deliberately narrow (this proxy, this errno):
     // a steady-state watch-node failure travels with global_remove/default
@@ -901,6 +1066,15 @@ void onDriverFormatParam(void* data, int /*seq*/, std::uint32_t id,
                          std::uint32_t /*index*/, std::uint32_t /*next*/,
                          const struct spa_pod* param) {
     auto* impl = static_cast<PipeWireSinkImpl*>(data);
+    if (id == SPA_PARAM_Props) {
+        // The target node's software gain (file header). A null Props is
+        // nothing to fold.
+        if (param != nullptr) {
+            applySoftGainProps(param, impl->targetGain);
+            publishAlterationsLocked(impl);
+        }
+        return;
+    }
     if (id != SPA_PARAM_Format || param == nullptr) {
         // A null Format is the driver clearing during its own renegotiation;
         // the fresh set follows on the same subscription. Keep the last known
@@ -919,6 +1093,16 @@ void onDriverFormatParam(void* data, int /*seq*/, std::uint32_t id,
         return;
     }
     impl->driverFormatRate.store(info.rate, std::memory_order_relaxed);
+
+    // The realized depth travels with the same Format. A change while open is
+    // a nudge for the engine to re-read it (the engine reads it itself at the
+    // end of our own transitions, so a nudge landing during one is harmless:
+    // it finds nothing changed).
+    const std::uint16_t depth = depthOfSpaFormat(info.format);
+    if (impl->driverDepthBits.exchange(depth, std::memory_order_relaxed) != depth &&
+        impl->opened && impl->events != nullptr) {
+        impl->events->onOutputAlterationsChanged();
+    }
 
     if (!impl->watchArmed || !impl->opened || impl->events == nullptr) {
         return;
@@ -971,11 +1155,17 @@ void disarmDriverFormatWatchLocked(PipeWireSinkImpl* impl) {
     impl->watchArmed     = false;
     impl->driverCertRate = 0;
     impl->driverFormatRate.store(0, std::memory_order_relaxed);
+    impl->driverDepthBits.store(0, std::memory_order_relaxed);
+    // The target's gain facts die with the proxy that delivered them. Not
+    // published here: a re-arm's Props delivery republishes against the new
+    // target, and the failed-arm path below publishes the cleared state.
+    impl->targetGain = PipeWireSinkImpl::SoftGain{};
 }
 
 // Bind the watch onto the current target resolution. Any previous watch is
-// torn down first; the Format subscription delivers the node's CURRENT param
-// immediately, so driverFormatRate repopulates without waiting for a change.
+// torn down first; the Format and Props subscriptions deliver the node's
+// CURRENT params immediately, so driverFormatRate, the depth and the target's
+// gain state repopulate without waiting for a change.
 // watchArmed stays false; the caller decides when emission is safe (open and
 // reconfigure reconcile at their end; the default-migration handler restores
 // the armed state it saw). Loop lock held. Returns false when no target
@@ -984,19 +1174,21 @@ void disarmDriverFormatWatchLocked(PipeWireSinkImpl* impl) {
 bool armDriverFormatWatchLocked(PipeWireSinkImpl* impl) {
     disarmDriverFormatWatchLocked(impl);
     const PipeWireSinkImpl::SinkNodeEntry* target = resolveTargetEntry(impl);
-    if (target == nullptr) {
-        return false;
-    }
-    auto* node = static_cast<struct pw_node*>(
-        pw_registry_bind(impl->registry, target->id, PW_TYPE_INTERFACE_Node,
-                         PW_VERSION_NODE, 0));
+    auto* node = target == nullptr
+                     ? nullptr
+                     : static_cast<struct pw_node*>(pw_registry_bind(
+                           impl->registry, target->id, PW_TYPE_INTERFACE_Node,
+                           PW_VERSION_NODE, 0));
     if (node == nullptr) {
+        publishAlterationsLocked(impl);  // no target facts: say so if that changed
         return false;
     }
     pw_node_add_listener(node, &impl->driverWatchListener, &kDriverNodeEvents,
                          impl);
-    std::uint32_t ids[1] = {SPA_PARAM_Format};
-    pw_node_subscribe_params(node, ids, 1);
+    // Format for the rate and depth, Props for the software gain; both deliver
+    // their current value at once.
+    std::uint32_t ids[2] = {SPA_PARAM_Format, SPA_PARAM_Props};
+    pw_node_subscribe_params(node, ids, 2);
     impl->driverWatchNode   = node;
     impl->driverWatchBound  = true;
     impl->driverWatchNodeId = target->id;
@@ -1064,6 +1256,34 @@ void onStreamParamChanged(void* data, std::uint32_t id,
     pw_thread_loop_signal(impl->loop, false);
 }
 
+// Our own stream node's controls (file header): the per-application volume
+// the session manager sets on the stream lands in audioconvert on our side of
+// the connection, and the stream reports each control's value here as it
+// changes, including the initial values once the node is set up. Loop thread,
+// lock held during dispatch.
+void onStreamControlInfo(void* data, std::uint32_t id,
+                         const struct pw_stream_control* control) {
+    auto* impl = static_cast<PipeWireSinkImpl*>(data);
+    if (control == nullptr || control->n_values == 0 || control->values == nullptr) {
+        return;
+    }
+    switch (id) {
+        case SPA_PROP_softVolumes:
+            impl->streamGain.volumeOffUnity =
+                anyOffUnity(control->values, control->n_values);
+            break;
+        case SPA_PROP_softMute:
+            impl->streamGain.softMute = control->values[0] != 0.0f;
+            break;
+        case SPA_PROP_mute:
+            impl->streamGain.mute = control->values[0] != 0.0f;
+            break;
+        default:
+            return;
+    }
+    publishAlterationsLocked(impl);
+}
+
 // The process callback: the real-time consumer. Pulls from the non-owning
 // source into the mapped buffer and zero-pads any shortfall; when disarmed
 // (stop() in flight or landed) it writes pure silence and never touches the
@@ -1121,6 +1341,7 @@ struct pw_stream_events makeStreamEvents() {
     struct pw_stream_events ev{};
     ev.version       = PW_VERSION_STREAM_EVENTS;
     ev.state_changed = onStreamStateChanged;
+    ev.control_info  = onStreamControlInfo;
     ev.io_changed    = onStreamIoChanged;
     ev.param_changed = onStreamParamChanged;
     ev.process       = onStreamProcess;
@@ -1543,6 +1764,7 @@ bool PipeWireSink::open(const AudioFormat& sourceFormat,
     pw_thread_loop_lock(m_impl->loop);
     m_impl->closing         = false;  // a fresh open gets a fresh failure budget
     m_impl->failureReported = false;
+    m_impl->streamGain      = PipeWireSinkImpl::SoftGain{};  // the new stream reports
 
     struct pw_properties* props = pw_properties_new(
         PW_KEY_MEDIA_TYPE,     "Audio",
@@ -2015,6 +2237,8 @@ void PipeWireSink::close() {
     m_impl->closing = false;
     m_impl->source  = nullptr;
     m_impl->measuredRate.store(0, std::memory_order_relaxed);
+    m_impl->streamGain = PipeWireSinkImpl::SoftGain{};
+    m_impl->alterations.store(0, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -2062,6 +2286,20 @@ std::uint32_t PipeWireSink::measuredDeviceRateHz() const {
         return 0;
     }
     return m_impl->measuredRate.load(std::memory_order_relaxed);
+}
+
+OutputAlterations PipeWireSink::outputAlterations() const {
+    if (!m_impl->opened) {
+        return 0;
+    }
+    return m_impl->alterations.load(std::memory_order_relaxed);
+}
+
+std::uint16_t PipeWireSink::realizedDepthBits() const {
+    if (!m_impl->opened) {
+        return 0;
+    }
+    return m_impl->driverDepthBits.load(std::memory_order_relaxed);
 }
 
 }  // namespace rawform::audio

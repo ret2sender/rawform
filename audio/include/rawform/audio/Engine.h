@@ -192,12 +192,16 @@ public:
         virtual void onOutputDevices(
             const std::vector<AudioDeviceInfo>& /*devices*/) {}
         /// Mid-session outcome republication: the device rate changed
-        /// under a live track (an external assertion the sink reported), and
-        /// this is the fresh truth the UI's suffix should show. Only fired
+        /// under a live track (an external assertion the sink reported), or
+        /// what alters the samples past the engine changed (a system volume
+        /// moved, the device depth changed), and this is the fresh truth the
+        /// UI's suffix should show. `alterations` is the OutputAlteration mask
+        /// (Types.h); bitPerfect is true exactly when it is empty. Only fired
         /// between onTrackChanged announcements; each announcement carries its
-        /// own outcome as before.
+        /// own outcome through the pull pair below.
         virtual void onDeviceOutcomeChanged(std::uint32_t /*deviceRateHz*/,
-                                            bool /*bitPerfect*/) {}
+                                            bool /*bitPerfect*/,
+                                            OutputAlterations /*alterations*/) {}
         /// The sink's restore ledger changed; all-zero means cleared.
         /// Persisted upstream for crash recovery. Engine thread, like everything
         /// here.
@@ -372,21 +376,31 @@ public:
     /// drive the readout with no dedicated callback.
     [[nodiscard]] std::uint32_t liveBitrateKbps() const noexcept;
 
-    /// The output device outcome for the current open, the
-    /// pull pair behind the UI's "(Bit Perfect)" / "(Resampled to N Hz)" suffix.
-    /// outputDeviceRateHz() is the rate the device is actually running at, and
-    /// outputBitPerfect() whether that equals the source rate; both are published
-    /// after each successful sink open, hold steady across gapless stitches,
-    /// HOLD-CUTs, seeks, and pause (the open is unchanged through all of those),
-    /// and clear on entering Stopped (device released: rate reads 0, bit-perfect
+    /// The output device outcome for the current open, the pull set behind the
+    /// UI's "(Bit Perfect)" / "(Resampled to N Hz)" / "(Volume Adjusted by
+    /// ...)" suffix. outputDeviceRateHz() is the rate the device is actually
+    /// running at; outputAlterations() is the OutputAlteration mask (Types.h):
+    /// Resampled when that rate differs from the source rate, SystemGain when
+    /// the sink reports a platform volume or mute on the samples, ReducedDepth
+    /// when the device format (outputDepthBits(), 0 when the sink cannot see
+    /// it) carries fewer bits than the current track's source depth or the
+    /// source exceeds the float32 pipeline's 24 bits; outputBitPerfect() is
+    /// true exactly when the mask is empty. The rate and the sink's facts are
+    /// published after each successful sink open and whenever the sink reports
+    /// a change; the depth comparison follows each track announcement (a 16-bit
+    /// track stitched gaplessly after a 24-bit one changes the claim, not the
+    /// open); everything holds across HOLD-CUTs, seeks, and pause, and clears on
+    /// entering Stopped (device released: rate 0, mask empty, bit-perfect
     /// false). Measurement-first: the sink's measured device rate
     /// (IAudioSink::measuredDeviceRateHz) is the authority when available, with
     /// the RateDecision's prediction as the fallback for sinks that cannot
-    /// measure (NullSink). One packed atomic backs both
-    /// reads, so they are individually lock-free and readable from any thread;
-    /// read them inside onTrackChanged for values coherent with that track.
-    [[nodiscard]] std::uint32_t outputDeviceRateHz() const noexcept;
-    [[nodiscard]] bool          outputBitPerfect() const noexcept;
+    /// measure (NullSink). One packed atomic backs every read, so each is
+    /// lock-free and readable from any thread; read them inside onTrackChanged
+    /// for values coherent with that track.
+    [[nodiscard]] std::uint32_t     outputDeviceRateHz() const noexcept;
+    [[nodiscard]] bool              outputBitPerfect() const noexcept;
+    [[nodiscard]] OutputAlterations outputAlterations() const noexcept;
+    [[nodiscard]] std::uint16_t     outputDepthBits() const noexcept;
 
     /// Frames the output asked for and the engine could not supply, summed
     /// over the engine's life: every one of them reached the device as

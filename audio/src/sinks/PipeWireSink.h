@@ -76,10 +76,10 @@
 // The device surface: enumerateDevices() lists the live Audio/Sink nodes by
 // node.name with the current default marked; selectDevice() pins one, which
 // redirects capabilities() and targets the stream at the next open. The sink
-// reports device-list changes and external clock transitions through the
-// event channel; it deliberately does not report default-device changes (the
-// session manager migrates live streams itself) or rate debt (repayment is
-// structural).
+// reports device-list changes, external clock transitions, and changes in the
+// software gain or device depth on the samples through the event channel; it
+// deliberately does not report default-device changes (the session manager
+// migrates live streams itself) or rate debt (repayment is structural).
 
 #pragma once
 
@@ -198,6 +198,14 @@ public:
     /// exactly that reason.
     void setLogOutput(ILogOutput* out) override;
     [[nodiscard]] std::uint32_t measuredDeviceRateHz() const override;
+
+    /// What PipeWire does to the samples past the engine (see the .cpp
+    /// header): SystemGain when a software volume or mute is in effect on our
+    /// stream node or on the target sink node, nothing otherwise; and the
+    /// target node's realized Format depth. Both 0 while not open. The sink
+    /// emits onOutputAlterationsChanged whenever either moves.
+    [[nodiscard]] OutputAlterations outputAlterations() const override;
+    [[nodiscard]] std::uint16_t     realizedDepthBits() const override;
 
 private:
     std::unique_ptr<PipeWireSinkImpl> m_impl;
