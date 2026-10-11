@@ -105,7 +105,9 @@
 #include <QTimer>
 #include <QVariant> // QVariantList for the output device model
 
+#include <atomic>   // the bridge's handoff edge
 #include <cstddef>  // copyScopeMono's frame-count type
+#include <cstdint>  // the handoff counter's width
 #include <memory>
 #include <optional>  // the in-flight keyboard seek target
 
@@ -518,6 +520,11 @@ signals:
 private:
     friend struct EngineListenerBridge;
 
+    /// The bridge's handoff edge: the bridge releases on it after building a
+    /// carrier and before posting it, event() acquires it before reading one.
+    /// Written only by the engine thread, read only by the GUI thread.
+    std::atomic<std::uint64_t> m_bridgeHandoff{0};
+
     /// The engine-thread facts for one track, snapshotted to GUI-thread-safe value
     /// types at the bridge boundary (no std::string crosses the queued call). The
     /// bridge (a friend) builds this; applyTrack consumes it on the GUI thread.
@@ -546,7 +553,12 @@ private:
         int      outputDepthBits = 0;
     };
 
-    // --- GUI-thread appliers (invoked queued from the bridge) --------------
+    /// The GUI-thread end of the engine bridge: runs a posted carrier's action
+    /// after acquiring the handoff edge (see the bridge in the .cpp); every
+    /// other event goes to QObject.
+    bool event(QEvent* e) override;
+
+    // --- GUI-thread appliers (posted from the bridge) ----------------------
     void applyState(int state);
     void applyTrack(const EngineTrackFacts& facts);
     void applyPosition(double seconds, int liveBitrateKbps);

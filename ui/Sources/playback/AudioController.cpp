@@ -58,6 +58,8 @@
 #include <QAbstractItemModel>
 #include <QAbstractProxyModel>
 #include <QByteArray>
+#include <QCoreApplication>  // postEvent, the bridge's carrier
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QIODevice>
@@ -67,9 +69,10 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <atomic>   // the bridge's handoff edge
-#include <cmath>    // std::pow for the volume taper, std::abs for the seek landing
-#include <cstdint>  // the handoff counter's width
+#include <atomic>      // the bridge's handoff edge
+#include <cmath>       // std::pow for the volume taper, std::abs for the seek landing
+#include <cstdint>     // the handoff counter's width
+#include <functional>  // the bridge carrier's action
 #include <memory>
 #include <optional>
 #include <string>
@@ -202,45 +205,67 @@ float computeReplayGainLinear(const replaygain::Values& v, int mode,
 // ===========================================================================
 //
 // Each Listener override runs on the engine thread. It snapshots its payload into
-// GUI-thread-safe value types and posts a queued functor to the controller, which
-// lives on the GUI thread, so the property/signal surface is only ever touched
-// there. The QString/primitive snapshots mean nothing non-trivially-copyable
-// crosses the queued call, and Qt6's invokeMethod(contextObject, functor, type)
-// runs the functor in the controller's thread with no Q_ARG metatype ceremony.
+// GUI-thread-safe value types and posts them to the controller, which lives on
+// the GUI thread, so the property/signal surface is only ever touched there.
+// The QString/primitive snapshots mean nothing non-trivially-copyable crosses
+// the post.
 //
-// The raw m_owner pointer is safe: the controller owns this bridge and outlives
+// The carrier is a plain QEvent (BridgeEvent) holding the GUI-side action, not
+// QMetaObject::invokeMethod's queued functor. The reason is the handoff edge
+// below: the payload is written on the engine thread and read on the GUI
+// thread, and the only ordering between the two is Qt's posted-event queue.
+// That ordering is real but invisible to a thread sanitizer when Qt is not
+// instrumented (QMutex waits on platform semaphores the tool does not
+// intercept), so every bridged call would read as a data race and the
+// sanitizer would abort the process at exit. The fix is a release/acquire pair
+// of our own around the post: the bridge publishes a release on the owner's
+// handoff counter AFTER the carrier is completely built and BEFORE it is
+// posted, and AudioController::event() acquires the counter before it reads
+// anything the engine thread wrote. The acquire reads a value at or past the
+// release (the event is delivered after the post), which synchronizes-with it
+// and with every earlier release in the sequence: a real edge in the memory
+// model, not an annotation; one uncontended atomic per bridged call.
+// invokeMethod cannot be used for this because it moves the functor into its
+// own slot object INSIDE the call, after any release we could place, and that
+// move is exactly the write the sanitizer then reports.
+//
+// The raw owner pointer is safe: the controller owns this bridge and outlives
 // it, and ~Engine (which runs before this bridge is destroyed, per the member
-// order in the header) joins the engine thread, so no callback can fire after the
-// owner starts going away. Any already-posted events are dropped by Qt when the
-// owner QObject is destroyed; the bridge pointer the functors carry is valid for
-// the same reason (the bridge dies after the engine, inside the owner's
-// destructor, where no event can run).
-//
-// The handoff edge. The payload is written on the engine thread (the functor's
-// captures) and read on the GUI thread (the functor's body), and the only
-// ordering between the two is Qt's posted-event queue. That ordering is real
-// but invisible to a thread sanitizer when Qt is not instrumented (QMutex waits
-// on platform semaphores the tool does not intercept), so every bridged call
-// would read as a data race and the sanitizer would abort the process at exit.
-// Each override therefore publishes a release on m_handoff before it posts, and
-// each functor acquires it before it touches the payload: the acquire reads a
-// value at or past the release (the event is delivered after the post), which
-// synchronizes-with it and with every earlier release in the sequence. A real
-// edge in the memory model, not an annotation; one uncontended atomic per
-// bridged call.
+// order in the header) joins the engine thread, so no callback can fire after
+// the owner starts going away. Any still-posted carriers are removed and
+// deleted by QObject's destructor on the GUI thread, after that join.
+
+namespace {
+
+// One engine callback, carried to the GUI thread. The action is complete when
+// the event is constructed; the controller runs it from its event() override.
+class BridgeEvent final : public QEvent {
+public:
+    using Action = std::function<void(AudioController&)>;
+
+    static QEvent::Type eventType() {
+        static const auto type =
+            static_cast<QEvent::Type>(QEvent::registerEventType());
+        return type;
+    }
+
+    explicit BridgeEvent(Action action)
+        : QEvent(eventType()), m_action(std::move(action)) {}
+
+    void run(AudioController& owner) { m_action(owner); }
+
+private:
+    Action m_action;
+};
+
+}  // namespace
+
 struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
     explicit EngineListenerBridge(AudioController* owner) : m_owner(owner) {}
 
     void onStateChanged(rawform::audio::State s) override {
         const int st = static_cast<int>(s);
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, st] {
-                bridge->receive();
-                owner->applyState(st);
-            },
-            Qt::QueuedConnection);
+        post([st](AudioController& c) { c.applyState(st); });
     }
 
     void onTrackChanged(const rawform::audio::TrackInfo& t) override {
@@ -262,14 +287,7 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         f.bitPerfect      = m_owner->m_engine.outputBitPerfect();
         f.alterations     = static_cast<int>(m_owner->m_engine.outputAlterations());
         f.outputDepthBits = static_cast<int>(m_owner->m_engine.outputDepthBits());
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, f] {
-                bridge->receive();
-                owner->applyTrack(f);
-            },
-            Qt::QueuedConnection);
+        post([f](AudioController& c) { c.applyTrack(f); });
     }
 
     void onOutputDevices(
@@ -285,14 +303,7 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
             m.insert(QStringLiteral("isDefault"), d.isDefault);
             list.push_back(m);
         }
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, list] {
-                bridge->receive();
-                owner->applyOutputDevices(list);
-            },
-            Qt::QueuedConnection);
+        post([list](AudioController& c) { c.applyOutputDevices(list); });
     }
 
     // A mid-track device outcome republication (the world changed the
@@ -302,31 +313,23 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         // The depth rides with the same publication; sampled here like the
         // track facts, so the four arrive coherent.
         const int depth = static_cast<int>(m_owner->m_engine.outputDepthBits());
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, rate = static_cast<int>(deviceRateHz),
-             bitPerfect, alt = static_cast<int>(alterations), depth] {
-                bridge->receive();
-                owner->applyDeviceOutcome(rate, bitPerfect, alt, depth);
-            },
-            Qt::QueuedConnection);
+        const int rate  = static_cast<int>(deviceRateHz);
+        const int alt   = static_cast<int>(alterations);
+        post([rate, bitPerfect, alt, depth](AudioController& c) {
+            c.applyDeviceOutcome(rate, bitPerfect, alt, depth);
+        });
     }
 
     // The ledger feed; persisted immediately (crash protection has no
     // patience for debouncing).
     void onRateDebtChanged(const std::string& deviceId, std::uint32_t originalRateHz,
                            std::uint32_t borrowedRateHz) override {
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, id = QString::fromStdString(deviceId),
-             orig = static_cast<quint32>(originalRateHz),
-             borrowed = static_cast<quint32>(borrowedRateHz)] {
-                bridge->receive();
-                owner->applyRateDebt(id, orig, borrowed);
-            },
-            Qt::QueuedConnection);
+        const QString id       = QString::fromStdString(deviceId);
+        const auto    orig     = static_cast<quint32>(originalRateHz);
+        const auto    borrowed = static_cast<quint32>(borrowedRateHz);
+        post([id, orig, borrowed](AudioController& c) {
+            c.applyRateDebt(id, orig, borrowed);
+        });
     }
 
     void onPositionChanged(double seconds) override {
@@ -336,51 +339,33 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         // extra callback. The bridge is a friend, so m_engine is reachable here.
         const int liveKbps =
             static_cast<int>(m_owner->m_engine.liveBitrateKbps());
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, seconds, liveKbps] {
-                bridge->receive();
-                owner->applyPosition(seconds, liveKbps);
-            },
-            Qt::QueuedConnection);
+        post([seconds, liveKbps](AudioController& c) {
+            c.applyPosition(seconds, liveKbps);
+        });
     }
 
     void onError(const std::string& message) override {
         const QString m = QString::fromStdString(message);
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, m] {
-                bridge->receive();
-                owner->applyError(m);
-            },
-            Qt::QueuedConnection);
+        post([m](AudioController& c) { c.applyError(m); });
     }
 
     void onInfo(const std::string& message) override {
         const QString m = QString::fromStdString(message);
-        publish();
-        QMetaObject::invokeMethod(
-            m_owner,
-            [owner = m_owner, bridge = this, m] {
-                bridge->receive();
-                owner->applyInfo(m);
-            },
-            Qt::QueuedConnection);
+        post([m](AudioController& c) { c.applyInfo(m); });
     }
 
 private:
-    // The two halves of the handoff edge (class comment). publish() runs on
-    // the engine thread right before a post; receive() runs on the GUI thread
-    // as the first thing a posted functor does.
-    void publish() noexcept { m_handoff.fetch_add(1, std::memory_order_release); }
-    void receive() const noexcept {
-        static_cast<void>(m_handoff.load(std::memory_order_acquire));
+    // The post: build the carrier completely (the action and every payload
+    // copy inside it), publish the handoff edge, then hand it to Qt. The
+    // release comes after the LAST write to anything the GUI thread will read,
+    // which is the whole point of owning the carrier's construction.
+    void post(BridgeEvent::Action action) {
+        auto* event = new BridgeEvent(std::move(action));
+        m_owner->m_bridgeHandoff.fetch_add(1, std::memory_order_release);
+        QCoreApplication::postEvent(m_owner, event);
     }
 
-    AudioController*           m_owner;
-    std::atomic<std::uint64_t> m_handoff{0};
+    AudioController* m_owner;
 };
 
 // ===========================================================================
@@ -707,8 +692,22 @@ QString AudioController::codecToName(int codec) {
 }
 
 // ===========================================================================
-// GUI-thread appliers (queued from the bridge)
+// GUI-thread appliers (posted from the bridge)
 // ===========================================================================
+
+// The GUI-thread end of the bridge. The acquire is the first thing done with
+// ANY event, before the type is even read: the handoff edge (see the bridge)
+// orders everything the engine thread wrote into a carrier before this
+// thread's reads of it, and it costs one uncontended load per event. A
+// carrier runs its action and is consumed; everything else goes to QObject.
+bool AudioController::event(QEvent* e) {
+    static_cast<void>(m_bridgeHandoff.load(std::memory_order_acquire));
+    if (e->type() == BridgeEvent::eventType()) {
+        static_cast<BridgeEvent*>(e)->run(*this);
+        return true;
+    }
+    return QObject::event(e);
+}
 
 void AudioController::applyState(int s) {
     if (s == m_state) {
