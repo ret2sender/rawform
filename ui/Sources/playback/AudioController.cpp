@@ -67,7 +67,9 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <cmath>   // std::pow for the volume taper, std::abs for the seek landing
+#include <atomic>   // the bridge's handoff edge
+#include <cmath>    // std::pow for the volume taper, std::abs for the seek landing
+#include <cstdint>  // the handoff counter's width
 #include <memory>
 #include <optional>
 #include <string>
@@ -208,14 +210,34 @@ float computeReplayGainLinear(const replaygain::Values& v, int mode,
 // it, and ~Engine (which runs before this bridge is destroyed, per the member
 // order in the header) joins the engine thread, so no callback can fire after the
 // owner starts going away. Any already-posted events are dropped by Qt when the
-// owner QObject is destroyed.
+// owner QObject is destroyed; the bridge pointer the functors carry is valid for
+// the same reason (the bridge dies after the engine, inside the owner's
+// destructor, where no event can run).
+//
+// The handoff edge. The payload is written on the engine thread (the functor's
+// captures) and read on the GUI thread (the functor's body), and the only
+// ordering between the two is Qt's posted-event queue. That ordering is real
+// but invisible to a thread sanitizer when Qt is not instrumented (QMutex waits
+// on platform semaphores the tool does not intercept), so every bridged call
+// would read as a data race and the sanitizer would abort the process at exit.
+// Each override therefore publishes a release on m_handoff before it posts, and
+// each functor acquires it before it touches the payload: the acquire reads a
+// value at or past the release (the event is delivered after the post), which
+// synchronizes-with it and with every earlier release in the sequence. A real
+// edge in the memory model, not an annotation; one uncontended atomic per
+// bridged call.
 struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
     explicit EngineListenerBridge(AudioController* owner) : m_owner(owner) {}
 
     void onStateChanged(rawform::audio::State s) override {
         const int st = static_cast<int>(s);
+        publish();
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, st] { owner->applyState(st); },
+            m_owner,
+            [owner = m_owner, bridge = this, st] {
+                bridge->receive();
+                owner->applyState(st);
+            },
             Qt::QueuedConnection);
     }
 
@@ -235,8 +257,13 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         // pattern the live bitrate rides in onPositionChanged below.
         f.deviceRateHz    = static_cast<int>(m_owner->m_engine.outputDeviceRateHz());
         f.bitPerfect      = m_owner->m_engine.outputBitPerfect();
+        publish();
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, f] { owner->applyTrack(f); },
+            m_owner,
+            [owner = m_owner, bridge = this, f] {
+                bridge->receive();
+                owner->applyTrack(f);
+            },
             Qt::QueuedConnection);
     }
 
@@ -253,8 +280,13 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
             m.insert(QStringLiteral("isDefault"), d.isDefault);
             list.push_back(m);
         }
+        publish();
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, list] { owner->applyOutputDevices(list); },
+            m_owner,
+            [owner = m_owner, bridge = this, list] {
+                bridge->receive();
+                owner->applyOutputDevices(list);
+            },
             Qt::QueuedConnection);
     }
 
@@ -262,9 +294,12 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
     // rate underneath a live track); same marshal shape as everything here.
     void onDeviceOutcomeChanged(std::uint32_t deviceRateHz,
                                 bool bitPerfect) override {
+        publish();
         QMetaObject::invokeMethod(
             m_owner,
-            [owner = m_owner, rate = static_cast<int>(deviceRateHz), bitPerfect] {
+            [owner = m_owner, bridge = this, rate = static_cast<int>(deviceRateHz),
+             bitPerfect] {
+                bridge->receive();
                 owner->applyDeviceOutcome(rate, bitPerfect);
             },
             Qt::QueuedConnection);
@@ -274,11 +309,13 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
     // patience for debouncing).
     void onRateDebtChanged(const std::string& deviceId, std::uint32_t originalRateHz,
                            std::uint32_t borrowedRateHz) override {
+        publish();
         QMetaObject::invokeMethod(
             m_owner,
-            [owner = m_owner, id = QString::fromStdString(deviceId),
+            [owner = m_owner, bridge = this, id = QString::fromStdString(deviceId),
              orig = static_cast<quint32>(originalRateHz),
              borrowed = static_cast<quint32>(borrowedRateHz)] {
+                bridge->receive();
                 owner->applyRateDebt(id, orig, borrowed);
             },
             Qt::QueuedConnection);
@@ -291,9 +328,11 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         // extra callback. The bridge is a friend, so m_engine is reachable here.
         const int liveKbps =
             static_cast<int>(m_owner->m_engine.liveBitrateKbps());
+        publish();
         QMetaObject::invokeMethod(
             m_owner,
-            [owner = m_owner, seconds, liveKbps] {
+            [owner = m_owner, bridge = this, seconds, liveKbps] {
+                bridge->receive();
                 owner->applyPosition(seconds, liveKbps);
             },
             Qt::QueuedConnection);
@@ -301,19 +340,39 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
 
     void onError(const std::string& message) override {
         const QString m = QString::fromStdString(message);
+        publish();
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, m] { owner->applyError(m); },
+            m_owner,
+            [owner = m_owner, bridge = this, m] {
+                bridge->receive();
+                owner->applyError(m);
+            },
             Qt::QueuedConnection);
     }
 
     void onInfo(const std::string& message) override {
         const QString m = QString::fromStdString(message);
+        publish();
         QMetaObject::invokeMethod(
-            m_owner, [owner = m_owner, m] { owner->applyInfo(m); },
+            m_owner,
+            [owner = m_owner, bridge = this, m] {
+                bridge->receive();
+                owner->applyInfo(m);
+            },
             Qt::QueuedConnection);
     }
 
-    AudioController* m_owner;
+private:
+    // The two halves of the handoff edge (class comment). publish() runs on
+    // the engine thread right before a post; receive() runs on the GUI thread
+    // as the first thing a posted functor does.
+    void publish() noexcept { m_handoff.fetch_add(1, std::memory_order_release); }
+    void receive() const noexcept {
+        static_cast<void>(m_handoff.load(std::memory_order_acquire));
+    }
+
+    AudioController*           m_owner;
+    std::atomic<std::uint64_t> m_handoff{0};
 };
 
 // ===========================================================================

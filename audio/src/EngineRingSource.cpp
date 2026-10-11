@@ -59,6 +59,12 @@
 // while running); the RT thread never touches it. Because the engine and the RT
 // thread write different atomics, the seam rebase needs no parked window. See
 // the header for the full rationale and the benign-skew note.
+//
+// The parked-thread edge. pull() ends with a release store to m_pullEpoch on
+// every call (a zero read included), and reconfigure/reset/setPlayhead begin
+// with an acquire load of it, so once the sink's stop() has joined the RT
+// thread, the engine's first parked-only touch of the ring synchronizes-with
+// the thread's last pull in the C++ memory model; see the header.
 
 #include "EngineRingSource.h"
 
@@ -76,6 +82,7 @@ EngineRingSource::~EngineRingSource() = default;
 std::size_t EngineRingSource::pull(float* out, std::size_t frames) noexcept {
     RingBuffer* ring = m_ring.get();
     if (ring == nullptr) {
+        m_pullEpoch.fetch_add(1, std::memory_order_release);
         return 0;
     }
 
@@ -139,6 +146,7 @@ std::size_t EngineRingSource::pull(float* out, std::size_t frames) noexcept {
         // The remaining case, exhausted and got > 0, is the final real block:
         // not an underrun, not yet finished. finished flips on the next pull.
     }
+    m_pullEpoch.fetch_add(1, std::memory_order_release);  // the parked-thread edge
     return got;
 }
 
@@ -147,9 +155,12 @@ std::size_t EngineRingSource::pull(float* out, std::size_t frames) noexcept {
 // parked (the sink closed or stopped), so the relaxed clears below race
 // nothing: the RT thread will not read these flags, advance the consumed
 // counter, or read the offset until the sink is started again, which
-// happens-after these calls on the same engine thread.
+// happens-after these calls on the same engine thread. The acquire of the pull
+// epoch at the top of each is the parked-thread edge (file header): it orders
+// the RT thread's last pull before the swap or the clears.
 void EngineRingSource::reconfigure(std::size_t  capacityFrames,
                                    std::uint16_t channels) {
+    static_cast<void>(m_pullEpoch.load(std::memory_order_acquire));
     m_ring = std::make_unique<RingBuffer>(capacityFrames, channels);
     m_inputExhausted.store(false, std::memory_order_relaxed);
     m_finished.store(false, std::memory_order_relaxed);
@@ -161,6 +172,7 @@ void EngineRingSource::reconfigure(std::size_t  capacityFrames,
 }
 
 void EngineRingSource::reset() noexcept {
+    static_cast<void>(m_pullEpoch.load(std::memory_order_acquire));
     if (m_ring) {
         m_ring->reset();
     }
@@ -178,6 +190,7 @@ void EngineRingSource::setPlayhead(std::uint64_t frame) noexcept {
     // with the RT thread parked (the seek window), where m_totalConsumed is
     // stable; after the paired reset() it is 0, so the offset is just `frame`.
     // Release so a paired sink->start() publishes the new origin to the RT thread.
+    static_cast<void>(m_pullEpoch.load(std::memory_order_acquire));
     const auto consumed =
         static_cast<std::int64_t>(m_totalConsumed.load(std::memory_order_relaxed));
     m_playheadOffset.store(static_cast<std::int64_t>(frame) - consumed,

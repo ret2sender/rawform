@@ -40,6 +40,15 @@
 //     rebasePositionAtSeam (see the position note below), which is engineered to
 //     be safe with the RT thread running.
 //
+// The parked-thread edge, stated in the memory model and not only in the sink's
+// contract: every pull() ends with a release store to m_pullEpoch, and the three
+// parked-only producer entry points begin with an acquire load of it. The
+// sink's stop() is what guarantees no pull is in flight when the engine moves
+// on; this pair is what makes the LAST pull's reads happen-before the engine's
+// subsequent swap or rebase in C++ terms too, so the invariant is something a
+// thread sanitizer can verify rather than take on faith (the platform joins
+// inside CoreAudio and PipeWire are sleeps and invokes the tool cannot see).
+//
 // The end-of-stream handshake: the producer publishes inputExhausted with a
 // release store AFTER its final ring write, and pull() flips finished only on
 // a zero read while exhausted, so no false "finished" is ever visible while
@@ -263,6 +272,12 @@ private:
     /// for the same toolchain-portability reason RingBuffer hardcodes it.
     alignas(64) std::atomic<std::uint64_t> m_totalWritten{0};   ///< W: engine(producer) R: engine
     alignas(64) std::atomic<std::uint64_t> m_totalConsumed{0};  ///< W: RT R: engine + controlling
+
+    /// The parked-thread edge (file header): released at the end of every
+    /// pull(), acquired at the start of reconfigure/reset/setPlayhead. RT-written
+    /// at block frequency, so it sits on m_totalConsumed's RT-written cache line
+    /// rather than contending with the engine's counters.
+    std::atomic<std::uint64_t> m_pullEpoch{0};  ///< W: RT R: engine
 
     /// The position origin. Engine-written ONLY (reconfigure/reset/setPlayhead and
     /// the seam rebase); read by the engine and the controlling thread for the
