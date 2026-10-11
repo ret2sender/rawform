@@ -103,8 +103,12 @@ FLAC__int32 quantize(float f, int bits) noexcept {
     long         v     = std::lround(static_cast<double>(f) * scale);
     const long   maxv  = (std::int64_t{1} << (bits - 1)) - 1;
     const long   minv  = -(std::int64_t{1} << (bits - 1));
-    if (v > maxv) v = maxv;
-    if (v < minv) v = minv;
+    if (v > maxv) {
+        v = maxv;
+    }
+    if (v < minv) {
+        v = minv;
+    }
     return static_cast<FLAC__int32>(v);
 }
 

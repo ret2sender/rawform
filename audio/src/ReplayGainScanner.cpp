@@ -168,8 +168,9 @@ ReplayGainScanner::Status ReplayGainScanner::addTrack(
             }
         }
 
-        if (got < kChunkFrames)  // end of stream reached on this read
+        if (got < kChunkFrames) {  // end of stream reached on this read
             break;
+        }
     }
 
     // 4. Integrated loudness. The library returns a value at or below the silence

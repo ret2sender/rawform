@@ -187,8 +187,12 @@ FLAC__int32 quantize(float f, int bits) noexcept {
     long v = std::lround(static_cast<double>(f) * scale);
     const long maxv = static_cast<long>((std::int64_t{1} << (bits - 1)) - 1);
     const long minv = static_cast<long>(-(std::int64_t{1} << (bits - 1)));
-    if (v > maxv) v = maxv;
-    if (v < minv) v = minv;
+    if (v > maxv) {
+        v = maxv;
+    }
+    if (v < minv) {
+        v = minv;
+    }
     return static_cast<FLAC__int32>(v);
 }
 
@@ -528,8 +532,12 @@ void runBattery(const Fixture& fx) {
             // Monotonic: a later target never leaves meaningfully more frames.
             CHECK(remaining <= prevRemaining + slack);
             prevRemaining = remaining;
-            if (i == 0) firstRemaining = remaining;
-            if (i == 2) lastRemaining  = remaining;
+            if (i == 0) {
+                firstRemaining = remaining;
+            }
+            if (i == 2) {
+                lastRemaining = remaining;
+            }
         }
         // And the playhead actually moved: a quarter-stream-later target leaves
         // clearly fewer frames than the earlier one (the seek is not a no-op).

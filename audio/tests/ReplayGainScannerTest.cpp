@@ -102,8 +102,9 @@ public:
         std::size_t produced = 0;
         while (produced < frames && m_pos < m_total) {
             const double s = m_amp * std::sin(w * static_cast<double>(m_pos));
-            for (std::size_t c = 0; c < ch; ++c)
+            for (std::size_t c = 0; c < ch; ++c) {
                 dst[produced * ch + c] = static_cast<float>(s);
+            }
             ++m_pos;
             ++produced;
         }
@@ -145,8 +146,9 @@ public:
                                    std::string*       error) override {
         const std::vector<std::string> t = split(path, ':');
         if (!t.empty() && t[0] == "fail") {
-            if (error)
+            if (error) {
                 *error = "synthetic open failure";
+            }
             return nullptr;
         }
         if (t.size() == 6 && t[0] == "sine") {
@@ -161,8 +163,9 @@ public:
                 static_cast<std::uint16_t>(std::stoul(t[2])), 1000.0, 0.0,
                 std::stoull(t[3]));
         }
-        if (error)
+        if (error) {
             *error = "unrecognized synthetic spec: " + path;
+        }
         return nullptr;
     }
 };

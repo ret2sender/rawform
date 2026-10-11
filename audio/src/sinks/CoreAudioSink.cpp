@@ -37,7 +37,11 @@
 //   - open() switches the device nominal rate to decision.deviceRate iff
 //     decision.switchDevice, then configures an interleaved float32 AUHAL at
 //     the SOURCE rate on the input scope, so if the device ends up clocking a
-//     different rate the AUHAL resamples to it.
+//     different rate the AUHAL resamples to it. The input scope also carries
+//     the stream's channel layout from the shared position table
+//     (ChannelPositions.h) and the output scope a channel map, so a mono
+//     stream reaches both device channels; the AUHAL does not downmix, so a
+//     source with more channels than the device keeps only the first ones.
 //
 //   - reconfigure() is the track-to-track transition on an ALREADY-OPEN unit:
 //     uninitialize, move the nominal rate iff the decision asks, set the
@@ -58,14 +62,17 @@
 // The rate ledger. Leaving a device at a rate its hardware cannot faithfully
 // clock corrupts all system audio, so a borrowed rate is a debt. The ledger
 // (originalRate, rateChanged) starts at open(), accumulates across
-// reconfigure() calls, and is repaid once by the final close(). It is
-// published on change through ISinkEventListener::onRateDebtChanged so the
-// owner can persist it, and repayStaleRateDebt() settles a persisted debt from
-// a crashed session before the sink is ever opened. An external nominal-rate
-// change on the bound device (the user or another program asserting
-// ownership) FORGIVES the debt: the asserted rate becomes the new baseline,
-// and the measurement follows. Our own sets are told apart from external ones
-// by a marker the initiating call plants before it changes the rate.
+// reconfigure() calls, and is repaid once by the final close(). rateChanged
+// is always "does the device now sit anywhere other than originalRate", so a
+// switch that lands on a third rate is a debt too. It is published on change
+// through ISinkEventListener::onRateDebtChanged so the owner can persist it,
+// and repayStaleRateDebt() settles a persisted debt from a crashed session
+// before the sink is ever opened. An external nominal-rate change on the bound
+// device (the user or another program asserting ownership) FORGIVES the debt:
+// the asserted rate becomes the new baseline, and the measurement follows. Our
+// own sets are told apart from external ones by a marker the initiating call
+// plants before it changes the rate; the per-open listener is installed before
+// the open's own switch for exactly that reason.
 //
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
@@ -92,9 +99,11 @@
 #error "CoreAudioSink.cpp is macOS-only; CMake should compile it under if(APPLE) only."
 #endif
 
+#include "ChannelPositions.h"
 #include "rawform/audio/IAudioSink.h"
 #include "rawform/audio/RateManager.h"
 #include "rawform/audio/Types.h"
+#include "sinks/SinkLog.h"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
@@ -105,12 +114,12 @@
 #include <chrono>
 #include <cmath>  // NOLINT: std::fabs, std::lround, etc.
 #include <condition_variable>
-#include <cstdarg>  // sinkLog's va_list formatting
-#include <cstddef>
+#include <cstddef>  // offsetof for the variable-length channel layout
 #include <cstdint>  // NOLINT: std::uintN_t
 #include <cstdio>
 #include <cstring>  // NOLINT: std::memset in renderCallback
 #include <mutex>
+#include <span>  // the channel position table's view
 #include <string>
 #include <vector>
 
@@ -183,24 +192,6 @@ struct CoreAudioSinkImpl {
 };
 
 namespace {
-
-// The single diagnostic funnel: format once, then write the line to BOTH
-// stderr (the CLI's byte-for-byte output; the trailing newline is added here,
-// so format strings carry none) and the installed ILogOutput when present.
-// Engine-thread only, like every log site in this file (open/close paths);
-// never the render callback.
-__attribute__((format(printf, 2, 3)))
-void sinkLog(ILogOutput* out, const char* fmt, ...) {
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    std::fprintf(stderr, "%s\n", buf);
-    if (out != nullptr) {
-        out->logLine(std::string(buf));
-    }
-}
 
 // The logger-aware OSStatus check, used from the instance methods (open/start/
 // stop/close paths) so device-failure breadcrumbs reach the application
@@ -279,6 +270,103 @@ double auhalScopeRate(AudioUnit unit, AudioUnitScope scope) {
         return 0.0;
     }
     return fmt.mSampleRate;
+}
+
+// The AUHAL's channel count for a given scope; the output scope of element 0
+// is the device side. 0 on failure.
+UInt32 auhalScopeChannels(AudioUnit unit, AudioUnitScope scope) {
+    AudioStreamBasicDescription fmt{};
+    UInt32 size = sizeof(fmt);
+    if (AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, scope, 0, &fmt,
+                             &size) != noErr) {
+        return 0;
+    }
+    return fmt.mChannelsPerFrame;
+}
+
+// The input-scope stream format for a source: interleaved, packed float32 (the
+// engine's canonical format) at the SOURCE rate; the AUHAL resamples to the
+// device clock when they differ. Used by open() and reconfigure(), so the two
+// can never describe the stream differently.
+AudioStreamBasicDescription buildAsbd(const AudioFormat& sourceFormat) {
+    AudioStreamBasicDescription asbd{};
+    asbd.mSampleRate       = static_cast<Float64>(sourceFormat.sampleRate);
+    asbd.mFormatID         = kAudioFormatLinearPCM;
+    asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+    asbd.mFramesPerPacket  = 1;
+    asbd.mChannelsPerFrame = sourceFormat.channels;
+    asbd.mBitsPerChannel   = 32;
+    asbd.mBytesPerFrame    = sourceFormat.channels * static_cast<UInt32>(sizeof(float));
+    asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
+    return asbd;
+}
+
+// The CoreAudio label for a table entry (ChannelPositions.h).
+AudioChannelLabel labelFor(ChannelPosition p) {
+    switch (p) {
+        case ChannelPosition::Mono:        return kAudioChannelLabel_Mono;
+        case ChannelPosition::FrontLeft:   return kAudioChannelLabel_Left;
+        case ChannelPosition::FrontRight:  return kAudioChannelLabel_Right;
+        case ChannelPosition::FrontCenter: return kAudioChannelLabel_Center;
+        case ChannelPosition::Lfe:         return kAudioChannelLabel_LFEScreen;
+        case ChannelPosition::BackLeft:    return kAudioChannelLabel_LeftSurround;
+        case ChannelPosition::BackRight:   return kAudioChannelLabel_RightSurround;
+        case ChannelPosition::BackCenter:  return kAudioChannelLabel_CenterSurround;
+        case ChannelPosition::SideLeft:    return kAudioChannelLabel_LeftSurroundDirect;
+        case ChannelPosition::SideRight:   return kAudioChannelLabel_RightSurroundDirect;
+    }
+    return kAudioChannelLabel_Unknown;
+}
+
+// Describe the stream's channels to the unit, on an UNINITIALIZED unit whose
+// input-scope format is already set: an input-scope AudioChannelLayout naming
+// each channel's speaker position from the shared table, and an output-scope
+// channel map (device channel -> input channel, -1 for silence) that is the
+// identity except for mono, which is sent to the first two device channels so
+// it reaches both speakers. The AUHAL does not downmix, so a source with more
+// channels than the device keeps its first channels and loses the rest; the
+// layout still tells the truth about what they are. A channel count the table
+// does not cover gets no layout and the identity map. Either property
+// failing is a breadcrumb, never a failed open: the stream plays as it did
+// before this existed.
+void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
+                        ILogOutput* out) {
+    const std::span<const ChannelPosition> positions =
+        channelPositionsFor(sourceFormat.channels);
+    if (!positions.empty()) {
+        const std::size_t bytes =
+            offsetof(AudioChannelLayout, mChannelDescriptions) +
+            positions.size() * sizeof(AudioChannelDescription);
+        std::vector<unsigned char> storage(bytes, 0);
+        auto* layout = reinterpret_cast<AudioChannelLayout*>(storage.data());
+        layout->mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
+        layout->mNumberChannelDescriptions = static_cast<UInt32>(positions.size());
+        for (std::size_t i = 0; i < positions.size(); ++i) {
+            layout->mChannelDescriptions[i].mChannelLabel = labelFor(positions[i]);
+            layout->mChannelDescriptions[i].mChannelFlags = kAudioChannelFlags_AllOff;
+        }
+        osOk(AudioUnitSetProperty(unit, kAudioUnitProperty_AudioChannelLayout,
+                                  kAudioUnitScope_Input, 0, layout,
+                                  static_cast<UInt32>(bytes)),
+             "set AudioChannelLayout (input scope)", out);
+    }
+
+    const UInt32 deviceChannels = auhalScopeChannels(unit, kAudioUnitScope_Output);
+    if (deviceChannels == 0) {
+        return;
+    }
+    std::vector<SInt32> map(deviceChannels, -1);
+    for (UInt32 d = 0; d < deviceChannels; ++d) {
+        if (sourceFormat.channels == 1) {
+            map[d] = d < 2 ? 0 : -1;
+        } else if (d < sourceFormat.channels) {
+            map[d] = static_cast<SInt32>(d);
+        }
+    }
+    osOk(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_ChannelMap,
+                              kAudioUnitScope_Output, 0, map.data(),
+                              static_cast<UInt32>(map.size() * sizeof(SInt32))),
+         "set ChannelMap (output scope)", out);
 }
 
 // Fetch the device's advertised nominal sample-rate ranges. Empty on failure.
@@ -585,11 +673,12 @@ OSStatus onDeviceOverloadEvent(AudioObjectID /*objectId*/, UInt32 /*nAddrs*/,
 // asserted rate becomes the session baseline: the debt is gone, the final
 // close restores nothing, and the measurement follows so the engine's
 // republication tells the truth. Our own sets are recognized by the marker the
-// initiating call planted; a marker mismatch means external. (A late-arriving
-// self notification after the marker was withdrawn would be misread as
-// external; the consequence is a forgiven debt, i.e. no restore of a rate the
-// user has since seen the device reach: benign, and documented rather than
-// chased.)
+// initiating call planted (open() and reconfigure() both plant it, with the
+// listener already installed); a marker mismatch means external. (A
+// late-arriving self notification after the marker was withdrawn would be
+// misread as external; the consequence is a forgiven debt, i.e. no restore of
+// a rate the user has since seen the device reach: benign, and documented
+// rather than chased.)
 OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
                            const AudioObjectPropertyAddress* /*addrs*/,
                            void* clientData) {
@@ -839,92 +928,15 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
         return false;
     }
 
-    // 3. Execute the rate decision. The policy already decided; here we only act.
-    // Switch the device nominal rate to the chosen rate iff the decision asks,
-    // remembering that we changed it so close() can restore. No advertised-list
-    // gate here: that reasoning is the RateManager's and is already folded into
-    // decision.switchDevice / decision.deviceRate.
-    if (decision.switchDevice) {
-        double achieved = 0.0;
-        const bool reached =
-            setDeviceNominalRate(dev, static_cast<double>(decision.deviceRate),
-                                 &achieved);
-        {
-            std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-            m_impl->rateChanged =
-                reached && !ratesEqual(achieved, m_impl->originalRate);
-        }
-        sinkLog(m_impl->logOut,
-                "CoreAudioSink: switch -> %u Hz %s (device now %.0f Hz)",
-                decision.deviceRate, reached ? "reached" : "NOT reached",
-                achieved);
-    } else {
-        sinkLog(m_impl->logOut,
-                "CoreAudioSink: no device switch (target %u Hz, %s)",
-                decision.deviceRate,
-                decision.resampleNeeded ? "resample expected"
-                                        : "already at rate");
-    }
-
-    // 4. Interleaved, packed float32 at the SOURCE rate on the input scope. If the
-    // device clocks at a different rate the AUHAL resamples to it.
-    AudioStreamBasicDescription asbd{};
-    asbd.mSampleRate       = static_cast<Float64>(sourceFormat.sampleRate);
-    asbd.mFormatID         = kAudioFormatLinearPCM;
-    asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-    asbd.mFramesPerPacket  = 1;
-    asbd.mChannelsPerFrame = sourceFormat.channels;
-    asbd.mBitsPerChannel   = 32;
-    asbd.mBytesPerFrame    = sourceFormat.channels * static_cast<UInt32>(sizeof(float));
-    asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
-    if (!osOk(AudioUnitSetProperty(m_impl->unit, kAudioUnitProperty_StreamFormat,
-                                   kAudioUnitScope_Input, 0, &asbd, sizeof(asbd)),
-              "set StreamFormat", m_impl->logOut)) {
-        close();
-        return false;
-    }
-
-    AURenderCallbackStruct cb{};
-    cb.inputProc       = &renderCallback;
-    cb.inputProcRefCon = m_impl.get();
-    if (!osOk(AudioUnitSetProperty(m_impl->unit, kAudioUnitProperty_SetRenderCallback,
-                                   kAudioUnitScope_Input, 0, &cb, sizeof(cb)),
-              "set RenderCallback", m_impl->logOut)) {
-        close();
-        return false;
-    }
-    if (!osOk(AudioUnitInitialize(m_impl->unit), "AudioUnitInitialize",
-              m_impl->logOut)) {
-        close();
-        return false;
-    }
-
-    // 5. Honest device rate from the AUHAL output scope; decides MEASURED
-    // bit-perfect, which can disagree with the decision's prediction if a
-    // device accepted a switch but did not truly clock it. Read AFTER
-    // AudioUnitInitialize: initialize re-synchronizes the unit's cached
-    // device-side format, so the value is trustworthy immediately after a
-    // nominal-rate switch, whereas a read before initialize can still report
-    // the pre-switch rate in exactly the case the measurement exists to catch.
-    const double auhalDeviceRate = auhalScopeRate(m_impl->unit, kAudioUnitScope_Output);
-    m_impl->deviceRate.store(auhalDeviceRate, std::memory_order_relaxed);
-    const bool openBitPerfect =
-        ratesEqual(auhalDeviceRate, sourceFormat.sampleRate);
-    m_impl->bitPerfect.store(openBitPerfect, std::memory_order_relaxed);
-
-    sinkLog(m_impl->logOut,
-            "CoreAudioSink: source %u Hz, device %.0f Hz -> %s",
-            sourceFormat.sampleRate, auhalDeviceRate,
-            openBitPerfect ? "bit-perfect" : "resampled by device");
-
-    m_impl->opened = true;
-
-    // With the device configured, start listening on it: nominal-rate
-    // changes (external assertions between here and close; our own
-    // reconfigure sets are recognized by the marker), liveness (the output
-    // failure event), and IO overloads (breadcrumb). A listener that fails to
-    // install is logged and leaves the sink deaf to that one event, never a
-    // failed open. Then publish the ledger shape this open produced.
+    // 3. Start listening on the bound device BEFORE touching its rate:
+    // nominal-rate changes (external assertions from here to close; our own
+    // sets are recognized by the marker planted below), liveness (the output
+    // failure event), and IO overloads (breadcrumb). Installed first so the
+    // notification our own switch produces is classified by the marker rather
+    // than arriving at a listener installed after the fact and forgiving the
+    // debt it just created. A listener that fails to install is logged and
+    // leaves the sink deaf to that one event, never a failed open; close()
+    // removes whatever was installed, on every failure path below too.
     {
         AudioObjectPropertyAddress rateAddr{
             kAudioDevicePropertyNominalSampleRate,
@@ -953,7 +965,91 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
                     m_impl->overloadListener ? 1 : 0);
         }
     }
-    publishDebt(m_impl.get());
+
+    // 4. Execute the rate decision. The policy already decided; here we only act.
+    // Switch the device nominal rate to the chosen rate iff the decision asks,
+    // marking the set as our own for the listener above, and record the debt
+    // by the one rule the ledger has: does the device now sit off the rate it
+    // had when the session opened (a switch that lands on a third rate is a
+    // debt too, even though it did not reach its target). No advertised-list
+    // gate here: that reasoning is the RateManager's and is already folded into
+    // decision.switchDevice / decision.deviceRate.
+    if (decision.switchDevice) {
+        {
+            std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+            m_impl->hasPendingSelfRate = true;
+            m_impl->pendingSelfRate    = static_cast<double>(decision.deviceRate);
+        }
+        double achieved = 0.0;
+        const bool reached =
+            setDeviceNominalRate(dev, static_cast<double>(decision.deviceRate),
+                                 &achieved);
+        const double nowRate =
+            (achieved > 0.0) ? achieved : deviceNominalRate(dev);
+        {
+            std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+            m_impl->hasPendingSelfRate = false;  // consumed or withdrawn (see the proc)
+            m_impl->rateChanged =
+                (nowRate > 0.0) && !ratesEqual(nowRate, m_impl->originalRate);
+        }
+        sinkLog(m_impl->logOut,
+                "CoreAudioSink: switch -> %u Hz %s (device now %.0f Hz)",
+                decision.deviceRate, reached ? "reached" : "NOT reached",
+                nowRate);
+    } else {
+        sinkLog(m_impl->logOut,
+                "CoreAudioSink: no device switch (target %u Hz, %s)",
+                decision.deviceRate,
+                decision.resampleNeeded ? "resample expected"
+                                        : "already at rate");
+    }
+
+    // 5. The source format on the input scope (buildAsbd), then the channel
+    // layout and map that describe its channels to the unit.
+    const AudioStreamBasicDescription asbd = buildAsbd(sourceFormat);
+    if (!osOk(AudioUnitSetProperty(m_impl->unit, kAudioUnitProperty_StreamFormat,
+                                   kAudioUnitScope_Input, 0, &asbd, sizeof(asbd)),
+              "set StreamFormat", m_impl->logOut)) {
+        close();
+        return false;
+    }
+    applyChannelLayout(m_impl->unit, sourceFormat, m_impl->logOut);
+
+    AURenderCallbackStruct cb{};
+    cb.inputProc       = &renderCallback;
+    cb.inputProcRefCon = m_impl.get();
+    if (!osOk(AudioUnitSetProperty(m_impl->unit, kAudioUnitProperty_SetRenderCallback,
+                                   kAudioUnitScope_Input, 0, &cb, sizeof(cb)),
+              "set RenderCallback", m_impl->logOut)) {
+        close();
+        return false;
+    }
+    if (!osOk(AudioUnitInitialize(m_impl->unit), "AudioUnitInitialize",
+              m_impl->logOut)) {
+        close();
+        return false;
+    }
+
+    // 6. Honest device rate from the AUHAL output scope; decides MEASURED
+    // bit-perfect, which can disagree with the decision's prediction if a
+    // device accepted a switch but did not truly clock it. Read AFTER
+    // AudioUnitInitialize: initialize re-synchronizes the unit's cached
+    // device-side format, so the value is trustworthy immediately after a
+    // nominal-rate switch, whereas a read before initialize can still report
+    // the pre-switch rate in exactly the case the measurement exists to catch.
+    const double auhalDeviceRate = auhalScopeRate(m_impl->unit, kAudioUnitScope_Output);
+    m_impl->deviceRate.store(auhalDeviceRate, std::memory_order_relaxed);
+    const bool openBitPerfect =
+        ratesEqual(auhalDeviceRate, sourceFormat.sampleRate);
+    m_impl->bitPerfect.store(openBitPerfect, std::memory_order_relaxed);
+
+    sinkLog(m_impl->logOut,
+            "CoreAudioSink: source %u Hz, device %.0f Hz -> %s",
+            sourceFormat.sampleRate, auhalDeviceRate,
+            openBitPerfect ? "bit-perfect" : "resampled by device");
+
+    m_impl->opened = true;
+    publishDebt(m_impl.get());  // the ledger shape this open produced
     return true;
 }
 
@@ -1038,25 +1134,17 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
                                         : "already at rate");
     }
 
-    // 3. Input-scope stream format for the NEW source, same shape as open()'s:
-    // interleaved packed float32 at the source rate; the AUHAL resamples to
-    // the device clock when they differ. The render callback and its refcon
-    // are untouched: same impl, same (engine-reconfigured) ring source behind
-    // it, so no SetRenderCallback round trip.
-    AudioStreamBasicDescription asbd{};
-    asbd.mSampleRate       = static_cast<Float64>(sourceFormat.sampleRate);
-    asbd.mFormatID         = kAudioFormatLinearPCM;
-    asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-    asbd.mFramesPerPacket  = 1;
-    asbd.mChannelsPerFrame = sourceFormat.channels;
-    asbd.mBitsPerChannel   = 32;
-    asbd.mBytesPerFrame    = sourceFormat.channels * static_cast<UInt32>(sizeof(float));
-    asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
+    // 3. Input-scope stream format for the NEW source (buildAsbd, the same
+    // shape as open()'s) and its channel layout and map. The render callback
+    // and its refcon are untouched: same impl, same (engine-reconfigured) ring
+    // source behind it, so no SetRenderCallback round trip.
+    const AudioStreamBasicDescription asbd = buildAsbd(sourceFormat);
     if (!osOk(AudioUnitSetProperty(m_impl->unit, kAudioUnitProperty_StreamFormat,
                                    kAudioUnitScope_Input, 0, &asbd, sizeof(asbd)),
               "set StreamFormat (reconfigure)", m_impl->logOut)) {
         return false;
     }
+    applyChannelLayout(m_impl->unit, sourceFormat, m_impl->logOut);
 
     // 4. Re-initialize; only now commit the working format and channel count
     // (the render callback's memset math), so a failed retune leaves them

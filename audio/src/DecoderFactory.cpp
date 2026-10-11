@@ -26,19 +26,24 @@
 //
 // Dispatch policy, in full:
 //
-//   1. Sniff the leading bytes (primary signal). "fLaC" is FLAC; "ID3" or an
-//      MPEG frame sync (0xFF Ex) is MP3; "RIFF"/"FORM"/".snd"/"caff" is a
+//   1. Sniff the leading bytes (primary signal). "fLaC" is FLAC; an MPEG
+//      frame sync (0xFF Ex) is MP3; "RIFF"/"FORM"/".snd"/"caff" is a
 //      libsndfile container; "OggS" is an Ogg container; the AC-3, DTS, ADTS,
 //      and ASF sync words are FFmpeg-only elementary streams or containers.
-//      Anything else is unclassified.
+//      An "ID3" prefix is a tag, not a format: the sniff skips the ID3v2 tag
+//      (its syncsafe size, plus the footer when flagged) and classifies the
+//      bytes that follow it by the same rules, so an ID3-tagged ADTS or FLAC
+//      routes as its content does; only a post-tag window that classifies as
+//      nothing keeps the historical MP3 default. Anything else is unclassified.
 //
 //   2. The extension is a HINT, not a verdict: it reorders the candidate list so
 //      the likely decoder is tried first, but it never decides alone.
 //
 //   3. A try-open cascade is the fallback: candidates are attempted in order and
 //      the first that opens wins. This makes a wrong sniff self-correcting, for
-//      instance an ID3-tagged FLAC (which sniffs as MP3) still opens because
-//      FlacDecoder follows Mpg123Decoder in the list.
+//      instance an ID3-tagged file whose post-tag bytes classify as nothing
+//      (sniffed MP3 by default) still opens as FLAC because FlacDecoder follows
+//      Mpg123Decoder in the list.
 //
 //   4. The frozen-decoder rule is structural: when the file is FLAC or MP3,
 //      libsndfile is removed from the candidate list entirely, so its own
@@ -84,6 +89,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>  // the ID3v2 syncsafe size
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -113,21 +119,12 @@ enum class Dec {
 // FFmpeg, never to the raw-FLAC or MP3 decoders (which key off their own magic).
 enum class Sniff { Flac, Mp3, Ogg, Ac3, Dts, Wma, Adts, Sndfile, Unknown };
 
-// Reads up to 16 leading bytes and classifies them. A file that cannot be opened
-// for reading sniffs as Unknown; the cascade then fails with each decoder's real
-// open error, which is the right place for the diagnostic.
-Sniff sniffBytes(const std::string& path) {
-    unsigned char b[16] = {0};
-    std::size_t   n     = 0;
-    {
-        std::ifstream f(path, std::ios::binary);
-        if (!f) {
-            return Sniff::Unknown;
-        }
-        f.read(reinterpret_cast<char*>(b), sizeof(b));
-        n = static_cast<std::size_t>(f.gcount());
-    }
+constexpr std::size_t kSniffBytes = 16;
 
+// Classify a window of leading bytes (the file head, or the first bytes after
+// an ID3v2 tag). Pure: no I/O, so the ID3 re-sniff below can run it on a
+// second window. Unknown means none of the signatures matched.
+Sniff classifyBytes(const unsigned char* b, std::size_t n) {
     auto starts = [&](const char* sig, std::size_t len) {
         if (n < len) {
             return false;
@@ -150,9 +147,6 @@ Sniff sniffBytes(const std::string& path) {
 
     if (starts("fLaC", 4)) {
         return Sniff::Flac;
-    }
-    if (starts("ID3", 3)) {
-        return Sniff::Mp3;  // ID3v2-tagged; almost always MP3, FLAC fallback covers the rest
     }
     // AC3 / E-AC3: the frame sync word 0x0B77, which a raw .ac3 leads with.
     if (n >= 2 && b[0] == 0x0B && b[1] == 0x77) {
@@ -212,6 +206,49 @@ Sniff sniffBytes(const std::string& path) {
         return Sniff::Sndfile;
     }
     return Sniff::Unknown;
+}
+
+// Reads the leading bytes and classifies them. A file that cannot be opened
+// for reading sniffs as Unknown; the cascade then fails with each decoder's real
+// open error, which is the right place for the diagnostic.
+//
+// An ID3v2 tag is skipped, not classified: the header is "ID3", two version
+// bytes, a flags byte, and a 28-bit syncsafe size (four bytes, 7 bits each) of
+// the tag body; bit 4 of the flags announces a 10-byte footer after the body.
+// The bytes after the tag are classified by the same rules as an untagged
+// head, so a tagged ADTS or FLAC routes as its content does instead of being
+// handed to libmpg123 first, whose permissive resync would open it as bogus
+// MP3. A post-tag window that classifies as nothing (or cannot be read, for a
+// tag that claims more than the file holds) keeps the MP3 default an "ID3"
+// prefix always had: that is what nearly every tagged file is, and the
+// cascade's FLAC fallback still covers the rest.
+Sniff sniffBytes(const std::string& path) {
+    unsigned char b[kSniffBytes] = {0};
+    std::size_t   n              = 0;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        return Sniff::Unknown;
+    }
+    f.read(reinterpret_cast<char*>(b), sizeof(b));
+    n = static_cast<std::size_t>(f.gcount());
+
+    if (n >= 10 && b[0] == 'I' && b[1] == 'D' && b[2] == '3') {
+        std::uint32_t size = 0;
+        for (int i = 6; i < 10; ++i) {
+            size = (size << 7) | (b[i] & 0x7Fu);
+        }
+        const bool footer = (b[5] & 0x10u) != 0;
+        const std::streamoff tagEnd = 10 + static_cast<std::streamoff>(size) +
+                                      (footer ? 10 : 0);
+        unsigned char after[kSniffBytes] = {0};
+        f.clear();
+        f.seekg(tagEnd, std::ios::beg);
+        f.read(reinterpret_cast<char*>(after), sizeof(after));
+        const auto  m    = static_cast<std::size_t>(f.gcount());  // 0 past EOF
+        const Sniff past = classifyBytes(after, m);
+        return past == Sniff::Unknown ? Sniff::Mp3 : past;
+    }
+    return classifyBytes(b, n);
 }
 
 // Lowercased file extension without the dot, or empty when there is none. Only

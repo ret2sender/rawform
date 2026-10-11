@@ -31,14 +31,18 @@
 // .cpp, so the library's link to MPG123::libmpg123 stays PRIVATE and callers can
 // include this header without inheriting the libmpg123 include path.
 //
-// The one global in the codec libraries lives behind this decoder: older
-// libmpg123 requires a process-wide mpg123_init() before any handle is
-// created. open() guards that with a std::once_flag on the versions that need
-// it (newer libmpg123 handles self-initialize and the call is skipped) and the
-// library deliberately NEVER calls mpg123_exit(), treating the init as
-// process-lifetime. This is documented in the .cpp; it is the single
-// unavoidable shared-state exception in an engine that is otherwise free of
-// process globals.
+// Process-wide state behind this decoder: older libmpg123 requires a
+// process-wide mpg123_init() before any handle is created. open() guards that
+// with a std::once_flag on the versions that need it (newer libmpg123 handles
+// self-initialize and the call is skipped) and the library deliberately NEVER
+// calls mpg123_exit(), treating the init as process-lifetime. This is
+// documented in the .cpp. It is one of a small, deliberate set of process-wide
+// touches in the audio library, all one-shot or read-only: the FFmpeg decoder
+// and the metadata probe each set the libav log level once (their own
+// once_flags), and a few environment knobs are read once (RAWFORM_NO_GAPLESS
+// and RAWFORM_OUTPUT_STALL_MS in the engine, RAWFORM_DECODER_LOG in the
+// factory, RAWFORM_PW_PODS in the PipeWire sink). Nothing else in the library
+// owns a global.
 //
 // Pull model: unlike libFLAC, libmpg123 is already a pull decoder (mpg123_read
 // hands back as many bytes as asked for), so there is no staging buffer here.

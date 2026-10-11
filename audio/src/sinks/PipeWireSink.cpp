@@ -145,9 +145,11 @@
 #error "PipeWireSink.cpp should be compiled only when CMake found libpipewire-0.3."
 #endif
 
+#include "ChannelPositions.h"
 #include "rawform/audio/IAudioSink.h"
 #include "rawform/audio/RateManager.h"
 #include "rawform/audio/Types.h"
+#include "sinks/SinkLog.h"
 
 #include <pipewire/pipewire.h>
 #include <pipewire/extensions/metadata.h>
@@ -162,13 +164,13 @@
 #include <atomic>
 #include <cerrno>   // EIO: onCoreError's expected-first-arm squelch
 #include <chrono>
-#include <cstdarg>  // sinkLog's va_list formatting
 #include <cstddef>
 #include <cstdint>  // NOLINT: std::int*_t
 #include <cstdio>
 #include <cstdlib>  // strtoul for metadata value parsing
 #include <cstring>
 #include <mutex>    // std::once_flag for the process-wide pw_init
+#include <span>     // the channel position table's view
 #include <string>
 #include <thread>   // the graph-rate confirmation poll in open()
 #include <vector>
@@ -264,7 +266,12 @@ struct PipeWireSinkImpl {
     // ----- per-open stream state ---------------------------------------------
     struct pw_stream*       stream = nullptr;
     struct spa_hook         streamListener{};
-    struct spa_io_position* position = nullptr;  // io area; loop-thread lifetime
+    // The io position area: handed over by io_changed on the loop thread,
+    // read by process on the data thread and by the engine's rate polls.
+    // Atomic so the handover is a real release/acquire edge between those
+    // threads; the area itself is daemon-owned shared memory that lives as
+    // long as the stream.
+    std::atomic<struct spa_io_position*> position{nullptr};
     IPullSource*            source   = nullptr;  // non-owning
     std::size_t             channels = 0;
     AudioFormat             working{};           // the SOURCE format we pull at
@@ -358,22 +365,6 @@ constexpr int kSyncTimeoutSec     = 2;  // metadata round trips, same 2 s ceilin
 constexpr int kConnectTimeoutSec  = 5;  // stream negotiation involves the session manager; give it headroom
 constexpr int kRateConfirmTimeoutMs = 2000;  // graph reclock confirmation, mirroring the Mac's rate wait
 constexpr int kRateReadTimeoutMs    = 300;   // expectation check when NOT commanding a reclock: a read, not a wait
-
-// The single diagnostic funnel, byte-for-byte the CoreAudioSink shape: format
-// once, write the line to BOTH stderr and the installed ILogOutput when
-// present. Engine-thread only (open/close paths); never the process callback.
-__attribute__((format(printf, 2, 3)))
-void sinkLog(ILogOutput* out, const char* fmt, ...) {
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    std::fprintf(stderr, "%s\n", buf);
-    if (out != nullptr) {
-        out->logLine(std::string(buf));
-    }
-}
 
 // Parse a metadata value string as a rate. Metadata sends plain decimal
 // strings ("48000"); a null value means the key was removed, which reads as 0
@@ -1222,7 +1213,8 @@ void onStreamIoChanged(void* data, std::uint32_t id, void* area,
                        std::uint32_t /*size*/) {
     auto* impl = static_cast<PipeWireSinkImpl*>(data);
     if (id == SPA_IO_Position) {
-        impl->position = static_cast<struct spa_io_position*>(area);
+        impl->position.store(static_cast<struct spa_io_position*>(area),
+                             std::memory_order_release);
     }
 }
 
@@ -1327,8 +1319,9 @@ void onStreamProcess(void* data) {
     // rate the stream is being consumed at (a fraction; nominal rates carry it
     // as 1/N, so the denominator is the rate in Hz). Refreshing it here keeps
     // measuredDeviceRateHz honest across mid-session graph changes.
-    if (impl->position != nullptr) {
-        const std::uint32_t denom = impl->position->clock.rate.denom;
+    if (const struct spa_io_position* pos =
+            impl->position.load(std::memory_order_acquire)) {
+        const std::uint32_t denom = pos->clock.rate.denom;
         if (denom != 0) {
             impl->measuredRate.store(denom, std::memory_order_relaxed);
         }
@@ -1384,6 +1377,50 @@ std::uint32_t effectiveGraphRate(const PipeWireSinkImpl* impl) {
     return impl->clockRate.load(std::memory_order_relaxed);
 }
 
+// The SPA speaker position for a table entry (ChannelPositions.h).
+std::uint32_t spaChannelFor(ChannelPosition p) {
+    switch (p) {
+        case ChannelPosition::Mono:        return SPA_AUDIO_CHANNEL_MONO;
+        case ChannelPosition::FrontLeft:   return SPA_AUDIO_CHANNEL_FL;
+        case ChannelPosition::FrontRight:  return SPA_AUDIO_CHANNEL_FR;
+        case ChannelPosition::FrontCenter: return SPA_AUDIO_CHANNEL_FC;
+        case ChannelPosition::Lfe:         return SPA_AUDIO_CHANNEL_LFE;
+        case ChannelPosition::BackLeft:    return SPA_AUDIO_CHANNEL_RL;
+        case ChannelPosition::BackRight:   return SPA_AUDIO_CHANNEL_RR;
+        case ChannelPosition::BackCenter:  return SPA_AUDIO_CHANNEL_RC;
+        case ChannelPosition::SideLeft:    return SPA_AUDIO_CHANNEL_SL;
+        case ChannelPosition::SideRight:   return SPA_AUDIO_CHANNEL_SR;
+    }
+    return SPA_AUDIO_CHANNEL_UNKNOWN;
+}
+
+// The stream's EnumFormat pod for a source format: interleaved float32 (the
+// engine's canonical format) at the source rate, with each channel's speaker
+// position declared from the shared table so the graph's channel mixer can
+// downmix or upmix it (a 5.1 track on a stereo sink keeps its center and
+// surrounds; a mono track reaches both speakers). A channel count the table
+// does not cover is declared unpositioned, honestly, rather than given an
+// invented layout. Used by open() and reconfigure(), so the two can never
+// describe the stream differently. The builder's buffer must outlive the
+// returned pod.
+const struct spa_pod* buildFormatPod(struct spa_pod_builder* builder,
+                                     const AudioFormat&      format) {
+    struct spa_audio_info_raw raw{};
+    raw.format   = SPA_AUDIO_FORMAT_F32;
+    raw.rate     = format.sampleRate;
+    raw.channels = format.channels;
+    const std::span<const ChannelPosition> positions =
+        channelPositionsFor(format.channels);
+    if (positions.empty()) {
+        raw.flags = SPA_AUDIO_FLAG_UNPOSITIONED;
+    } else {
+        for (std::size_t i = 0; i < positions.size(); ++i) {
+            raw.position[i] = spaChannelFor(positions[i]);
+        }
+    }
+    return spa_format_audio_raw_build(builder, SPA_PARAM_EnumFormat, &raw);
+}
+
 // Confirm the graph reclocked to `target` by polling the stream's io position
 // clock, the only truthful witness: node.force-rate never touches the settings
 // metadata, so the atomics above keep showing the graph's OWN rate while a
@@ -1398,8 +1435,9 @@ std::uint32_t pollGraphRate(const PipeWireSinkImpl* impl,
                           std::chrono::milliseconds(timeoutMs);
     for (;;) {
         pw_thread_loop_lock(impl->loop);
-        const std::uint32_t observed =
-            impl->position != nullptr ? impl->position->clock.rate.denom : 0;
+        const struct spa_io_position* pos =
+            impl->position.load(std::memory_order_acquire);
+        const std::uint32_t observed = pos != nullptr ? pos->clock.rate.denom : 0;
         pw_thread_loop_unlock(impl->loop);
         if (observed == target) {
             return observed;
@@ -1812,24 +1850,7 @@ bool PipeWireSink::open(const AudioFormat& sourceFormat,
     struct spa_pod_builder podb{};
     podb.data = podBuffer;
     podb.size = sizeof(podBuffer);
-
-    struct spa_audio_info_raw raw{};
-    raw.format   = SPA_AUDIO_FORMAT_F32;  // interleaved float32, the canonical format
-    raw.rate     = sourceFormat.sampleRate;
-    raw.channels = sourceFormat.channels;
-    if (sourceFormat.channels == 1) {
-        raw.position[0] = SPA_AUDIO_CHANNEL_MONO;
-    } else if (sourceFormat.channels == 2) {
-        raw.position[0] = SPA_AUDIO_CHANNEL_FL;
-        raw.position[1] = SPA_AUDIO_CHANNEL_FR;
-    } else {
-        // Beyond stereo the engine carries no layout semantics (interleaved
-        // order is the decoder's), so tell the graph honestly rather than
-        // invent one.
-        raw.flags = SPA_AUDIO_FLAG_UNPOSITIONED;
-    }
-    const struct spa_pod* params[1] = {
-        spa_format_audio_raw_build(&podb, SPA_PARAM_EnumFormat, &raw)};
+    const struct spa_pod* params[1] = {buildFormatPod(&podb, sourceFormat)};
 
     const int connectRes = pw_stream_connect(
         m_impl->stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
@@ -1874,8 +1895,8 @@ bool PipeWireSink::open(const AudioFormat& sourceFormat,
     }
     if (!negotiated) {
         pw_stream_destroy(m_impl->stream);
-        m_impl->stream   = nullptr;
-        m_impl->position = nullptr;
+        m_impl->stream = nullptr;
+        m_impl->position.store(nullptr, std::memory_order_relaxed);
         pw_thread_loop_unlock(m_impl->loop);
         sinkLog(m_impl->logOut,
                 "PipeWireSink: stream did not reach PAUSED (error or timeout)");
@@ -2013,21 +2034,7 @@ bool PipeWireSink::reconfigure(const AudioFormat& sourceFormat,
     struct spa_pod_builder podb{};
     podb.data = podBuffer;
     podb.size = sizeof(podBuffer);
-
-    struct spa_audio_info_raw raw{};
-    raw.format   = SPA_AUDIO_FORMAT_F32;
-    raw.rate     = sourceFormat.sampleRate;
-    raw.channels = sourceFormat.channels;
-    if (sourceFormat.channels == 1) {
-        raw.position[0] = SPA_AUDIO_CHANNEL_MONO;
-    } else if (sourceFormat.channels == 2) {
-        raw.position[0] = SPA_AUDIO_CHANNEL_FL;
-        raw.position[1] = SPA_AUDIO_CHANNEL_FR;
-    } else {
-        raw.flags = SPA_AUDIO_FLAG_UNPOSITIONED;
-    }
-    const struct spa_pod* params[1] = {
-        spa_format_audio_raw_build(&podb, SPA_PARAM_EnumFormat, &raw)};
+    const struct spa_pod* params[1] = {buildFormatPod(&podb, sourceFormat)};
     if (pw_stream_update_params(m_impl->stream, params, 1) < 0) {
         pw_thread_loop_unlock(m_impl->loop);
         sinkLog(m_impl->logOut,
@@ -2216,8 +2223,8 @@ void PipeWireSink::close() {
         disarmDriverFormatWatchLocked(m_impl.get());
         pw_stream_disconnect(m_impl->stream);
         pw_stream_destroy(m_impl->stream);  // removes its listeners; no callbacks after this
-        m_impl->stream   = nullptr;
-        m_impl->position = nullptr;
+        m_impl->stream = nullptr;
+        m_impl->position.store(nullptr, std::memory_order_relaxed);
         pw_thread_loop_unlock(m_impl->loop);
     }
     if (m_impl->forcedThisOpen) {

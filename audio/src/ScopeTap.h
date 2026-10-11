@@ -43,6 +43,14 @@
 //     producer would have to write capacity-minus-window samples inside a
 //     microsecond-scale memcpy), and a visualizer tolerates a torn frame anyway,
 //     so the retry is pure belt-and-suspenders.
+//   - The SAMPLES themselves are relaxed atomics. The counter's release/acquire
+//     pair orders the samples BELOW the published count; a slot the producer
+//     overwrites WHILE the consumer reads it (the lap the retry exists for) is
+//     outside that order, and the standard calls a plain float there a data
+//     race whatever the hardware does. A relaxed atomic float is the same
+//     load and store instruction on x86-64 and arm64, so this costs nothing
+//     on the RT path and turns the lap from undefined behavior into the torn
+//     frame the retry already handles.
 //
 // WHY AN OVERWRITE RING (and not the SPSC RingBuffer the engine already has). The
 // engine's RingBuffer is a back-pressured FIFO: the producer must not overrun the
@@ -84,7 +92,7 @@ public:
     explicit ScopeTap(std::size_t requestedCapacity = 8192)
         : m_capacity(roundUpPow2(requestedCapacity < 64 ? 64 : requestedCapacity)),
           m_mask(m_capacity - 1),
-          m_ring(m_capacity, 0.0f) {}
+          m_ring(m_capacity) {}
 
     /// PRODUCER (RT thread). Downmix `frames` interleaved float32 frames of
     /// `channels` samples each to mono and append them to the ring, then publish
@@ -110,7 +118,8 @@ public:
             for (std::uint16_t c = 0; c < channels; ++c) {
                 acc += frame[c];
             }
-            m_ring[static_cast<std::size_t>((base + f)) & m_mask] = acc * invCh;
+            m_ring[static_cast<std::size_t>((base + f)) & m_mask].store(
+                acc * invCh, std::memory_order_relaxed);
         }
         m_written.store(base + frames, std::memory_order_release);
     }
@@ -147,7 +156,8 @@ public:
             const std::uint64_t start = w - avail;
             for (std::uint64_t i = 0; i < avail; ++i) {
                 out[lead + static_cast<std::size_t>(i)] =
-                    m_ring[static_cast<std::size_t>(start + i) & m_mask];
+                    m_ring[static_cast<std::size_t>(start + i) & m_mask].load(
+                        std::memory_order_relaxed);
             }
 
             // If the producer has advanced by no more than the slack between the
@@ -187,9 +197,11 @@ private:
         return p;
     }
 
-    const std::size_t  m_capacity;  ///< power of two; storage length in mono samples
-    const std::size_t  m_mask;      ///< m_capacity - 1, for the wrap
-    std::vector<float> m_ring;      ///< allocated once; never resized after construction
+    const std::size_t m_capacity;  ///< power of two; storage length in mono samples
+    const std::size_t m_mask;      ///< m_capacity - 1, for the wrap
+    /// Allocated once (value-initialized to 0.0f); never resized after
+    /// construction. Relaxed atomics, see the file header.
+    std::vector<std::atomic<float>> m_ring;
 
     /// Monotonic count of mono samples ever written. The producer (RT thread) is
     /// its sole writer; the consumer (GUI thread) only reads it. On its own cache
