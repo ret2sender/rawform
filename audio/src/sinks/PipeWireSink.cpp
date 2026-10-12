@@ -450,13 +450,15 @@ void applySoftGainProps(const struct spa_pod* param,
         bool b = false;
         switch (prop->key) {
             case SPA_PROP_softVolumes: {
-                std::uint32_t n    = 0;
-                std::uint32_t size = 0;
-                std::uint32_t type = 0;
-                const void* values =
-                    spa_pod_get_array_full(&prop->value, &n, &size, &type);
-                if (values != nullptr && type == SPA_TYPE_Float &&
-                    size == sizeof(float)) {
+                // spa_pod_get_array plus the child macros, not
+                // spa_pod_get_array_full: the _full variant only exists from
+                // PipeWire 1.6, and Fedora 42 ships 1.4. The macros are read
+                // only after the getter validated the pod as an array.
+                std::uint32_t n      = 0;
+                const void*   values = spa_pod_get_array(&prop->value, &n);
+                if (values != nullptr &&
+                    SPA_POD_ARRAY_VALUE_TYPE(&prop->value) == SPA_TYPE_Float &&
+                    SPA_POD_ARRAY_VALUE_SIZE(&prop->value) == sizeof(float)) {
                     gain.volumeOffUnity =
                         anyOffUnity(static_cast<const float*>(values), n);
                 }

@@ -2884,8 +2884,16 @@ void testOutcomeObserversAndInfoForwarding() {
     CHECK(engine.outputBitPerfect() == false);
 
     // The forwarding chain: one sink line per open reached Listener::onInfo,
-    // in open order, carrying each open's executed device rate.
-    const std::vector<std::string> infos = listener.infos();
+    // in open order, carrying each open's executed device rate. Only the sink's
+    // own lines are counted: the pull loop drains far faster than real time, so
+    // on a slow host the producer can fall behind and the engine adds its
+    // "underrun:" lines to the same channel, which is correct and not under test.
+    std::vector<std::string> infos;
+    for (const std::string& line : listener.infos()) {
+        if (line.rfind("RecordingSink: ", 0) == 0) {
+            infos.push_back(line);
+        }
+    }
     CHECK(infos.size() == 2);
     if (infos.size() == 2) {
         CHECK(infos[0] == "RecordingSink: open at 44100 Hz");
