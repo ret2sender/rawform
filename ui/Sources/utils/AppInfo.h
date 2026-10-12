@@ -55,6 +55,8 @@
 /// derives from T. Marking the class final makes registration ill-formed
 /// (MSVC diagnoses this as C3246; clang happens not to instantiate the
 /// offending specialization, but the code is invalid either way).
+namespace rawform {
+
 class AppInfo : public QObject {
     Q_OBJECT
     QML_NAMED_ELEMENT(AppInfo)
@@ -99,3 +101,5 @@ public:
     /// resolve it to their default styling.
     [[nodiscard]] QString systemIconTheme() const;
 };
+
+} // namespace rawform

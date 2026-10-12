@@ -94,11 +94,11 @@
 #include "media/ReplayGainTags.h"  // replaygain::Values member (the playing track's RG snapshot)
 #include "playback/PlaybackQueue.h" // PlaybackQueue::Origin in a private signature
 #include "playlist/PlaylistModel.h"
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QList>
 #include <QMetaObject>
 #include <QObject>
-#include <QQmlEngine>  // QML_ELEMENT / QML_UNCREATABLE
 #include <QPersistentModelIndex>
 #include <QPointer>
 #include <QString>
@@ -123,11 +123,8 @@ struct EngineListenerBridge;
 class AudioController : public QObject {
     Q_OBJECT
 
-    /// Registered so QML can NAME the type (typed property declarations, and
-    /// qmllint member checking on them); never instantiated from QML. The one
-    /// instance is created in main.cpp and exposed as a context property.
-    QML_ELEMENT
-    QML_UNCREATABLE("AudioController is created in C++ and exposed as a context property")
+    /// QML reaches the one instance as the AudioController singleton: see the
+    /// AudioControllerSingleton wrapper at the end of this file.
 
     /// Transport state, mirrored from rawform::audio::State as an int plus three
     /// convenience bools so QML never needs the enum to drive a play/pause toggle.
@@ -833,6 +830,25 @@ private:
     QVariantList m_outputDevices;
     QString      m_outputDeviceId;
     QString      m_outputDeviceName;  ///< friendly companion of the id; see Q_PROPERTY
+};
+
+/// The AudioController QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct AudioControllerSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::AudioController)
+    QML_NAMED_ELEMENT(AudioController)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static AudioController* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<AudioController>::take(engine);
+    }
 };
 
 }  // namespace rawform

@@ -25,7 +25,7 @@
 // now-playing column (currentTrackColumn: format line and timing readout over
 // the SeekBar), the master-volume column (volumeColumn), and the SpectrumView.
 // Everything here is wiring over the AudioController and SpectrumProvider
-// context properties; the bars and the spectrum are dumb reusable components
+// singletons; the bars and the spectrum are dumb reusable components
 // that know nothing about either.
 //
 //   - Transport enablement. Each button gates input from controller state:
@@ -57,13 +57,6 @@
 // boundaries. TpBtn is plateless: no background rectangle in any state; hover and
 // disabled feedback are pure opacity on the button root. The play/pause button swaps its
 // SVG source on isPlaying.
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// spectrumProvider), which qmllint cannot see, so the unqualified-access
-// category is disabled file-wide. Components stay fully linted; keep global
-// wiring in the views so they can. Cost: a typo'd global name here surfaces at
-// runtime, not at lint.
 
 pragma ComponentBehavior: Bound
 
@@ -152,28 +145,28 @@ Item {
             TpBtn {
                 icon: Qt.resolvedUrl("../../icons/app/track_controls/stop.svg")
                 // Nothing to stop when already stopped.
-                enabled: !audioController.isStopped
-                onActivated: audioController.stop()
+                enabled: !AudioController.isStopped
+                onActivated: AudioController.stop()
             }
             TpBtn {
                 icon: Qt.resolvedUrl("../../icons/app/track_controls/previous.svg")
                 // Organic navigation needs a live cursor to move from.
-                enabled: audioController.playingRow >= 0
-                onActivated: audioController.previous()
+                enabled: AudioController.playingRow >= 0
+                onActivated: AudioController.previous()
             }
             TpBtn {
                 // Single toggling button: the SVG source swaps on the playing
                 // state.
-                icon: Qt.resolvedUrl(audioController.isPlaying
+                icon: Qt.resolvedUrl(AudioController.isPlaying
                     ? "../../icons/app/track_controls/pause.svg"
                     : "../../icons/app/track_controls/play.svg")
                 // Always live: play has the from-Stopped fallback to the active tab.
-                onActivated: audioController.playPauseToggle()
+                onActivated: AudioController.playPauseToggle()
             }
             TpBtn {
                 icon: Qt.resolvedUrl("../../icons/app/track_controls/next.svg")
-                enabled: audioController.playingRow >= 0
-                onActivated: audioController.next()
+                enabled: AudioController.playingRow >= 0
+                onActivated: AudioController.next()
             }
         }
 
@@ -211,10 +204,10 @@ Item {
                     // transparent when nothing is playing (false while Stopped, so
                     // Stop clears the green line; true while Playing or Paused, so a
                     // pause still shows it).
-                    opacity: audioController.hasTrack ? 1 : 0
+                    opacity: AudioController.hasTrack ? 1 : 0
                     spacing: 0
 
-                    FmtText { text: audioController.codecName + " " }
+                    FmtText { text: AudioController.codecName + " " }
 
                     // Fixed-width slot for the live kbps. The number right-aligns
                     // against the trailing "kbps", which stays put; the slot is the
@@ -227,20 +220,20 @@ Item {
                         width: Math.max(kbpsRefMetrics.width, kbpsNowMetrics.width)
                         FmtText {
                             anchors.right: parent.right
-                            text: "\u200A" + audioController.displayBitrateKbps
+                            text: "\u200A" + AudioController.displayBitrateKbps
                         }
                     }
 
                     FmtText {
-                        text: "\u2009kbps " + audioController.sampleRateHz + "Hz "
-                              + root.channelLabel(audioController.channels)
+                        text: "\u2009kbps " + AudioController.sampleRateHz + "Hz "
+                              + root.channelLabel(AudioController.channels)
                               // The device-outcome suffix:
                               // "(Bit Perfect)" / "(Resampled to N Hz)", empty
                               // while Stopped. Wording owned by the controller's
                               // outputSuffix so this split rendering and the
                               // canonical formatSummary string cannot disagree.
-                              + (audioController.outputSuffix.length > 0
-                                 ? " " + audioController.outputSuffix : "")
+                              + (AudioController.outputSuffix.length > 0
+                                 ? " " + AudioController.outputSuffix : "")
                     }
                 }
 
@@ -260,7 +253,7 @@ Item {
                     font.family: Theme.uiFont
                     font.pixelSize: 12
                     font.weight: Font.Bold
-                    text: "" + audioController.displayBitrateKbps
+                    text: "" + AudioController.displayBitrateKbps
                 }
 
                 Text {
@@ -272,13 +265,13 @@ Item {
                     // now-playing readout (this timing line together with the green
                     // format Row) without the timeline moving. A pause still shows
                     // the frozen timing.
-                    opacity: audioController.hasTrack ? 1 : 0
+                    opacity: AudioController.hasTrack ? 1 : 0
                     color: Theme.textPrimary
                     font.family: Theme.monoFont
                     font.pixelSize: 12
                     font.weight: Font.Bold
-                    text: Format.mmss(audioController.positionSeconds)
-                          + " / " + Format.mmss(audioController.durationSeconds)
+                    text: Format.mmss(AudioController.positionSeconds)
+                          + " / " + Format.mmss(AudioController.durationSeconds)
                 }
             }
 
@@ -292,12 +285,12 @@ Item {
                 id: seekBar
                 Layout.fillWidth: true
 
-                positionSeconds: audioController.positionSeconds
-                durationSeconds: audioController.durationSeconds
-                seekable: audioController.seekable
+                positionSeconds: AudioController.positionSeconds
+                durationSeconds: AudioController.durationSeconds
+                seekable: AudioController.seekable
 
                 onSeekRequested: function (seconds) {
-                    audioController.seekSeconds(seconds)
+                    AudioController.seekSeconds(seconds)
                 }
 
                 // The keyboard step badge, the same split as the seek itself:
@@ -305,7 +298,7 @@ Item {
                 // the bar draws and accumulates it, and this is the one line
                 // that knows both.
                 Connections {
-                    target: audioController
+                    target: AudioController
                     function onSeekStepped(deltaSeconds) {
                         seekBar.showSeekStep(deltaSeconds)
                     }
@@ -353,9 +346,9 @@ Item {
                     id: volumePercentText
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: audioController.volumePercent + "%"
+                    text: AudioController.volumePercent + "%"
                     color: Theme.textPrimary
-                    opacity: audioController.muted ? 0.55 : 1.0
+                    opacity: AudioController.muted ? 0.55 : 1.0
                     font.family: Theme.uiFont
                     font.pixelSize: 12
                     font.weight: Font.Bold
@@ -367,7 +360,7 @@ Item {
                 // number. transformOrigin defaults to the item center, so it pivots
                 // in place.
                 Rectangle {
-                    visible: audioController.muted
+                    visible: AudioController.muted
                     anchors.horizontalCenter: volumePercentText.horizontalCenter
                     anchors.verticalCenter: volumePercentText.verticalCenter
                     width: volumePercentText.contentWidth
@@ -382,7 +375,7 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: audioController.toggleMute()
+                    onClicked: AudioController.toggleMute()
                 }
             }
 
@@ -394,12 +387,12 @@ Item {
             VolumeSlider {
                 id: volumeSlider
                 Layout.fillWidth: true
-                level: audioController.volume
-                muted: audioController.muted
+                level: AudioController.volume
+                muted: AudioController.muted
                 // The exponent drives the dB bubble so it matches the engine gain;
                 // its mono family defaults to Theme.monoFont, same as the SeekBar.
-                taperExponent: audioController.volumeTaperExponent
-                onMoved: function (level) { audioController.setVolume(level) }
+                taperExponent: AudioController.volumeTaperExponent
+                onMoved: function (level) { AudioController.setVolume(level) }
             }
         }
 
@@ -413,8 +406,8 @@ Item {
             Layout.bottomMargin: 26
             Layout.preferredWidth: 120
             Layout.preferredHeight: 40
-            values: spectrumProvider.bars
-            count: spectrumProvider.barCount
+            values: SpectrumProvider.bars
+            count: SpectrumProvider.barCount
         }
     }
 }

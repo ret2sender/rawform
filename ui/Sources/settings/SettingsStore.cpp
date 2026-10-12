@@ -45,6 +45,11 @@ SettingsStore* SettingsStore::s_instance = nullptr;
 
 namespace {
 
+// The `version:` key settings.yaml carries. Bumped only if a later layout
+// stops being readable per field by this reader; loadSettings warns when it
+// meets a newer number and reads what it can.
+constexpr int kFormatVersion = 1;
+
 // settings.yaml lives beside spectrum.yaml and playback.yaml under
 // userConfigDir(). Unlike those, it is the general store: one top-level sub-map
 // per concern, `tagging:` being the one it holds.
@@ -216,6 +221,16 @@ void SettingsStore::loadSettings() {
     }
     try {
         const YAML::Node root = YAML::Load(*text);
+        // The file's format version (the writer emits 1). A newer number means
+        // a later rawform wrote it; the keys below are still read per field, so
+        // the warning is the only consequence.
+        if (root["version"]) {
+            const int version = root["version"].as<int>(1);
+            if (version > kFormatVersion) {
+                qWarning("rawform: settings.yaml: format version %d is newer than %d",
+                         version, kFormatVersion);
+            }
+        }
         const YAML::Node tagging = root["tagging"];
         if (!tagging || !tagging.IsMap()) {
             return;
@@ -270,7 +285,7 @@ void SettingsStore::persistSettings() {
 
     YAML::Emitter out;
     out << YAML::BeginMap;
-    out << YAML::Key << "version" << YAML::Value << 1;
+    out << YAML::Key << "version" << YAML::Value << kFormatVersion;
     out << YAML::Key << "tagging" << YAML::Value;
     out << YAML::BeginMap;
     out << YAML::Key << "id3v2_version" << YAML::Value

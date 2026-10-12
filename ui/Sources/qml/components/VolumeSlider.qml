@@ -21,7 +21,7 @@
 // VolumeSlider.qml
 //
 // The master-volume control for the PlayerBar. It is a sibling in spirit to
-// SeekBar: a pure, dumb, reusable bar that knows nothing about audioController.
+// SeekBar: a pure, dumb, reusable bar that knows nothing about AudioController.
 // It takes a 0..1 `level` IN and emits moved(level) OUT, so the playback wiring
 // stays up in PlayerBar and this bar stays reusable and testable, and it never
 // reaches for an ancestor id (the font/color it needs are properties, the same

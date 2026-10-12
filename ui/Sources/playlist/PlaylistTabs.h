@@ -76,7 +76,8 @@
 // otherwise rides the Tab struct across hide/show like any parked state.
 // The session manifest records its strip position with a "@queue" line.
 //
-// Registered via QML_ELEMENT into com.rawform.app; a QML context property.
+// Reached from QML as the PlaylistTabs singleton of com.rawform.app: the one
+// instance main.cpp builds, handed to the engine through the wrapper's create().
 
 #pragma once
 
@@ -84,13 +85,13 @@
 #include "media/TrackData.h"
 #include "playlist/PlaylistFilterProxy.h" // complete type: a Q_PROPERTY pointer
 #include "search/PlaylistSearch.h"         // complete type: a Q_PROPERTY pointer
+#include "utils/QmlSingletonInstance.h"    // the singleton wrapper at the end
 
 #include <QAbstractListModel>
 #include <QFuture>
 #include <QHash>
 #include <QList>
 #include <QPointer>
-#include <QQmlEngine> // QML_ELEMENT
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -110,7 +111,8 @@ struct PlaylistDocument; // defined in PlaylistFile.h; returned by snapshotTab()
 
 class PlaylistTabs : public QAbstractListModel {
     Q_OBJECT
-    QML_ELEMENT
+    /// QML reaches the one instance as the PlaylistTabs singleton: see the
+    /// PlaylistTabsSingleton wrapper at the end of this file.
 
     // Pointer properties to our own types are namespace-qualified on purpose:
     // moc records a Q_PROPERTY type as written, qmltyperegistrar names the
@@ -396,7 +398,7 @@ public:
     /// the method call). Marshaling it to a QObject* parameter IS reliable:
     /// the engine's own deletion tracking passes nullptr for a dead object.
     /// Lives here because this object owns the tabs whose lifetimes are being
-    /// probed, and it is already a context property every window can reach.
+    /// probed, and it is a singleton every window can reach.
     Q_INVOKABLE [[nodiscard]] bool objectAlive(QObject* object) const {
         return object != nullptr;
     }
@@ -596,6 +598,25 @@ private:
     int               m_insertedCount = 0; ///< rows inserted so far this scan
 
     static constexpr int kAutosaveDebounceMs = 1500;
+};
+
+/// The PlaylistTabs QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct PlaylistTabsSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::PlaylistTabs)
+    QML_NAMED_ELEMENT(PlaylistTabs)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static PlaylistTabs* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<PlaylistTabs>::take(engine);
+    }
 };
 
 } // namespace rawform

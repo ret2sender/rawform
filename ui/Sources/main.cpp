@@ -28,24 +28,27 @@
 // macOS, PipeWire on Linux).
 //
 // This file owns no UI logic. It constructs the app-global C++ services, wires
-// them together once, exposes them to QML, and loads the QML front end. The
-// context properties, in registration order (the name QML binds is on the
-// left):
+// them together once, exposes them to QML, and loads the QML front end. QML
+// reaches the services as singletons of the com.rawform.app module (each
+// type's wrapper create() hands the engine the instance built here, see
+// utils/QmlSingletonInstance.h), so every access is qualified, lint-checked and
+// compiled ahead of time. The singletons, in registration order (the name QML
+// binds is on the left):
 //
-//   - playlistTabs     : PlaylistTabs, one PlaylistModel + selection +
-//                        MetadataReloader per tab, the active-tab pointers,
-//                        the scanner seam, the live-playlist autosave/restore
-//   - customColumns    : CustomColumnRegistry, shared user-defined %pattern%
-//                        columns
-//   - metadataModel    : MetadataModel, the dock pane, following the active tab
-//   - trackScanner     : TrackScanner, off-thread file/tag ingestion
-//   - playlistStore    : PlaylistStore, Save / Save As + the column presets
-//   - playbackQueue    : PlaybackQueue, the cross-playlist play-next list
-//                        behind the Playback Queue tab
-//   - audioController  : AudioController, the engine wrapper and the cursor
-//   - spectrumProvider : SpectrumProvider, the spectrum viewer
-//   - windowGeometry   : WindowGeometryStore, window.yaml
-//   - settingsStore    : SettingsStore, settings.yaml
+//   - PlaylistTabs         : one PlaylistModel + selection + MetadataReloader
+//                            per tab, the active-tab pointers, the scanner
+//                            seam, the live-playlist autosave/restore
+//   - CustomColumnRegistry : shared user-defined %pattern% columns
+//   - MetadataPaneModel    : the MetadataModel behind the dock pane, following
+//                            the active tab
+//   - TrackScanner         : off-thread file/tag ingestion
+//   - PlaylistStore        : Save / Save As + the column presets
+//   - PlaybackQueue        : the cross-playlist play-next list behind the
+//                            Playback Queue tab
+//   - AudioController      : the engine wrapper and the cursor
+//   - SpectrumProvider     : the spectrum viewer
+//   - WindowGeometryStore  : window.yaml
+//   - SettingsStore        : settings.yaml
 //
 // plus the "rawformart" image provider (AlbumArtProvider, engine-owned). The
 // types QML instantiates itself (the Properties window's models, editors, and
@@ -70,11 +73,13 @@
 #include <QIcon>
 #include <QItemSelection>
 #include <QItemSelectionModel>
-#include <QQmlApplicationEngine>
-#include <QQmlContext>
+#include <QQmlComponent>
+#include <QQmlEngine>
 #include <QQmlError>
 #include <QQuickStyle>
 #include <QVariantMap>
+
+#include <memory>  // std::unique_ptr, the root window's owner
 
 #include "media/AlbumArtProvider.h"
 #include "columns/ColumnSchema.h"
@@ -91,7 +96,12 @@
 #include "playback/SpectrumProvider.h"
 #include "settings/SettingsStore.h"
 #include "utils/MacOSStyling.h"
+#include "utils/QmlSingletonInstance.h"
 #include "window/WindowGeometryStore.h"
+
+#if defined(Q_OS_MAC)
+#include <QQuickWindow>  // the root window handed to applyMacOSStyling
+#endif
 
 int main(int argc, char* argv[]) {
 
@@ -162,8 +172,8 @@ int main(int argc, char* argv[]) {
     // large Alt-Tab renders; that is the accepted uninstalled-dev gap.
     //
     // The fallback path carries the full QTP0001 module prefix: RESOURCES
-    // entries of the qml module land under :/qt/qml/<URI-as-path>/, the same
-    // scheme as the engine.load URL below, NOT under a bare :/icons/. The
+    // entries of the qml module land under :/qt/qml/<URI-as-path>/ (where
+    // the module's own qmldir lives too), NOT under a bare :/icons/. The
     // qsvgicon plugin it needs is deployment-guaranteed by the Qt6::Svg link
     // in CMakeLists.txt.
     //
@@ -271,7 +281,8 @@ int main(int argc, char* argv[]) {
 
     // Seed the session: re-open the previous live tabs, or one empty tab. Done
     // AFTER the metadata wiring so the initial active tab pushes its (empty)
-    // selection, and BEFORE the engine loads so QML binds to a live active tab.
+    // selection, and BEFORE the root component is created so QML binds to a
+    // live active tab.
     tabs.restoreSession();
 
     // -----------------------------------------------------------------------
@@ -313,8 +324,9 @@ int main(int argc, char* argv[]) {
 
     // Window geometry persistence (window.yaml). Constructed AFTER the
     // QGuiApplication (its off-screen guard queries QGuiApplication::screens())
-    // and registered before engine.load below, so its startup properties are
-    // already loaded and valid when MainWindow.qml binds width/height/x/y.
+    // and registered before the root component is created below, so its
+    // startup properties are already loaded and valid when MainWindow.qml
+    // binds width/height/x/y.
     rawform::WindowGeometryStore windowGeometry;
 
     // General application settings (settings.yaml). Loads on construction, so
@@ -328,7 +340,16 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     // QML engine
     // -----------------------------------------------------------------------
-    QQmlApplicationEngine engine;
+    // A plain QQmlEngine, not QQmlApplicationEngine: that class adds a
+    // QQmlFileSelector whose +platform/+locale probing of every qrc URL the
+    // loader touches cost about a fifth of the instructions to the first
+    // frame (measured: 574 M to 442 M without it), translation loading, and
+    // the Qt.quit() wiring; this tree has no file selectors, no translations,
+    // and no QML call to Qt.quit (closing the main window ends the event
+    // loop, through its onClosing flush). The root window is owned by the
+    // unique_ptr below, declared after the engine so it is destroyed first,
+    // the same order QQmlApplicationEngine kept.
+    QQmlEngine engine;
 
     // Album art on demand, keyed by file path: image://rawformart/<path>.
     // The engine takes ownership of the provider.
@@ -376,26 +397,33 @@ int main(int argc, char* argv[]) {
             }
         });
 
-    QQmlContext* ctx = engine.rootContext();
-    ctx->setContextProperty("playlistTabs", &tabs);
-    ctx->setContextProperty("customColumns", &customColumns);
-    ctx->setContextProperty("metadataModel", &metadataModel);
-    ctx->setContextProperty("trackScanner", &trackScanner);
-    ctx->setContextProperty("playlistStore", &playlistStore);
-    ctx->setContextProperty("playbackQueue", &playbackQueue);
-    ctx->setContextProperty("audioController", &audioController);
-    ctx->setContextProperty("spectrumProvider", &spectrumProvider);
-    ctx->setContextProperty("windowGeometry", &windowGeometry);
-    ctx->setContextProperty("settingsStore", &settingsStore);
+    // The singleton instances, registered before the first QML access can
+    // resolve them (each wrapper's create() asserts its pointer is set).
+    using rawform::QmlSingletonInstance;
+    QmlSingletonInstance<rawform::PlaylistTabs>::set(&tabs);
+    QmlSingletonInstance<rawform::CustomColumnRegistry>::set(&customColumns);
+    QmlSingletonInstance<rawform::MetadataModel>::set(&metadataModel);
+    QmlSingletonInstance<rawform::TrackScanner>::set(&trackScanner);
+    QmlSingletonInstance<rawform::PlaylistStore>::set(&playlistStore);
+    QmlSingletonInstance<rawform::PlaybackQueue>::set(&playbackQueue);
+    QmlSingletonInstance<rawform::AudioController>::set(&audioController);
+    QmlSingletonInstance<rawform::SpectrumProvider>::set(&spectrumProvider);
+    QmlSingletonInstance<rawform::WindowGeometryStore>::set(&windowGeometry);
+    QmlSingletonInstance<rawform::SettingsStore>::set(&settingsStore);
 
     // -----------------------------------------------------------------------
     // Load QML
     // -----------------------------------------------------------------------
-    engine.load(QUrl(QStringLiteral(
-        "qrc:/qt/qml/com/rawform/app/Sources/qml/views/MainWindow.qml")));
-
-    if (engine.rootObjects().isEmpty())
+    // The root type is named through the module, so the engine resolves it
+    // from the generated qmldir rather than from a resource path spelled here.
+    QQmlComponent component(&engine, "com.rawform.app", "MainWindow");
+    std::unique_ptr<QObject> rootWindow(component.create());
+    if (component.isError() || !rootWindow) {
+        const QList<QQmlError> errors = component.errors();
+        for (const QQmlError& e : errors)
+            qWarning().noquote() << e.toString();
         return -1;
+    }
 
     // -----------------------------------------------------------------------
     // Native macOS window styling. rawform draws its own QML title bar; on macOS
@@ -407,7 +435,7 @@ int main(int argc, char* argv[]) {
     // TitleBarControls, so there is nothing to do here.
     // -----------------------------------------------------------------------
     #if defined(Q_OS_MAC)
-    applyMacOSStyling(&engine);
+    applyMacOSStyling(qobject_cast<QQuickWindow*>(rootWindow.get()));
     #endif
 
     return QGuiApplication::exec();

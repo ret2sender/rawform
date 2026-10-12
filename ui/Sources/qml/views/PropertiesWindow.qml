@@ -46,7 +46,7 @@
 // which can close while this window is open (the window itself is parented to
 // the long-lived PlaylistView, so it survives). A QML var wrapping a destroyed
 // QObject is NOT dependably null/falsy, so every post-open touch guards through
-// _alive (a C++ probe via playlistTabs.objectAlive); a dead model or reloader
+// _alive (a C++ probe via PlaylistTabs.objectAlive); a dead model or reloader
 // skips its phase, and a reload pass orphaned by a dying reloader is completed
 // by the reloader's destructor token flush. The file writes are path-based and
 // land regardless; when nothing is left to re-pull from, the panes adopt the
@@ -111,13 +111,6 @@
 // and complex properties (embedded pictures included). The flag clears when
 // the pass that carried it finishes, success or not (re-invoke Remove tags to
 // retry a failure), and on Reload info, the discard-staging action.
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// playlistTabs, windowGeometry), which qmllint cannot see, so the
-// unqualified-access category is disabled file-wide. Components stay fully
-// linted; keep global wiring in the views so they can. Cost: a typo'd global
-// name here surfaces at runtime, not at lint.
 
 pragma ComponentBehavior: Bound
 
@@ -188,8 +181,8 @@ Window {
     // know them. Initial values, not live bindings: invokable calls are not
     // tracked as dependencies, which is exactly right for a startup-only
     // read. Position is NOT restored: the host cascades each instance.
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("properties", 720))
-    height: Math.max(minimumHeight, windowGeometry.savedHeight("properties", 560))
+    width: Math.max(minimumWidth, WindowGeometryStore.savedWidth("properties", 720))
+    height: Math.max(minimumHeight, WindowGeometryStore.savedHeight("properties", 560))
     minimumWidth: 560
     minimumHeight: 360
     color: "transparent"
@@ -216,7 +209,7 @@ Window {
         // (the visibility guard, same as the main window). Several instances closing
         // just means last write wins. Then destruction, as before.
         if (propertiesWindow.visibility === Window.Windowed)
-            windowGeometry.saveSize("properties",
+            WindowGeometryStore.saveSize("properties",
                                     propertiesWindow.width,
                                     propertiesWindow.height)
         propertiesWindow.destroy()
@@ -244,13 +237,11 @@ Window {
     // would abort the apply sequencer mid-flight and strand the window in
     // Applying. Marshaling the wrapper to a C++ QObject* parameter IS reliable
     // (the engine passes nullptr for a dead object), so route the check through
-    // playlistTabs.objectAlive.
+    // PlaylistTabs.objectAlive.
     function _alive(obj) {
         if (obj === null || obj === undefined)
             return false
-        if (typeof playlistTabs !== "undefined" && playlistTabs)
-            return playlistTabs.objectAlive(obj)
-        return true // no probe available; trust the reference (test harness case)
+        return PlaylistTabs.objectAlive(obj)
     }
 
     // Open the Edit Value dialog for a field row: any multi-track edit, the
@@ -556,8 +547,7 @@ Window {
             // A write marks the playlist tab dirty (dataChanged -> markDirty ->
             // debounced autosave). Force that write now so the .rwfpl cache
             // reflects the edit immediately, not just on the debounce.
-            if (typeof playlistTabs !== "undefined" && playlistTabs)
-                playlistTabs.flushPendingWrites()
+            PlaylistTabs.flushPendingWrites()
         }
 
         var failed = propertiesWindow._metaFailed.concat(propertiesWindow._rgFailed)
@@ -646,10 +636,10 @@ Window {
 
     // Both write editors get the playback link so apply() can stop the
     // engine before rewriting the loaded track's file (the tag-write interlock;
-    // see AudioController::stopIfPlayingAny). audioController is the root
-    // context property, reachable from any window.
-    MetadataEditor { id: metaEditor; audio: audioController }
-    ReplayGainEditor { id: rgEditor; audio: audioController }
+    // see AudioController::stopIfPlayingAny). AudioController is a singleton,
+    // reachable from any window.
+    MetadataEditor { id: metaEditor; audio: AudioController }
+    ReplayGainEditor { id: rgEditor; audio: AudioController }
 
     // Backing models for the two read-only tabs. Both are fed in openFor and copy
     // their TrackData, so they survive selection changes while the window is open.
@@ -892,7 +882,7 @@ Window {
                     anchors.bottomMargin: 6
                     visible: propertiesWindow.currentTab === 2
                     enabled: !propertiesWindow._applying && !scanController.busy
-                    controller: audioController
+                    controller: AudioController
                     model: rgModel
 
                     onScanRequested: function (items, mode) {
@@ -1002,11 +992,12 @@ Window {
                                 // the Binding element re-asserts the settings-backed
                                 // truth whenever it changes, and the trigger just
                                 // pushes the freshly toggled state into it.
-                                onTriggered: audioController.replayGainScanSkipExisting = skipExistingItem.checked
+                                onTriggered: AudioController.replayGainScanSkipExisting =
+                                                 skipExistingItem.checked
                                 Binding {
                                     target: skipExistingItem
                                     property: "checked"
-                                    value: audioController.replayGainScanSkipExisting
+                                    value: AudioController.replayGainScanSkipExisting
                                 }
                             }
                         }

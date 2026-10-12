@@ -41,7 +41,7 @@
 // track the typed text exactly.
 //
 // How a search acts on the playlist: while this dialog is shown, its search
-// is installed as playlistTabs.activeSearch, and the active tab's
+// is installed as PlaylistTabs.activeSearch, and the active tab's
 // PlaylistFilterProxy hides every row that does not match, so the playlist
 // itself shows the hits, with no second list. When a filter lands
 // (view.filterApplied) the current row is placed on the first visible row if
@@ -51,11 +51,6 @@
 // all and every row shows; a search with zero hits shows an empty playlist.
 // Closing the dialog lifts the filter (activeSearch goes null); the texts
 // stay for the next open.
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (windowGeometry,
-// customColumns), which qmllint cannot see, so the unqualified-access category
-// is disabled file-wide, as in the other views.
 
 pragma ComponentBehavior: Bound
 
@@ -78,18 +73,13 @@ Window {
     property var model: null
     property var view: null
     property var selection: null
-    // The registry, captured at Window scope: inside the PlaylistSearch block
-    // below, an unqualified `customColumns` would resolve to its own property
-    // of that name (a self-binding), so the context property is read here.
-    readonly property var _registry: customColumns
-
     /// Ask the host to make @p row current and center it in the playlist.
     signal revealRow(int row)
 
     title: "Find"
     // Width restores from window.yaml's keyed store; the height is the
     // content's, fixed: nothing in this dialog grows.
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("find", 640))
+    width: Math.max(minimumWidth, WindowGeometryStore.savedWidth("find", 640))
     height: 224
     minimumWidth: 480
     minimumHeight: 224
@@ -114,7 +104,7 @@ Window {
     PlaylistSearch {
         id: search
         model: findDialog.model
-        customColumns: findDialog._registry
+        customColumns: CustomColumnRegistry
         // Hidden means suspended: the kept texts stay, the row work stops.
         enabled: findDialog.visible
     }
@@ -128,7 +118,7 @@ Window {
 
     // Shown: the active tab filters by this search. Hidden: the filter lifts.
     // PlaylistTabs moves the search to whichever tab becomes active.
-    onVisibleChanged: playlistTabs.activeSearch = findDialog.visible ? search : null
+    onVisibleChanged: PlaylistTabs.activeSearch = findDialog.visible ? search : null
     SearchPresetStore { id: presetStore }
 
     // --- state -------------------------------------------------------------
@@ -163,7 +153,7 @@ Window {
 
     function _saveSize() {
         if (findDialog.visibility === Window.Windowed)
-            windowGeometry.saveSize("find", findDialog.width, findDialog.height)
+            WindowGeometryStore.saveSize("find", findDialog.width, findDialog.height)
     }
 
     // A window-manager close request bypasses the in-window paths above;

@@ -21,8 +21,8 @@
 // SpectrumView.qml
 //
 // The spectrum bar display for the PlayerBar, a pure, dumb, reusable widget in the
-// same spirit as SeekBar and VolumeSlider: it knows nothing about spectrumProvider
-// or audioController. It takes the bar VALUES in (a 0..1 array, low frequency
+// same spirit as SeekBar and VolumeSlider: it knows nothing about SpectrumProvider
+// or AudioController. It takes the bar VALUES in (a 0..1 array, low frequency
 // first) and a stable bar COUNT, and draws the dark rounded frame with the
 // bottom-anchored lavender bars. Every color and size is a property defaulted
 // to the current look, so it can be retuned without touching any host wiring,
@@ -32,8 +32,8 @@
 // times a second. If the Repeater keyed off the array, every tick would rebuild the
 // whole delegate set; keying off the stable `count` instead means the delegates are
 // created once and only their height bindings re-evaluate per tick, which is what
-// keeps a live 60 Hz display cheap. The host binds count to spectrumProvider.bar
-// Count (effectively constant) and values to spectrumProvider.bars (per tick).
+// keeps a live 60 Hz display cheap. The host binds count to SpectrumProvider.bar
+// Count (effectively constant) and values to SpectrumProvider.bars (per tick).
 //
 // The provider already applies the attack/decay envelope, so the bars are smooth at
 // the source; this file adds no animation of its own (a Behavior here would fight

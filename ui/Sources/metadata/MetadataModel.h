@@ -65,6 +65,11 @@
 //
 // TrackData stays in C++; main.cpp hands this model the selected tracks and QML
 // only ever reads display strings.
+//
+// Two QML faces. The type itself is creatable (the Properties window's Details
+// tab builds one in detailsMode), so the pane instance main.cpp owns is exposed
+// under its own name, MetadataPaneModel, by the singleton wrapper at the end of
+// this file.
 
 #pragma once
 
@@ -74,6 +79,7 @@
                                     // moc must see fully defined to build the
                                     // meta-type QML marshals into. (The sibling
                                     // models include it for the same reason.)
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QAbstractTableModel>
 #include <QDateTime>
@@ -286,6 +292,24 @@ private:
     QHash<FieldId, QString> m_valueCache;    ///< aggregated value per field
     QHash<FieldId, int>     m_distinctCount;  ///< path fields only; saturates at 2
     bool m_detailsMode = false;    ///< true = Location + General only (no Metadata, no Items Selected)
+};
+
+/// The metadata pane's model, as the MetadataPaneModel QML singleton: the one
+/// MetadataModel main.cpp builds and feeds from the active tab's selection. The
+/// same wrapper shape as the other services (see utils/QmlSingletonInstance.h),
+/// under a name of its own because the class stays creatable from QML.
+struct MetadataPaneModelSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::MetadataModel)
+    QML_NAMED_ELEMENT(MetadataPaneModel)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static MetadataModel* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<MetadataModel>::take(engine);
+    }
 };
 
 } // namespace rawform

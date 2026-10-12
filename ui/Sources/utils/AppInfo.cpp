@@ -27,6 +27,8 @@
 #include <QtGlobal>
 #include <QIcon>
 
+namespace rawform {
+
 AppInfo::AppInfo(QObject* parent)
     : QObject(parent) {
 }
@@ -45,3 +47,5 @@ QString AppInfo::qtVersion() const {
 QString AppInfo::systemIconTheme() const {
     return QIcon::themeName();
 }
+
+} // namespace rawform

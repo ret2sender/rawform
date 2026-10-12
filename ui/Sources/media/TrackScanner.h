@@ -48,6 +48,7 @@
 #pragma once
 
 #include "media/TrackData.h"
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QFutureWatcher>
 #include <QList>
@@ -61,6 +62,8 @@ namespace rawform {
 
 class TrackScanner : public QObject {
     Q_OBJECT
+    /// QML reaches the one instance as the TrackScanner singleton: see the
+    /// TrackScannerSingleton wrapper at the end of this file.
 
     /// True from the moment a scan request starts enumerating until its scan
     /// finishes (and stays true across a queued follow-on). Bound by QML to a
@@ -131,6 +134,25 @@ private:
     int                   m_added = 0;      ///< valid tracks emitted this request
     int                   m_skipped = 0;    ///< files dropped this request
     bool m_scanning = false;
+};
+
+/// The TrackScanner QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct TrackScannerSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::TrackScanner)
+    QML_NAMED_ELEMENT(TrackScanner)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static TrackScanner* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<TrackScanner>::take(engine);
+    }
 };
 
 } // namespace rawform

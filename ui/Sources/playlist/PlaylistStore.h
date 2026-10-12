@@ -53,10 +53,10 @@
 #pragma once
 
 #include "playlist/PlaylistFormat.h"
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QFutureWatcher>
 #include <QObject>
-#include <QQmlEngine>  // QML_ELEMENT / QML_UNCREATABLE
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -70,11 +70,8 @@ class PlaylistModel;
 class PlaylistStore : public QObject {
     Q_OBJECT
 
-    // Registered so QML can NAME the type (typed property declarations, and
-    // qmllint member checking on them); never instantiated from QML. The one
-    // instance is created in main.cpp and exposed as a context property.
-    QML_ELEMENT
-    QML_UNCREATABLE("PlaylistStore is created in C++ and exposed as a context property")
+    /// QML reaches the one instance as the PlaylistStore singleton: see the
+    /// PlaylistStoreSingleton wrapper at the end of this file.
 
     /// True while a write is in flight. Bound by QML to the status line
     /// (alongside trackScanner.scanning / activeReloader.busy).
@@ -89,6 +86,7 @@ class PlaylistStore : public QObject {
 public:
     explicit PlaylistStore(PlaylistModel* model, QObject* parent = nullptr);
     ~PlaylistStore() override = default;
+
 
     [[nodiscard]] bool isBusy() const { return m_busy; }
 
@@ -169,6 +167,25 @@ private:
     /// message can name the M3U lossiness without re-deriving it from the path.
     PlaylistFormat                    m_saveFormat = PlaylistFormat::Rwfpl;
     bool                              m_busy = false;
+};
+
+/// The PlaylistStore QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct PlaylistStoreSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::PlaylistStore)
+    QML_NAMED_ELEMENT(PlaylistStore)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static PlaylistStore* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<PlaylistStore>::take(engine);
+    }
 };
 
 } // namespace rawform

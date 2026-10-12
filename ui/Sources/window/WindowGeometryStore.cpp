@@ -77,8 +77,8 @@ WindowGeometryStore::WindowGeometryStore(QObject* parent) : QObject(parent) {
     m_platformCanPosition =
         !QGuiApplication::platformName().startsWith(QStringLiteral("wayland"));
     // Load eagerly so the startup properties are valid before QML binds them
-    // (the store is registered as a context property before engine.load, so
-    // construction strictly precedes the first binding evaluation).
+    // (main.cpp registers the singleton instance before the root component is
+    // created, so construction strictly precedes the first binding evaluation).
     load();
     emit geometryLoaded();
 }

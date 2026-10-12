@@ -69,6 +69,7 @@
 #include <QItemSelectionModel>
 #include <QList>
 #include <QObject>
+#include <QQmlEngine> // QML_ANONYMOUS
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -106,6 +107,10 @@ struct ReloadResult {
 
 class MetadataReloader : public QObject {
     Q_OBJECT
+    /// Registered anonymously: QML never creates or names one, it reaches the
+    /// per-tab instance through PlaylistTabs.activeReloader and the typed
+    /// handles the windows keep, and qmllint needs the type to check those.
+    QML_ANONYMOUS
 
     /// True while a reload/validation pass is running. Bound by QML to a status
     /// indicator.

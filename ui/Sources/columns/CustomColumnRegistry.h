@@ -40,10 +40,10 @@
 #pragma once
 
 #include "columns/ColumnSchema.h" // CustomColumn
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QList>
 #include <QObject>
-#include <QQmlEngine> // QML_ANONYMOUS
 #include <QString>
 #include <QVariantList>
 
@@ -51,11 +51,10 @@ namespace rawform {
 
 class CustomColumnRegistry : public QObject {
     Q_OBJECT
-    // Not creatable from QML (main.cpp owns the one instance and exposes it as
-    // the `customColumns` context property); registered anonymously so the
-    // instance can be assigned to a typed CustomColumnRegistry* property
-    // (PlaylistSearch::customColumns).
-    QML_ANONYMOUS
+    /// QML reaches the one instance as the CustomColumnRegistry singleton
+    /// (the wrapper at the end of this file), which also registers the type
+    /// so the instance can be assigned to a typed CustomColumnRegistry*
+    /// property (PlaylistSearch::customColumns).
 
 public:
     explicit CustomColumnRegistry(QObject* parent = nullptr);
@@ -130,6 +129,25 @@ private:
     void persist() const;
 
     QList<CustomColumn> m_columns;
+};
+
+/// The CustomColumnRegistry QML singleton: the one instance main.cpp builds, handed to
+/// the engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct CustomColumnRegistrySingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::CustomColumnRegistry)
+    QML_NAMED_ELEMENT(CustomColumnRegistry)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static CustomColumnRegistry* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<CustomColumnRegistry>::take(engine);
+    }
 };
 
 } // namespace rawform

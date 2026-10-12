@@ -29,8 +29,8 @@
 // edited in the Settings window's Tagging > MP3 pane; a second concern is a
 // second sub-map, emitted by the same single writer.
 //
-// SHAPE: a plain QObject constructed once in main.cpp and exposed to QML as the
-// `settingsStore` context property, matching every other app-global service.
+// SHAPE: a plain QObject constructed once in main.cpp and reached from QML as
+// the SettingsStore singleton, matching every other app-global service.
 // A static instance() accessor additionally lets C++ that is instantiated FROM
 // QML (MetadataEditor is a QML_ELEMENT created inside PropertiesWindow.qml)
 // reach the same object without new plumbing; it is a convenience pointer to
@@ -59,8 +59,9 @@
 
 #pragma once
 
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
+
 #include <QObject>
-#include <QQmlEngine>  // QML_ELEMENT / QML_UNCREATABLE
 #include <QString>
 #include <QTimer>
 
@@ -69,11 +70,8 @@ namespace rawform {
 class SettingsStore : public QObject {
     Q_OBJECT
 
-    /// Registered so QML can NAME the type (typed property declarations, and
-    /// qmllint member checking on them); never instantiated from QML. The one
-    /// instance is created in main.cpp and exposed as a context property.
-    QML_ELEMENT
-    QML_UNCREATABLE("SettingsStore is created in C++ and exposed as a context property")
+    /// QML reaches the one instance as the SettingsStore singleton: see the
+    /// SettingsStoreSingleton wrapper at the end of this file.
 
     /// The MP3/ID3 tagging knobs. Ints crossing to QML, backed by the
     /// Q_ENUMs below so both sides share the named values. Each setter clamps
@@ -198,6 +196,25 @@ private:
     QTimer m_persistTimer;
 
     static SettingsStore* s_instance;
+};
+
+/// The SettingsStore QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct SettingsStoreSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::SettingsStore)
+    QML_NAMED_ELEMENT(SettingsStore)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static SettingsStore* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<SettingsStore>::take(engine);
+    }
 };
 
 }  // namespace rawform

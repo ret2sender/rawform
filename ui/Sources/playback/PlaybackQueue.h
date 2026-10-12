@@ -52,17 +52,17 @@
 // Session-transient: nothing here is persisted. The tab's visibility and
 // column layout are PlaylistTabs' and PlaylistStore's concern.
 //
-// Created in main.cpp and exposed as the `playbackQueue` context property.
+// Created in main.cpp and reached from QML as the PlaybackQueue singleton.
 
 #pragma once
 
 #include "playlist/PlaylistModel.h" // complete type: a Q_PROPERTY pointer
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QList>
 #include <QObject>
 #include <QPersistentModelIndex>
 #include <QPointer>
-#include <QQmlEngine> // QML_ELEMENT / QML_UNCREATABLE
 #include <QString>
 
 #include <string>
@@ -74,8 +74,8 @@ struct TrackData;
 
 class PlaybackQueue : public QObject {
     Q_OBJECT
-    QML_ELEMENT
-    QML_UNCREATABLE("PlaybackQueue is created in C++ and exposed as a context property")
+    /// QML reaches the one instance as the PlaybackQueue singleton: see the
+    /// PlaybackQueueSingleton wrapper at the end of this file.
 
     /// The number of queued entries (the queue model's row count). Notifies on
     /// every structural change of the model, so a tab-bar count or a menu
@@ -169,6 +169,25 @@ private:
     /// before the model insert, consumed by onRowsInserted (synchronous, so
     /// the two can never interleave with another insert).
     QList<Origin>  m_staged;
+};
+
+/// The PlaybackQueue QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct PlaybackQueueSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::PlaybackQueue)
+    QML_NAMED_ELEMENT(PlaybackQueue)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static PlaybackQueue* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<PlaybackQueue>::take(engine);
+    }
 };
 
 } // namespace rawform

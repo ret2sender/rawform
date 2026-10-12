@@ -60,11 +60,11 @@
 #pragma once
 
 #include "rawform/audio/SpectrumAnalyzer.h"
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QList>
 #include <QObject>
 #include <QPointer>
-#include <QQmlEngine>  // QML_ELEMENT / QML_UNCREATABLE
 #include <QTimer>
 
 #include <cstddef>
@@ -78,11 +78,8 @@ class AudioController;
 class SpectrumProvider : public QObject {
     Q_OBJECT
 
-    /// Registered so QML can NAME the type (typed property declarations, and
-    /// qmllint member checking on them); never instantiated from QML. The one
-    /// instance is created in main.cpp and exposed as a context property.
-    QML_ELEMENT
-    QML_UNCREATABLE("SpectrumProvider is created in C++ and exposed as a context property")
+    /// QML reaches the one instance as the SpectrumProvider singleton: see the
+    /// SpectrumProviderSingleton wrapper at the end of this file.
 
     /// The bar magnitudes QML draws: barCount values, each 0..1, low frequency
     /// first. Republished on every visible tick while the display is live (and as it
@@ -164,6 +161,25 @@ private:
 
     QList<qreal>              m_bars;        ///< the published, smoothed bar values
     int                       m_source = Output;  ///< applied analyzer source (default Output)
+};
+
+/// The SpectrumProvider QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct SpectrumProviderSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::SpectrumProvider)
+    QML_NAMED_ELEMENT(SpectrumProvider)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static SpectrumProvider* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<SpectrumProvider>::take(engine);
+    }
 };
 
 }  // namespace rawform

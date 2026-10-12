@@ -57,9 +57,10 @@
 //     matching the windows' own last-write-wins staging semantics.
 //
 // Lifecycle: constructed in main() AFTER the QGuiApplication (screens() needs
-// the app object) and registered as the "windowGeometry" context property
-// BEFORE engine.load(), so load() has run in the constructor and every startup
-// property below is already valid when MainWindow.qml binds width/height/x/y.
+// the app object) and registered as the WindowGeometryStore singleton BEFORE
+// the root component is created, so load() has run in the constructor and
+// every startup property below is already valid when MainWindow.qml binds
+// width/height/x/y.
 // The properties never change after construction (the NOTIFY signals exist to
 // satisfy QML's binding machinery, not because anything fires them), and the
 // window binds them once at creation; save() is a plain invokable called from
@@ -70,6 +71,8 @@
 
 #pragma once
 
+#include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
+
 #include <QMap>
 #include <QObject>
 #include <QSize>
@@ -79,6 +82,9 @@ namespace rawform {
 
 class WindowGeometryStore : public QObject {
     Q_OBJECT
+    /// QML reaches the one instance as the WindowGeometryStore singleton: see
+    /// the WindowGeometryStoreSingleton wrapper at the end of this file.
+
     /// Startup size: the saved windowed size, else the built-in defaults
     /// (1800 x 1040; MainWindow.qml carries no size literal of its own, it
     /// binds these).
@@ -94,6 +100,7 @@ class WindowGeometryStore : public QObject {
 
 public:
     explicit WindowGeometryStore(QObject* parent = nullptr);
+
 
     [[nodiscard]] int  startupWidth() const { return m_width; }
     [[nodiscard]] int  startupHeight() const { return m_height; }
@@ -153,6 +160,25 @@ private:
     /// `customColumns`). QMap so the emit order (and therefore the file) is
     /// stable across runs.
     QMap<QString, QSize> m_toolSizes;
+};
+
+/// The WindowGeometryStore QML singleton: the one instance main.cpp builds, handed to the
+/// engine through create(). A QML_FOREIGN wrapper rather than QML_SINGLETON on
+/// the class itself, because the engine prefers a type's default constructor
+/// over its create() and would build a second, empty instance (see
+/// utils/QmlSingletonInstance.h); with a wrapper the factory always wins.
+struct WindowGeometryStoreSingleton {
+    Q_GADGET
+    QML_FOREIGN(rawform::WindowGeometryStore)
+    QML_NAMED_ELEMENT(WindowGeometryStore)
+    QML_SINGLETON
+
+public:
+    // Q_GADGET leaves the struct in a private section; the factory must be
+    // public for the engine's detection to see it.
+    static WindowGeometryStore* create(QQmlEngine* engine, QJSEngine* /*jsEngine*/) {
+        return QmlSingletonInstance<WindowGeometryStore>::take(engine);
+    }
 };
 
 }  // namespace rawform

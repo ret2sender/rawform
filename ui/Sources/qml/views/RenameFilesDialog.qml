@@ -40,7 +40,7 @@
 //
 // Apply sequence: FileRenamer.apply(jobs) off-thread (stops playback first if
 // it holds one of the files, TagWriteLock per file against concurrent tag
-// saves) -> applied(ok, failedPaths, renames) -> playlistTabs.applyPathRenames
+// saves) -> applied(ok, failedPaths, renames) -> PlaylistTabs.applyPathRenames
 // patches EVERY open tab's rows in place (paths persist via each tab's normal
 // autosave) -> this dialog remaps its own snapshot keys through the same map
 // (the old paths just stopped existing; without the remap every row would
@@ -48,16 +48,9 @@
 // which doubles as the visible receipt that the rename landed.
 //
 // The captured model belongs to the owning tab, which can close under this
-// non-modal window; every touch goes through _alive (playlistTabs.objectAlive,
+// non-modal window; every touch goes through _alive (PlaylistTabs.objectAlive,
 // the destroyed-object probe). A dead model degrades the dialog to a
 // static view whose Apply is disabled (jobs need a live preview).
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// playlistTabs, windowGeometry), which qmllint cannot see, so the
-// unqualified-access category is disabled file-wide. Components stay fully
-// linted; keep global wiring in the views so they can. Cost: a typo'd global
-// name here surfaces at runtime, not at lint.
 
 pragma ComponentBehavior: Bound
 
@@ -76,8 +69,8 @@ Window {
     // default; clamped against the minimums here because the store does not
     // know them. Initial values, not live bindings (startup-only read).
     // Position is NOT restored: the host cascades each instance.
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("rename", 720))
-    height: Math.max(minimumHeight, windowGeometry.savedHeight("rename", 480))
+    width: Math.max(minimumWidth, WindowGeometryStore.savedWidth("rename", 720))
+    height: Math.max(minimumHeight, WindowGeometryStore.savedHeight("rename", 480))
     minimumWidth: 560
     minimumHeight: 360
     color: "transparent"
@@ -145,7 +138,7 @@ Window {
     function _alive(obj) {
         if (!obj)
             return false
-        return playlistTabs.objectAlive(obj)
+        return PlaylistTabs.objectAlive(obj)
     }
 
     function openFor(model, rows) {
@@ -233,11 +226,11 @@ Window {
     RenamePatternStore { id: presetStore }
     FileRenamer {
         id: renamer
-        audio: audioController
+        audio: AudioController
         onApplied: function (okCount, failedPaths, renames) {
             // Bookkeeping first: every open tab's rows re-point at the
             // new paths; the tabs' autosaves persist them.
-            playlistTabs.applyPathRenames(renames)
+            PlaylistTabs.applyPathRenames(renames)
             // Remap our own snapshot: the old paths in _keys just stopped
             // existing. Without this every renamed row would preview "gone";
             // with it they preview "identity", the visible receipt.
@@ -287,7 +280,7 @@ Window {
     // visibility guard, same as the main window), then destruction as before.
     onClosing: {
         if (renameDialog.visibility === Window.Windowed)
-            windowGeometry.saveSize("rename",
+            WindowGeometryStore.saveSize("rename",
                                     renameDialog.width, renameDialog.height)
         renameDialog.destroy()
         // Hand the freed heap pages back once the deferred delete has run

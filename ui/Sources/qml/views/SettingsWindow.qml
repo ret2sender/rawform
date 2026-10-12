@@ -47,13 +47,6 @@
 // this being a separate top-level Window (outside MainWindow's id scope) is
 // irrelevant to font resolution.
 
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// settingsStore, spectrumProvider, windowGeometry), which qmllint cannot see, so the
-// unqualified-access category is disabled file-wide. Components stay fully
-// linted; keep global wiring in the views so they can. Cost: a typo'd global
-// name here surfaces at runtime, not at lint.
-
 pragma ComponentBehavior: Bound
 
 import QtQuick
@@ -79,8 +72,8 @@ Window {
     // know them. Initial values, not live bindings (startup-only read).
     minimumHeight: 480
     minimumWidth: 720
-    height: Math.max(minimumHeight, windowGeometry.savedHeight("settings", 480))
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("settings", 720))
+    height: Math.max(minimumHeight, WindowGeometryStore.savedHeight("settings", 480))
+    width: Math.max(minimumWidth, WindowGeometryStore.savedWidth("settings", 720))
     modality: Qt.NonModal
 
     // Escape closes, byte-identical to Cancel (reseed discards the
@@ -122,7 +115,7 @@ Window {
     // takes the window off screen.
     function _saveSize() {
         if (settingsWindow.visibility === Window.Windowed)
-            windowGeometry.saveSize("settings",
+            WindowGeometryStore.saveSize("settings",
                                     settingsWindow.width, settingsWindow.height)
     }
 
@@ -158,37 +151,37 @@ Window {
 
     // staged differs from what is currently applied: gates Apply/OK.
     readonly property bool dirty:
-           staged.bitPerfect !== audioController.bitPerfect
-        || staged.outputDeviceId !== audioController.outputDeviceId
-        || staged.mode !== audioController.replayGainMode
-        || !_near(staged.preampDb, audioController.replayGainPreampDb)
-        || !_near(staged.untaggedPreampDb, audioController.replayGainUntaggedPreampDb)
-        || staged.clip !== audioController.replayGainClipPrevention
-        || staged.skipExisting !== audioController.replayGainScanSkipExisting
-        || staged.spectrumSource !== spectrumProvider.source
-        || staged.id3v2Version !== settingsStore.id3v2Version
-        || staged.id3v1Mode !== settingsStore.id3v1Mode
-        || staged.apeMode !== settingsStore.apeMode
-        || staged.id3v2Encoding !== settingsStore.id3v2Encoding
+           staged.bitPerfect !== AudioController.bitPerfect
+        || staged.outputDeviceId !== AudioController.outputDeviceId
+        || staged.mode !== AudioController.replayGainMode
+        || !_near(staged.preampDb, AudioController.replayGainPreampDb)
+        || !_near(staged.untaggedPreampDb, AudioController.replayGainUntaggedPreampDb)
+        || staged.clip !== AudioController.replayGainClipPrevention
+        || staged.skipExisting !== AudioController.replayGainScanSkipExisting
+        || staged.spectrumSource !== SpectrumProvider.source
+        || staged.id3v2Version !== SettingsStore.id3v2Version
+        || staged.id3v1Mode !== SettingsStore.id3v1Mode
+        || staged.apeMode !== SettingsStore.apeMode
+        || staged.id3v2Encoding !== SettingsStore.id3v2Encoding
 
     // Copy applied -> staged (open and Cancel/revert).
     function reseed() {
-        staged.bitPerfect       = audioController.bitPerfect
-        staged.outputDeviceId   = audioController.outputDeviceId
+        staged.bitPerfect       = AudioController.bitPerfect
+        staged.outputDeviceId   = AudioController.outputDeviceId
         // The device list may have changed since the last open (hot-plug);
         // ask for a fresh enumeration so the Playback pane's picker is
         // current. Async: the combo repopulates when the reply lands.
-        audioController.refreshOutputDevices()
-        staged.mode             = audioController.replayGainMode
-        staged.preampDb         = audioController.replayGainPreampDb
-        staged.untaggedPreampDb = audioController.replayGainUntaggedPreampDb
-        staged.clip             = audioController.replayGainClipPrevention
-        staged.skipExisting     = audioController.replayGainScanSkipExisting
-        staged.spectrumSource   = spectrumProvider.source
-        staged.id3v2Version     = settingsStore.id3v2Version
-        staged.id3v1Mode        = settingsStore.id3v1Mode
-        staged.apeMode          = settingsStore.apeMode
-        staged.id3v2Encoding    = settingsStore.id3v2Encoding
+        AudioController.refreshOutputDevices()
+        staged.mode             = AudioController.replayGainMode
+        staged.preampDb         = AudioController.replayGainPreampDb
+        staged.untaggedPreampDb = AudioController.replayGainUntaggedPreampDb
+        staged.clip             = AudioController.replayGainClipPrevention
+        staged.skipExisting     = AudioController.replayGainScanSkipExisting
+        staged.spectrumSource   = SpectrumProvider.source
+        staged.id3v2Version     = SettingsStore.id3v2Version
+        staged.id3v1Mode        = SettingsStore.id3v1Mode
+        staged.apeMode          = SettingsStore.apeMode
+        staged.id3v2Encoding    = SettingsStore.id3v2Encoding
     }
 
     // Copy staged -> applied (Apply and OK). The controller's setters skip no-ops,
@@ -199,18 +192,18 @@ Window {
     // persists it. The tagging setters skip no-ops too and coalesce into a single
     // settings.yaml write per event-loop turn, so pushing all four is one write.
     function applyStaged() {
-        audioController.setBitPerfect(staged.bitPerfect)
-        audioController.setOutputDeviceId(staged.outputDeviceId)
-        audioController.setReplayGainMode(staged.mode)
-        audioController.setReplayGainPreampDb(staged.preampDb)
-        audioController.setReplayGainUntaggedPreampDb(staged.untaggedPreampDb)
-        audioController.setReplayGainClipPrevention(staged.clip)
-        audioController.setReplayGainScanSkipExisting(staged.skipExisting)
-        spectrumProvider.setSource(staged.spectrumSource)
-        settingsStore.id3v2Version  = staged.id3v2Version
-        settingsStore.id3v1Mode     = staged.id3v1Mode
-        settingsStore.apeMode       = staged.apeMode
-        settingsStore.id3v2Encoding = staged.id3v2Encoding
+        AudioController.setBitPerfect(staged.bitPerfect)
+        AudioController.setOutputDeviceId(staged.outputDeviceId)
+        AudioController.setReplayGainMode(staged.mode)
+        AudioController.setReplayGainPreampDb(staged.preampDb)
+        AudioController.setReplayGainUntaggedPreampDb(staged.untaggedPreampDb)
+        AudioController.setReplayGainClipPrevention(staged.clip)
+        AudioController.setReplayGainScanSkipExisting(staged.skipExisting)
+        SpectrumProvider.setSource(staged.spectrumSource)
+        SettingsStore.id3v2Version  = staged.id3v2Version
+        SettingsStore.id3v1Mode     = staged.id3v1Mode
+        SettingsStore.apeMode       = staged.apeMode
+        SettingsStore.id3v2Encoding = staged.id3v2Encoding
     }
 
     // Edit > Settings entry point: seed from the applied state, then show + raise.
@@ -349,7 +342,7 @@ Window {
                         anchors.margins: 20
                         visible: navPane.currentIndex === 0
                         settings: staged
-                        controller: audioController
+                        controller: AudioController
                     }
 
                     ReplayGainSettingsPane {
@@ -357,7 +350,7 @@ Window {
                         anchors.margins: 20
                         visible: navPane.currentIndex === 1
                         settings: staged
-                        controller: audioController
+                        controller: AudioController
                     }
 
                     SpectrumSettingsPane {
@@ -365,7 +358,7 @@ Window {
                         anchors.margins: 20
                         visible: navPane.currentIndex === 2
                         settings: staged
-                        provider: spectrumProvider
+                        provider: SpectrumProvider
                     }
 
                     TaggingSettingsPane {
@@ -380,7 +373,7 @@ Window {
                         anchors.margins: 20
                         visible: navPane.currentIndex === 4
                         settings: staged
-                        store: settingsStore
+                        store: SettingsStore
                     }
                 }
             }

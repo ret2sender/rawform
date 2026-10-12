@@ -22,7 +22,7 @@
 //
 // The interactive seek scrubber for the PlayerBar: a progress track you can click and
 // drag, driving nothing but the controller's existing seek() through the host. This
-// component is a pure, dumb interactive bar: it does NOT know about audioController. It
+// component is a pure, dumb interactive bar: it does NOT know about AudioController. It
 // takes position / duration / seekable IN and emits seekRequested(seconds) OUT, so the
 // playback wiring stays up in PlayerBar and this bar stays reusable and testable. (That
 // also keeps it off the ancestor-id chain; a genuinely reusable component should not

@@ -69,7 +69,6 @@
 #import <AppKit/AppKit.h>
 
 #include <QDebug>
-#include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QString>
 
@@ -255,22 +254,19 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
 
 @end
 
-void applyMacOSStyling(QQmlApplicationEngine* engine) {
-    if (engine->rootObjects().isEmpty())
-        return;
-
+void applyMacOSStyling(QQuickWindow* window) {
     // rawform's root QML object is the ApplicationWindow in MainWindow.qml,
-    // which is backed by a QQuickWindow. Anything else means the QML failed to
-    // load as expected, so bail rather than guess.
-    auto* rootObject = qobject_cast<QQuickWindow*>(engine->rootObjects().first());
-    if (!rootObject) {
+    // which is backed by a QQuickWindow; main.cpp passes null when the root
+    // object is anything else, which means the QML did not load as expected,
+    // so bail rather than guess.
+    if (!window) {
         qWarning().noquote() << "applyMacOSStyling: root object is not a QQuickWindow";
         return;
     }
 
     // On macOS, winId() returns a pointer-sized integer whose value is the
     // address of the content NSView backing the QQuickWindow.
-    auto nsView = reinterpret_cast<NSView*>(rootObject->winId());
+    auto nsView = reinterpret_cast<NSView*>(window->winId());
     if (!nsView) {
         qWarning().noquote() << "applyMacOSStyling: could not obtain NSView";
         return;
@@ -290,7 +286,7 @@ void applyMacOSStyling(QQmlApplicationEngine* engine) {
     // the fullscreen-exit re-styling would silently stop working. This is a
     // deliberate app-lifetime singleton, not a leak.
     static RawformWindowStyler* s_styler = nil;
-    s_styler = [[RawformWindowStyler alloc] initWithQuickWindow:rootObject
+    s_styler = [[RawformWindowStyler alloc] initWithQuickWindow:window
                                                        nsWindow:nsWindow];
     [s_styler applyTitleBarStyling];
     [s_styler publishDoubleClickAction];
@@ -305,6 +301,6 @@ void applyMacOSStyling(QQmlApplicationEngine* engine) {
 /// The build normally excludes this translation unit off macOS (see
 /// CMakeLists.txt), and main.cpp only calls applyMacOSStyling under Q_OS_MAC, so
 /// this branch is a safety net rather than a code path the app depends on.
-void applyMacOSStyling(QQmlApplicationEngine* /*engine*/) {}
+void applyMacOSStyling(QQuickWindow* /*window*/) {}
 
 #endif

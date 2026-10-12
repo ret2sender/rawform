@@ -49,7 +49,8 @@
 // use the identity keys (trackKeys / rowsForKeys) rather than positions.
 //
 // I/O-free: it receives a ready ColumnSchema via setSchema() (loaded in
-// main.cpp). Registered into the com.rawform.app QML module via QML_ELEMENT.
+// main.cpp). Registered into the com.rawform.app QML module as a named but
+// uncreatable type: PlaylistTabs builds every instance.
 
 #pragma once
 
@@ -70,6 +71,7 @@ class CustomColumnRegistry; // owns the user-defined custom columns (injected, r
 class PlaylistModel : public QAbstractTableModel {
     Q_OBJECT
     QML_ELEMENT
+    QML_UNCREATABLE("PlaylistModel instances are created by PlaylistTabs")
 
     /// Bumped on every in-place row refresh (refreshTrack), so a QML binding can
     /// depend on it to re-evaluate when row data changes underneath it. Used by

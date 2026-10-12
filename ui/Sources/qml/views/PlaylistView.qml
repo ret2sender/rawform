@@ -41,12 +41,6 @@
 // applyColumnLayout on load) reads/writes the header; `columnWidths` is only the
 // default seed when nothing is saved.
 
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// playbackQueue), which qmllint cannot see, so the unqualified-access category
-// is disabled file-wide. Components stay fully linted; keep global wiring in the views so
-// they can. Cost: a typo'd global name here surfaces at runtime, not at lint.
-
 pragma ComponentBehavior: Bound
 
 import QtQml.Models
@@ -79,7 +73,7 @@ Item {
     // stays reusable; tab switching swaps the model underneath it. It is the
     // active tab's PlaylistFilterProxy, NOT its PlaylistModel: every row this
     // view reads or hands to `model` is a PROXY row, and the source-space
-    // consumers (audioController.playAt, the dialogs' openFor, the drop
+    // consumers (AudioController.playAt, the dialogs' openFor, the drop
     // position) get model.source plus a row mapped through it. The proxy
     // re-exports the invokables and signals this view uses, so the rest of the
     // file reads as it did against the model.
@@ -135,9 +129,9 @@ Item {
     // row/model notify), on the model swap, and on _filterRevision.
     readonly property int _playingViewRow: {
         void root._filterRevision
-        if (!root.model || audioController.playingModel !== root.model.source)
+        if (!root.model || AudioController.playingModel !== root.model.source)
             return -1
-        return root.model.mapRowFromSource(audioController.playingRow)
+        return root.model.mapRowFromSource(AudioController.playingRow)
     }
 
     // True while this view shows the Playback Queue (the active tab is the
@@ -147,7 +141,7 @@ Item {
     // marker lands in the origin playlist, so the pending check could never
     // clear), and enqueueSelection refuses to queue the queue.
     readonly property bool isQueueView:
-        root.model !== null && playbackQueue.model === root.model.source
+        root.model !== null && PlaybackQueue.model === root.model.source
 
     // The playlist session manager (PlaylistTabs, created in C++, assigned from
     // MainWindow). The body DropArea hands dropped URLs to it in ONE call
@@ -157,7 +151,7 @@ Item {
     property var tabs
 
     // The active tab's MetadataReloader (assigned from MainWindow as
-    // playlistTabs.activeReloader). The row context menu's "Reload info" forces
+    // PlaylistTabs.activeReloader). The row context menu's "Reload info" forces
     // a re-read of the current selection through it.
     property var reloader
 
@@ -236,7 +230,7 @@ Item {
     // current multi-selection where that matters; this is the click target).
     property int _contextRow: -1
 
-    // Row most recently handed to audioController.playAt by an activation gesture
+    // Row most recently handed to AudioController.playAt by an activation gesture
     // (double-click or Enter), awaiting the engine's verdict. If the start fails
     // (a missing/unreadable file), we deselect this row so it drops the selection
     // highlight and reads as the grayed-out unavailable entry rather than staying
@@ -373,7 +367,7 @@ Item {
     // selected/playing. errorOccurred is the failed start: deselect the row so the
     // missing entry reverts to its grayed-out look instead of staying highlighted.
     Connections {
-        target: audioController
+        target: AudioController
         function onTrackChanged() {
             if (root._pendingActivateRow >= 0
                     && root._playingViewRow === root._pendingActivateRow)
@@ -462,11 +456,11 @@ Item {
         if (rows.length === 0)
             return 0
         var src = root.model.mapRowsToSource(rows)
-        var n = next ? playbackQueue.enqueueNext(root.model.source, src)
-                     : playbackQueue.enqueue(root.model.source, src)
+        var n = next ? PlaybackQueue.enqueueNext(root.model.source, src)
+                     : PlaybackQueue.enqueue(root.model.source, src)
         if (root.log && n > 0)
             root.log.append("info", (next ? "Playing next: " : "Queued ") + n
-                            + " track(s), " + playbackQueue.count + " in queue")
+                            + " track(s), " + PlaybackQueue.count + " in queue")
         return n
     }
 
@@ -1549,7 +1543,7 @@ Item {
                         // half needs.
                         if (root._pendingRevealRow >= 0) {
                             root._pendingPositionMode =
-                                (model && audioController.playingModel === model.source)
+                                (model && AudioController.playingModel === model.source)
                                     ? 2 : 0
                             root._pendingPositionRow = -1
                             root._pendingRevealRow = -1
@@ -1649,7 +1643,7 @@ Item {
                             event.accepted = true
                         } else if ((event.key === Qt.Key_Right
                                     || event.key === Qt.Key_Left) && !ctrl) {
-                            audioController.seekBy(event.key === Qt.Key_Right
+                            AudioController.seekBy(event.key === Qt.Key_Right
                                                    ? root.seekStepSeconds
                                                    : -root.seekStepSeconds)
                             event.accepted = true
@@ -1690,7 +1684,7 @@ Item {
                                     if (!root._rowFullyVisible(ci.row))
                                         root._centerRow(ci.row, true)
                                 }
-                                audioController.playAt(root.model.source,
+                                AudioController.playAt(root.model.source,
                                                        root.model.mapRowToSource(ci.row))
                             }
                             event.accepted = true
@@ -1728,8 +1722,8 @@ Item {
                             // No live cursor (stopped, detached, or the owning
                             // tab closed so indexOfModel finds nothing):
                             // no-op. Accepted regardless.
-                            var pm = audioController.playingModel
-                            var pr = audioController.playingRow
+                            var pm = AudioController.playingModel
+                            var pr = AudioController.playingRow
                             if (pm && pr >= 0) {
                                 if (pm === root.model.source) {
                                     root._revealPlayingHere(true)
@@ -2344,7 +2338,7 @@ Item {
                         // the entry leaves this list the moment it starts.
                         if (!root.isQueueView)
                             root._pendingActivateRow = rr
-                        audioController.playAt(root.model.source,
+                        AudioController.playAt(root.model.source,
                                                root.model.mapRowToSource(rr))
                     }
                 }
@@ -2765,7 +2759,7 @@ Item {
 
     // The custom-columns manager window ("Manage custom columns..."). A
     // frameless, NON-MODAL tool Window hosted here because this view owns the
-    // header menu that opens it and the `customColumns` registry it edits; its
+    // header menu that opens it and the `CustomColumnRegistry` registry it edits; its
     // transient parent resolves to the main window automatically (this is a
     // child of the view), so it floats and competes for focus alongside the
     // Properties and Settings windows. Single reused instance (show/hide). See
@@ -2893,7 +2887,7 @@ Item {
     // window per invocation that snapshots the selection in openFor and
     // destroys itself on close; parented to this long-lived view so it
     // survives tab switches (its captured model is guarded through
-    // playlistTabs.objectAlive inside the dialog). Shares the Properties
+    // PlaylistTabs.objectAlive inside the dialog). Shares the Properties
     // cascade counter so mixed stacks of both window kinds fan out together.
     Component {
         id: renameDialogComponent

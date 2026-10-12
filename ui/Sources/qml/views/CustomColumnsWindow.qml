@@ -40,10 +40,10 @@
 // is absent from the Dock / cmd-tab (moot: frameless anyway).
 //
 // LIFETIME: a SINGLE reused instance (show/hide), not a fresh-instance-per-open
-// like Properties. It is one manager over the shared `customColumns` registry;
+// like Properties. It is one manager over the shared `CustomColumnRegistry` registry;
 // reusing the instance keeps its position and size across opens, as Settings
 // does. Resizable through WindowResizeGrips, and the size persists in
-// window.yaml under the `customColumns` key (size only, never position; one
+// window.yaml under the `CustomColumnRegistry` key (size only, never position; one
 // instance per tab all share the key, last hide wins). There is no staging:
 // edits commit straight to the registry (name and
 // pattern on editing-finished, align on combo change), which persists and
@@ -57,13 +57,6 @@
 // Fonts resolve through the Theme singleton, which is scope-independent, so
 // this being a separate top-level Window (outside PlaylistView's id scope) does
 // not matter for font resolution.
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (customColumns,
-// windowGeometry), which qmllint cannot see, so the unqualified-access category
-// is disabled file-wide. Components stay fully linted; keep global wiring in the
-// views so they can. Cost: a typo'd global name here surfaces at runtime, not at
-// lint.
 
 pragma ComponentBehavior: Bound
 
@@ -83,8 +76,10 @@ Window {
     // Size restores from window.yaml's keyed store, else the built-in
     // default; clamped against the minimums here because the store does not
     // know them. Initial values, not live bindings (startup-only read).
-    width: Math.max(minimumWidth, windowGeometry.savedWidth("customColumns", 680))
-    height: Math.max(minimumHeight, windowGeometry.savedHeight("customColumns", 490))
+    width: Math.max(minimumWidth,
+                    WindowGeometryStore.savedWidth("customColumns", 680))
+    height: Math.max(minimumHeight,
+                     WindowGeometryStore.savedHeight("customColumns", 490))
     minimumWidth: 560
     minimumHeight: 380
     color: "transparent"
@@ -99,7 +94,7 @@ Window {
     property string focusFieldId: "" // scroll-to target on open
     property var selectedRows: []    // selected row INDICES into rows
     property int selectionAnchor: -1 // for Shift-range
-    property var rows: []            // snapshot of customColumns.catalog()
+    property var rows: []            // snapshot of CustomColumnRegistry.catalog()
     // How many inline cell editors are open (0 or 1 in practice, a count
     // for symmetry). Maintained at the EditableCell USAGE sites, not inside
     // the component (which references no outer ids by contract). Gates the
@@ -150,7 +145,7 @@ Window {
     // takes the window off screen.
     function _saveSize() {
         if (customColumnsWindow.visibility === Window.Windowed)
-            windowGeometry.saveSize("customColumns",
+            WindowGeometryStore.saveSize("customColumns",
                                     customColumnsWindow.width,
                                     customColumnsWindow.height)
     }
@@ -176,8 +171,7 @@ Window {
     }
 
     function refresh() {
-        rows = (typeof customColumns !== "undefined" && customColumns)
-            ? customColumns.catalog() : []
+        rows = CustomColumnRegistry.catalog()
         selectedRows = []
         selectionAnchor = -1
     }
@@ -214,8 +208,7 @@ Window {
     }
 
     function addRow() {
-        if (typeof customColumns === "undefined" || !customColumns) return
-        customColumns.add() // new blank record, appended + persisted
+        CustomColumnRegistry.add() // new blank record, appended + persisted
         refresh()
         if (rows.length > 0) { // select the freshly added last row
             selectedRows = [rows.length - 1]
@@ -223,7 +216,6 @@ Window {
         }
     }
     function removeSelected() {
-        if (typeof customColumns === "undefined" || !customColumns) return
         if (selectedRows.length === 0) return
         // Resolve ids BEFORE removing, indices shift as rows go.
         var ids = []
@@ -232,7 +224,7 @@ Window {
             if (r) ids.push(r.id)
         }
         for (var j = 0; j < ids.length; j++)
-            customColumns.remove(ids[j])
+            CustomColumnRegistry.remove(ids[j])
         refresh()
     }
 
@@ -559,8 +551,7 @@ Window {
                                         if (editing) customColumnsWindow._editingCells--
                                     onRowClicked: function (mods) { customColumnsWindow.clickRow(rowDelegate.index, mods) }
                                     onCommitted: function (t) {
-                                        if (typeof customColumns !== "undefined" && customColumns)
-                                            customColumns.setName(rowDelegate.colId, t)
+                                        CustomColumnRegistry.setName(rowDelegate.colId, t)
                                     }
                                 }
 
@@ -608,10 +599,10 @@ Window {
                                         Component.onCompleted:
                                             currentIndex = customColumnsWindow.alignIndex(rowDelegate.modelData.align)
                                         onActivated: {
-                                            if (typeof customColumns !== "undefined" && customColumns)
-                                                customColumns.setAlignment(
-                                                    rowDelegate.colId,
-                                                    customColumnsWindow.alignFlag(currentIndex))
+                                            CustomColumnRegistry.setAlignment(
+                                                rowDelegate.colId,
+                                                customColumnsWindow.alignFlag(
+                                                    currentIndex))
                                         }
                                     }
                                 }
@@ -630,8 +621,8 @@ Window {
                                         if (editing) customColumnsWindow._editingCells--
                                     onRowClicked: function (mods) { customColumnsWindow.clickRow(rowDelegate.index, mods) }
                                     onCommitted: function (t) {
-                                        if (typeof customColumns !== "undefined" && customColumns)
-                                            customColumns.setPattern(rowDelegate.colId, t)
+                                        CustomColumnRegistry.setPattern(
+                                            rowDelegate.colId, t)
                                     }
                                 }
                             }

@@ -32,23 +32,15 @@
 // the PlaylistTabBar, the PlaylistView and the StatusLogBar, with the
 // LogConsole popping up over the playlist. The PlayerBar spans the bottom.
 //
-// Wiring: this file binds the C++ context properties (audioController,
-// playbackQueue, playlistTabs, trackScanner, playlistStore, windowGeometry,
-// metadataModel) to the components, which declare what they consume and
-// reach no global themselves. It forwards ThemedMenuBar's request signals to
+// Wiring: this file binds the C++ singletons (AudioController, PlaybackQueue,
+// PlaylistTabs, TrackScanner, PlaylistStore, WindowGeometryStore,
+// MetadataPaneModel) to the components, which declare what they consume and
+// reach no singleton themselves. It forwards ThemedMenuBar's request signals to
 // PlaylistDialogs and the tool windows, feeds the status line (live activity
 // while busy, otherwise the latest LogStore entry), logs activity edges and
 // playback errors, and persists the windowed geometry on quit. Settings and About are
 // declared here so they share this window's lifetime; Properties, Custom
 // Columns and Rename Files are created by PlaylistView.
-
-// qmllint disable unqualified
-// Wiring layer: this file reaches the C++ context properties (audioController,
-// metadataModel, playbackQueue, playlistStore, playlistTabs, trackScanner,
-// windowGeometry), which qmllint cannot see, so the unqualified-access
-// category is disabled file-wide. Components stay fully linted; keep global
-// wiring in the views so they can. Cost: a typo'd global name here surfaces
-// at runtime, not at lint.
 
 pragma ComponentBehavior: Bound
 
@@ -77,19 +69,19 @@ ApplicationWindow {
     // at the left edge on macOS, which is exactly what this avoids).
     // Screen.virtualX/virtualY anchor the centering to the correct screen in a
     // multi-monitor virtual desktop.
-    height: windowGeometry.startupHeight
-    width: windowGeometry.startupWidth
+    height: WindowGeometryStore.startupHeight
+    width: WindowGeometryStore.startupWidth
     // Hard floor under the split constraints: playlistPane asks for half the
     // window and mediaDataSplit for 256 px, so below roughly 900 px the two
     // minimums cannot both hold and the SplitView starts inverting. The
     // floor also clamps a hand-edited window.yaml.
     minimumWidth: 960
     minimumHeight: 600
-    x: windowGeometry.hasSavedPosition
-         ? windowGeometry.startupX
+    x: WindowGeometryStore.hasSavedPosition
+         ? WindowGeometryStore.startupX
          : Screen.virtualX + Math.round((Screen.width - width) / 2)
-    y: windowGeometry.hasSavedPosition
-         ? windowGeometry.startupY
+    y: WindowGeometryStore.hasSavedPosition
+         ? WindowGeometryStore.startupY
          : Screen.virtualY + Math.round((Screen.height - height) / 2)
     visible: true
 
@@ -101,23 +93,23 @@ ApplicationWindow {
     // can't read it), then force a synchronous write of every dirty tab.
     onClosing: {
         // Lift any Find filter FIRST (dismiss hides the dialog, which clears
-        // playlistTabs.activeSearch and re-filters synchronously), so the
+        // PlaylistTabs.activeSearch and re-filters synchronously), so the
         // scroll row stashed below and the current row the flush persists are
         // unfiltered playlist positions.
         findDialog.dismiss()
-        playlistTabs.stashActiveWidths(playlistView.currentColumnWidths())
+        PlaylistTabs.stashActiveWidths(playlistView.currentColumnWidths())
         // The scroll twin of the widths line above: push the ACTIVE
         // tab's live position (QML-owned, C++ can't read it) into its parking
         // so the flush below writes it to the SCRL chunk. Background tabs
         // were parked at their switch-away and are already covered.
         playlistView.stashScrollPosition()
-        playlistTabs.flushPendingWrites()
+        PlaylistTabs.flushPendingWrites()
         // Persist the windowed frame only. Closing while maximized or
         // fullscreen skips the write, so the last good windowed geometry in
         // window.yaml survives (the macOS fullscreen-exit fix already leaves a
         // clean windowed frame behind, which is what makes this guard exact).
         if (applicationWindow.visibility === Window.Windowed)
-            windowGeometry.save(applicationWindow.x, applicationWindow.y,
+            WindowGeometryStore.save(applicationWindow.x, applicationWindow.y,
                                 applicationWindow.width, applicationWindow.height)
     }
 
@@ -174,9 +166,9 @@ ApplicationWindow {
     readonly property string _saveMsg: "Saving playlist\u2026"
     readonly property string _readMsg: "Reading tags\u2026"
     readonly property string _activityText:
-          trackScanner.scanning ? _scanMsg
-        : playlistStore.busy ? _saveMsg
-        : (playlistTabs.activeReloader && playlistTabs.activeReloader.busy)
+          TrackScanner.scanning ? _scanMsg
+        : PlaylistStore.busy ? _saveMsg
+        : (PlaylistTabs.activeReloader && PlaylistTabs.activeReloader.busy)
               ? _readMsg
         : ""
     readonly property string _statusText:
@@ -198,9 +190,9 @@ ApplicationWindow {
     // two bindings, and reveals rows through the playlist view.
     FindDialog {
         id: findDialog
-        model: playlistTabs.activeModel
-        view: playlistTabs.activeView
-        selection: playlistTabs.activeSelection
+        model: PlaylistTabs.activeModel
+        view: PlaylistTabs.activeView
+        selection: PlaylistTabs.activeSelection
         onRevealRow: function (row) { playlistView.revealRow(row) }
     }
 
@@ -219,7 +211,7 @@ ApplicationWindow {
     LogStore { id: logStore }
 
     Connections {
-        target: audioController
+        target: AudioController
         function onErrorOccurred(message) { logStore.append("error", message) }
         // Notable non-error events (stopping playback because a tag write
         // targets the loaded file) land in the log at warning level.
@@ -234,16 +226,16 @@ ApplicationWindow {
     // of each activity, plus a brief completion so the idle bar reads "done"
     // instead of freezing on the last "in progress" line.
     Connections {
-        target: trackScanner
+        target: TrackScanner
         function onScanningChanged() {
-            logStore.append("info", trackScanner.scanning
+            logStore.append("info", TrackScanner.scanning
                             ? applicationWindow._scanMsg : "Library scan complete")
         }
     }
     Connections {
-        target: playlistStore
+        target: PlaylistStore
         function onBusyChanged() {
-            logStore.append("info", playlistStore.busy
+            logStore.append("info", PlaylistStore.busy
                             ? applicationWindow._saveMsg : "Playlist saved")
         }
     }
@@ -252,10 +244,10 @@ ApplicationWindow {
     // read is in flight can miss that tab's completion, which is acceptable.) If
     // tag reads prove too chatty in the log, remove this block.
     Connections {
-        target: playlistTabs.activeReloader
+        target: PlaylistTabs.activeReloader
         function onBusyChanged() {
-            if (playlistTabs.activeReloader)
-                logStore.append("info", playlistTabs.activeReloader.busy
+            if (PlaylistTabs.activeReloader)
+                logStore.append("info", PlaylistTabs.activeReloader.busy
                                 ? applicationWindow._readMsg : "Tags read")
         }
     }
@@ -271,7 +263,7 @@ ApplicationWindow {
     // startup: a brand-new tab's widths are ready synchronously (a restored tab's
     // arrive later and re-seed via the onActiveLayoutChanged handler below).
     Component.onCompleted: {
-        playlistView.applyWidths(playlistTabs.activeWidths());
+        playlistView.applyWidths(PlaylistTabs.activeWidths());
     }
 
     // The four native file dialogs (Add files/folder, Save/Open playlist) and
@@ -279,8 +271,8 @@ ApplicationWindow {
     // only supplies the dependencies and forwards the menu's requests.
     PlaylistDialogs {
         id: playlistDialogs
-        tabs: playlistTabs
-        store: playlistStore
+        tabs: PlaylistTabs
+        store: PlaylistStore
         columnSource: playlistView
     }
 
@@ -289,9 +281,9 @@ ApplicationWindow {
     // but can't touch the QML-owned header widths, so we push the freshly parked
     // widths on here. (Tab switches are handled in PlaylistView via onModelChanged.)
     Connections {
-        target: playlistTabs
+        target: PlaylistTabs
         function onActiveLayoutChanged() {
-            playlistView.applyWidths(playlistTabs.activeWidths())
+            playlistView.applyWidths(PlaylistTabs.activeWidths())
         }
     }
 
@@ -370,33 +362,33 @@ ApplicationWindow {
 
                             // State DOWN for the two entries that read it (the
                             // queue tab's verb, the layout preset's name).
-                            queueVisible: playlistTabs.queueVisible
-                            queueTabActive: playlistTabs.activeIsQueue
+                            queueVisible: PlaylistTabs.queueVisible
+                            queueTabActive: PlaylistTabs.activeIsQueue
 
                             onAddFilesRequested: playlistDialogs.openAddFiles()
                             onAddFolderRequested: playlistDialogs.openAddFolder()
-                            onNewPlaylistRequested: playlistTabs.newPlaylist("")
+                            onNewPlaylistRequested: PlaylistTabs.newPlaylist("")
                             onOpenPlaylistRequested: playlistDialogs.openOpenPlaylist()
                             onSavePlaylistRequested: playlistDialogs.openSavePlaylist()
                             // The active tab; closeTab never leaves zero tabs
                             // (closing the last one spawns a fresh empty one).
                             onClosePlaylistRequested:
-                                playlistTabs.closeTab(playlistTabs.currentIndex)
+                                PlaylistTabs.closeTab(PlaylistTabs.currentIndex)
 
                             // With a selection: force-reload those files. With
                             // nothing selected: refresh the whole playlist
                             // (changed files only). Guarded: a fresh empty tab
                             // has no reloader yet.
                             onReloadSelectedRequested: {
-                                if (playlistTabs.activeReloader)
-                                    playlistTabs.activeReloader.reloadSelected()
+                                if (PlaylistTabs.activeReloader)
+                                    PlaylistTabs.activeReloader.reloadSelected()
                             }
 
                             // Drop every row whose file is gone/unreadable (the
                             // grayed-out entries) from the active playlist.
                             onRemoveUnavailableRequested: {
-                                if (playlistTabs.activeModel)
-                                    playlistTabs.activeModel.removeUnavailableTracks()
+                                if (PlaylistTabs.activeModel)
+                                    PlaylistTabs.activeModel.removeUnavailableTracks()
                             }
 
                             onFindRequested: findDialog.open()
@@ -405,10 +397,10 @@ ApplicationWindow {
                             // Transport, the same controller calls the
                             // PlayerBar buttons make, so the menu, its
                             // shortcuts, and the buttons can never diverge.
-                            onPlayPauseRequested: audioController.playPauseToggle()
-                            onStopRequested: audioController.stop()
-                            onPreviousRequested: audioController.previous()
-                            onNextRequested: audioController.next()
+                            onPlayPauseRequested: AudioController.playPauseToggle()
+                            onStopRequested: AudioController.stop()
+                            onPreviousRequested: AudioController.previous()
+                            onNextRequested: AudioController.next()
 
                             // The playback queue. The two enqueue verbs act on
                             // the active playlist's selection through the
@@ -418,12 +410,12 @@ ApplicationWindow {
                             onAddToQueueRequested: playlistView.enqueueSelection(false)
                             onPlayNextRequested: playlistView.enqueueSelection(true)
                             onClearQueueRequested: {
-                                if (playbackQueue.count > 0) {
-                                    playbackQueue.clear()
+                                if (PlaybackQueue.count > 0) {
+                                    PlaybackQueue.clear()
                                     logStore.append("info", "Playback queue cleared")
                                 }
                             }
-                            onToggleQueueRequested: playlistTabs.toggleQueueTab()
+                            onToggleQueueRequested: PlaylistTabs.toggleQueueTab()
 
                             onAboutRequested: aboutWindow.openAbout()
 
@@ -438,13 +430,13 @@ ApplicationWindow {
                             onSaveColumnLayoutRequested: {
                                 var order = playlistView.currentColumnOrder()
                                 var widths = playlistView.currentColumnWidths()
-                                if (playlistTabs.activeIsQueue) {
-                                    playlistStore.saveColumnPreset(order, widths, true)
+                                if (PlaylistTabs.activeIsQueue) {
+                                    PlaylistStore.saveColumnPreset(order, widths, true)
                                     logStore.append("info",
                                                     "Playback queue column layout saved")
                                 } else {
-                                    playlistStore.saveColumnPreset(order, widths)
-                                    playlistTabs.setDefaultLayout(order, widths)
+                                    PlaylistStore.saveColumnPreset(order, widths)
+                                    PlaylistTabs.setDefaultLayout(order, widths)
                                 }
                             }
                         }
@@ -468,7 +460,7 @@ ApplicationWindow {
                             // driven by the whole selection.
                             property int _selectionRevision: 0
                             Connections {
-                                target: playlistTabs
+                                target: PlaylistTabs
                                 function onActiveSelectionChanged() {
                                     albumArtFrame._selectionRevision++
                                 }
@@ -508,12 +500,12 @@ ApplicationWindow {
                                 // Reading them unconditionally keeps playingChanged
                                 // and the playing model's dataRevision in the
                                 // dependency set on every evaluation.
-                                var pm = audioController.playingModel
-                                var prow = audioController.playingRow
+                                var pm = AudioController.playingModel
+                                var prow = AudioController.playingRow
                                 var prev = pm ? pm.dataRevision : 0
-                                var m = playlistTabs.activeModel
-                                var v = playlistTabs.activeView
-                                var sel = playlistTabs.activeSelection
+                                var m = PlaylistTabs.activeModel
+                                var v = PlaylistTabs.activeView
+                                var sel = PlaylistTabs.activeSelection
                                 if (m && v && sel) {
                                     var rev = m.dataRevision
                                     // The selection is bound to the filter
@@ -655,7 +647,7 @@ ApplicationWindow {
                     MetadataView {
                         id: metadataView
                         implicitWidth: 450
-                        model: metadataModel
+                        model: MetadataPaneModel
                         SplitView.minimumHeight: 450 / 2
                     }
                 }
@@ -673,7 +665,7 @@ ApplicationWindow {
                         PlaylistTabBar {
                             id: playlistTabBar
                             Layout.fillWidth: true
-                            tabs: playlistTabs
+                            tabs: PlaylistTabs
                             view: playlistView
                             log: logStore
                         }
@@ -685,10 +677,10 @@ ApplicationWindow {
                             // The filter proxy, not the model: the view and
                             // its selection live in proxy rows (see the
                             // view's `model` note).
-                            model: playlistTabs.activeView
-                            selectionModel: playlistTabs.activeSelection
-                            reloader: playlistTabs.activeReloader
-                            tabs: playlistTabs
+                            model: PlaylistTabs.activeView
+                            selectionModel: PlaylistTabs.activeSelection
+                            reloader: PlaylistTabs.activeReloader
+                            tabs: PlaylistTabs
                             log: logStore
                         }
 

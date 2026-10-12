@@ -34,15 +34,14 @@
 
 #pragma once
 
-/// Forward declaration of QQmlApplicationEngine.
+/// Forward declaration of QQuickWindow.
 ///
 /// Only a pointer to this class appears in the function signature below, so the
-/// compiler needs just the name, not the full definition. The heavy
-/// `<QQmlApplicationEngine>` header is pulled in only by the .mm
-/// implementation, where the class is actually used. Keeping it out of this
-/// header avoids dragging a large Qt include into every translation unit that
-/// includes us.
-class QQmlApplicationEngine;
+/// compiler needs just the name, not the full definition. The `<QQuickWindow>`
+/// header is pulled in only by the .mm implementation, where the class is
+/// actually used, so this header drags no Qt Quick include into every
+/// translation unit that includes it.
+class QQuickWindow;
 
 /// Applies native macOS window styling to the application's root window.
 ///
@@ -59,5 +58,7 @@ class QQmlApplicationEngine;
 /// and main.cpp only calls it under `Q_OS_MAC`, so the no-op branch is a
 /// belt-and-suspenders guard rather than a path the app relies on.
 ///
-/// engine: The QQmlApplicationEngine whose root window will be styled.
-void applyMacOSStyling(QQmlApplicationEngine* engine);
+/// window: The application's root window (MainWindow.qml's
+/// ApplicationWindow). A null pointer, which main.cpp passes when the root
+/// object is not a QQuickWindow, is reported and ignored.
+void applyMacOSStyling(QQuickWindow* window);

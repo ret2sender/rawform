@@ -177,6 +177,9 @@ set(APP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/HeapTrim.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/AppInfo.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/AppInfo.cpp
+        # The instance pointer behind each C++-owned QML singleton (the
+        # app-global services main.cpp builds); header-only template.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/QmlSingletonInstance.h
         # Shared YAML file IO (atomic QSaveFile persist + tolerant read),
         # used by every YAML-backed store.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.h
@@ -434,14 +437,16 @@ set(RAWFORM_QML_FILES
 #   cmake --build <dir> --target rawform_qmllint    (this module only)
 #   cmake --build <dir> --target all_qmllint        (every module in the tree)
 # The warning class that motivates this is "unqualified access": a QML file
-# reaching an id or context property it does not declare, i.e. the
-# non-self-contained pattern. Every QML file carries
-# `pragma ComponentBehavior: Bound`, so delegates and other nested components
-# resolve outer document ids statically (checked by qmllint) and declare what
-# they consume as `required property`. Every view that reaches a C++ context
-# property carries a file-wide `qmllint disable unqualified` for exactly that
-# reach; the components declare what they consume (their few directives cover
-# other categories, each at its site), so any warning is a regression.
+# reaching an id it does not declare, i.e. the non-self-contained pattern.
+# Every QML file carries `pragma ComponentBehavior: Bound`, so delegates and
+# other nested components resolve outer document ids statically (checked by
+# qmllint) and declare what they consume as `required property`. The C++
+# services are module singletons (AudioController, PlaylistTabs, ...), so the
+# views reach them by type name, which qmllint resolves and checks like any
+# other type; no file carries a file-wide disable, and the three line-scoped
+# `missing-property` directives (the window's menuBlurSource lookups and the
+# menu's item-width probe) are the only directives in the tree, so any other
+# warning is a regression.
 qt_add_qml_module(rawform
         URI com.rawform.app
         VERSION 1.0
