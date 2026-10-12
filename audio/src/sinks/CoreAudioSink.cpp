@@ -80,9 +80,19 @@
 // and device-list changes to the engine; three more are installed per open()
 // on the bound device: the nominal-rate watch above, the liveness watch
 // (kAudioDevicePropertyDeviceIsAlive going false is the device unplugged or
-// lost across a sleep, reported as an output failure the engine ends the
-// session on), and the IO overload watch (a stderr breadcrumb; the audible
-// side shows up in the engine's underrun report). All listener callbacks
+// lost across a sleep), and the IO overload watch (a stderr breadcrumb; the
+// audible side shows up in the engine's underrun report). A dead device is
+// reported as an output failure, which ends the session, ONLY when it was
+// pinned: the user chose it, and nothing else is the right place to play. A
+// device the sink was bound to by following the system default is a different
+// matter: the system is about to name a new default (unplugging headphones
+// makes the speakers the default), that change arrives through the system
+// listener, and the engine's reaction to it is the reopen at position that
+// moves playback over. Ending the session first would strand the player in
+// Stopped before that reopen can happen, so the liveness watch stays quiet
+// for a default-followed device and lets the default change do the moving.
+// Should no default change follow (the last device in the system went away),
+// the engine's output stall watchdog ends the session. All listener callbacks
 // arrive on CoreAudio's own threads and never touch the render path; every
 // call they make into the engine's event channel runs under the state mutex,
 // so detaching the listener (setEventListener(nullptr)) fences a call in
@@ -185,6 +195,7 @@ struct CoreAudioSinkImpl {
     bool                aliveListener      = false;  // per-open liveness listener
     bool                overloadListener   = false;  // per-open IO overload listener
     bool                failureReported    = false;  // one onOutputFailed per open
+    bool                followingDefault   = false;  // this open resolved the default
     std::string         deviceUidStr;                // bound device's UID, for debt events
     std::string         deviceNameStr;               // bound device's name, for failure text
     bool                lastDebtActive     = false;  // last published debt shape
@@ -626,7 +637,11 @@ OSStatus onSystemObjectEvent(AudioObjectID /*objectId*/, UInt32 nAddrs,
 // reading false means the hardware is gone (unplugged, or not back after a
 // sleep). The render callback simply stops being invoked in that case, which
 // the engine cannot tell from a healthy pause; this is the event that tells
-// it. Reported once per open; the engine ends the session and keeps the pin.
+// it. Reported once per open, for a PINNED device only; the engine ends the
+// session and keeps the pin. A default-followed device that dies is left to
+// the default-device change that follows it (file header): the engine's
+// reopen at position on that event is what moves playback to the new default,
+// and an output failure landing first would stop the player before it could.
 OSStatus onDeviceAliveEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
                             const AudioObjectPropertyAddress* /*addrs*/,
                             void* clientData) {
@@ -644,6 +659,13 @@ OSStatus onDeviceAliveEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     }
     std::lock_guard<std::mutex> lock(impl->stateMtx);
     if (impl->failureReported) {
+        return noErr;
+    }
+    if (impl->followingDefault) {
+        std::fprintf(stderr,
+                     "CoreAudioSink: output device '%s' disconnected while "
+                     "following the system default; waiting for the new default\n",
+                     impl->deviceNameStr.c_str());
         return noErr;
     }
     impl->failureReported = true;
@@ -902,6 +924,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
         m_impl->deviceUidStr    = deviceUid(dev);   // the debt events' persistent key
         m_impl->deviceNameStr   = deviceName(dev);  // the failure event's label
         m_impl->failureReported = false;            // a fresh open, a fresh budget
+        m_impl->followingDefault = m_impl->targetDeviceUid.empty();
     }
 
     // 2. Create the AUHAL and bind it to the device.
