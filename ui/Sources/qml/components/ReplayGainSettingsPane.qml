@@ -33,9 +33,9 @@
 // (labelColumnWidth), so the controls line up in a second column. The reset menu
 // is one SettingsResetMenu per pane, pointed at the row that opened it.
 //
-// The row, label, switch, and reset menu are shared components. The controls only
-// this page uses (segmented mode, dB steppers) are local inline components, styled
-// to the app rather than native.
+// The row, label, switch, segmented selector and reset menu are shared
+// components. The dB steppers are local inline components, styled to the app
+// rather than native.
 
 pragma ComponentBehavior: Bound
 
@@ -98,7 +98,9 @@ Item {
             resetMenu: resetMenu
             onReset: if (pane.settings) pane.settings.mode = pane.controller.replayGainModeDefault
 
-            ModeSelect {
+            SegmentSelect {
+                labels: ["Off", "Track", "Album"]
+                segWidth: 62
                 value: pane.settings ? pane.settings.mode : 0
                 onPicked: function (v) {
                     if (pane.settings) pane.settings.mode = v
@@ -180,42 +182,6 @@ Item {
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // Segmented Off / Track / Album selector.
-    // -----------------------------------------------------------------------
-    component ModeSelect: Row {
-        id: ms
-        property int value: 0
-        signal picked(int value)
-        spacing: 0
-
-        Repeater {
-            model: ["Off", "Track", "Album"]
-            delegate: Rectangle {
-                id: seg
-                required property int index
-                required property string modelData
-                width: 62
-                height: 26
-                color: ms.value === seg.index ? Theme.accentSoft
-                     : segHover.hovered ? Theme.surfaceControlHover : Theme.surfaceControl
-                border.color: Theme.border
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: seg.modelData
-                    color: ms.value === seg.index ? Theme.textOnAccent : Theme.textSecondary
-                    font.family: pane.uiFont
-                    font.pixelSize: 11
-                    font.weight: ms.value === seg.index ? Font.Bold : Font.Normal
-                }
-                HoverHandler { id: segHover }
-                TapHandler { onTapped: ms.picked(seg.index) }
-            }
-        }
     }
 
     // -----------------------------------------------------------------------

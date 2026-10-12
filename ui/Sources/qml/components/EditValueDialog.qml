@@ -388,31 +388,57 @@ Item {
             anchors.left: parent.left; anchors.leftMargin: 14
             spacing: 0
 
-            component TabButton: Rectangle {
+            // A tab of the two-tab strip: a button, so the strip is in the
+            // Tab chain and reads as page tabs; Left/Right switch tabs.
+            // Named ValueTabButton so it does not shadow Controls' TabButton
+            // for this file.
+            component ValueTabButton: AbstractButton {
+                id: valueTab
                 property string label: ""
                 property int tabIndex: 0
+                readonly property bool current: dlg._tab === valueTab.tabIndex
                 width: tabText.implicitWidth + 24
                 height: 26
-                color: dlg._tab === tabIndex ? Theme.surfacePanel : "transparent"
-                Text {
+                padding: 0
+                onClicked: dlg._tab = valueTab.tabIndex
+
+                Accessible.role: Accessible.PageTab
+                Accessible.name: valueTab.label
+                Accessible.selected: valueTab.current
+
+                Keys.onLeftPressed: function (event) {
+                    dlg._tab = 0; singleTab.forceActiveFocus(Qt.TabFocusReason)
+                    event.accepted = true
+                }
+                Keys.onRightPressed: function (event) {
+                    dlg._tab = 1; individualTab.forceActiveFocus(Qt.TabFocusReason)
+                    event.accepted = true
+                }
+
+                background: Rectangle {
+                    color: valueTab.current ? Theme.surfacePanel : "transparent"
+                    border.color: Theme.textPrimary
+                    border.width: valueTab.visualFocus ? 1 : 0
+                    Rectangle { // active underline
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left; anchors.right: parent.right
+                        height: 2
+                        visible: valueTab.current
+                        color: Theme.accentSoft
+                    }
+                }
+                contentItem: Text {
                     id: tabText
-                    anchors.centerIn: parent
-                    text: parent.label
-                    color: dlg._tab === parent.tabIndex ? Theme.textPrimary : Theme.textMuted
+                    text: valueTab.label
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    color: valueTab.current ? Theme.textPrimary : Theme.textMuted
                     font.family: dlg.uiFont; font.pixelSize: 12
                 }
-                Rectangle { // active underline
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left; anchors.right: parent.right
-                    height: 2
-                    visible: dlg._tab === parent.tabIndex
-                    color: Theme.accentSoft
-                }
-                TapHandler { onTapped: dlg._tab = parent.tabIndex }
             }
 
-            TabButton { label: "Single Value"; tabIndex: 0 }
-            TabButton { label: "Individual Values"; tabIndex: 1 }
+            ValueTabButton { id: singleTab; label: "Single Value"; tabIndex: 0 }
+            ValueTabButton { id: individualTab; label: "Individual Values"; tabIndex: 1 }
         }
         Rectangle {
             id: tabRule
@@ -743,40 +769,23 @@ Item {
             }
         }
 
-        // Footer (OK / Cancel).
+        // Footer (OK / Cancel): the tool dialogs' shared buttons, OK as the
+        // accent one. Enter in the value fields runs _ok through their own
+        // handlers (above), so no root default-button route is needed here.
         Item {
             id: footer
             anchors.bottom: parent.bottom
             anchors.left: parent.left; anchors.right: parent.right
             anchors.margins: 12
-            height: 28
+            height: 30
 
-            component DialogButton: Rectangle {
-                property string label: ""
-                property bool primary: false
-                signal clicked()
-                width: 84; height: 28; radius: 4
-                color: btnHover.hovered ? (primary ? "#3A3458" : Theme.surfaceRaised)
-                                        : (primary ? Theme.selectionSoft : Theme.surfacePanel)
-                border.color: primary ? Theme.accentSoft : Theme.border
-                border.width: 1
-                Text {
-                    anchors.centerIn: parent
-                    text: parent.label
-                    color: Theme.textPrimary
-                    font.family: dlg.uiFont; font.pixelSize: 12
-                }
-                HoverHandler { id: btnHover }
-                TapHandler { onTapped: parent.clicked() }
-            }
-
-            DialogButton {
+            ToolDialogButton {
                 anchors.right: cancelBtn.left; anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                label: "OK"; primary: true
+                label: "OK"; accent: true
                 onClicked: dlg._ok()
             }
-            DialogButton {
+            ToolDialogButton {
                 id: cancelBtn
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter

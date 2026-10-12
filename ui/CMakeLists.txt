@@ -393,11 +393,13 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/EditValueDialog.qml
         Sources/qml/components/LogConsole.qml
         Sources/qml/components/LogStore.qml
+        Sources/qml/components/MenuTitle.qml
         Sources/qml/components/MetadataPropertiesPane.qml
         Sources/qml/components/Mp3TaggingSettingsPane.qml
         Sources/qml/components/PlaybackSettingsPane.qml
         Sources/qml/components/PlaylistDialogs.qml
         Sources/qml/components/PlaylistTabBar.qml
+        Sources/qml/components/PresetRow.qml
         Sources/qml/components/PropertiesLogBar.qml
         Sources/qml/components/ReplayGainPropertiesPane.qml
         Sources/qml/components/ReplayGainScanProgress.qml
@@ -405,6 +407,7 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/Format.qml
         Sources/qml/components/FrostedPopupBackground.qml
         Sources/qml/components/SeekBar.qml
+        Sources/qml/components/SegmentSelect.qml
         Sources/qml/components/SettingsResetMenu.qml
         Sources/qml/components/SettingsRow.qml
         Sources/qml/components/SettingsRowLabel.qml

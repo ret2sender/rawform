@@ -154,14 +154,9 @@ Window {
         // preload its pattern so the dialog opens ready to Apply.
         var last = presetStore.lastUsed()
         if (last.length > 0) {
-            var pat = presetStore.patternFor(last)
-            if (pat.length > 0) {
-                var idx = presetCombo.find(last)
-                if (idx >= 0)
-                    presetCombo.currentIndex = idx
-                renameDialog._setPresetText(last)
+            var pat = presetRow.selectName(last)
+            if (pat.length > 0)
                 patternField.text = pat
-            }
         }
         renameDialog._refreshPreview()
         previewDebounce.stop() // the text set above armed it; already refreshed
@@ -182,17 +177,6 @@ Window {
         renameDialog._previewRows = previewer.preview(
             renameDialog._model, renameDialog._keys, patternField.text)
         renameDialog._statusText = ""
-    }
-
-    // Sets the preset box text through BOTH channels. The contentItem's
-    // declarative text binding is severed the first time the user types in
-    // the field (standard QML binding-break on user input), after which
-    // editText changes stop reaching the display; observed as the deleted
-    // preset's name sticking in the box and selections not rendering. Every
-    // programmatic change goes through here so the display can never desync.
-    function _setPresetText(t) {
-        presetCombo.editText = t
-        presetEditor.text = t
     }
 
     function _flash(msg) {
@@ -302,6 +286,11 @@ Window {
         border.color: Theme.separatorStrong
         border.width: 1
 
+        // The default button: an Enter that no field or control claimed on
+        // the way up activates the accent button (OK), when it is enabled.
+        Keys.onReturnPressed: function (event) { event.accepted = okButton.activate() }
+        Keys.onEnterPressed: function (event) { event.accepted = okButton.activate() }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 1
@@ -384,110 +373,18 @@ Window {
                         font.family: renameDialog.uiFont
                         font.pixelSize: 12
                     }
-                    ThemedComboBox {
-                        id: presetCombo
+                    PresetRow {
+                        id: presetRow
                         Layout.fillWidth: true
-                        editable: true   // the edit text doubles as the save-as name
-                        enabled: !renameDialog._applying
-                        textRole: "name"
-
-                        model: presetStore.catalog()
-                        // The editable content item replaces the shared combo's
-                        // read-only label, three birds: selectByMouse ON
-                        // declaratively (the Basic style ships its editor with
-                        // it off, the drag-select asymmetry against the
-                        // pattern field), the themed edit context menu, and no
-                        // duck-typed onCompleted poke at style internals.
-                        // ComboBox auto-syncs editText with a TextInput-based
-                        // contentItem, so the one-way text binding here is the
-                        // whole wiring. background null: the combo draws its
-                        // own frame; the TextField's would double-border. No
-                        // padding for the indicator: the shared combo keeps
-                        // the content item short of it.
-                        contentItem: TextField {
-                            id: presetEditor
-                            background: null
-                            enabled: presetCombo.editable
-                            font: presetCombo.font
-                            text: presetCombo.editable ? presetCombo.editText
-                                                       : presetCombo.displayText
-                            selectByMouse: true
-                            verticalAlignment: Text.AlignVCenter
-                            ContextMenu.menu: ThemedEditMenu { editor: presetEditor }
-                        }
-                        // Selection must repaint through the helper too:
-                        // with the text binding severed (see _setPresetText),
-                        // activating an entry updates editText but not the
-                        // display, so clicking another preset looked dead.
-                        onActivated: function (index) {
-                            renameDialog._setPresetText(presetCombo.textAt(index))
-                        }
-                        Connections {
-                            target: presetStore
-                            function onPatternsChanged() {
-                                // Reassigning the model recreates the entries
-                                // and stomps the edit text; preserve a typed
-                                // name that still EXISTS (the save flow), and
-                                // clear one that does not (the delete flow;
-                                // restoring it left a ghost the combo could
-                                // not select away from).
-                                var typed = presetCombo.editText
-                                presetCombo.model = presetStore.catalog()
-                                var i = presetCombo.find(typed)
-                                if (i >= 0) {
-                                    presetCombo.currentIndex = i
-                                    renameDialog._setPresetText(typed)
-                                } else {
-                                    presetCombo.currentIndex = -1
-                                    renameDialog._setPresetText("")
-                                }
-                            }
-                        }
-                    }
-                    ToolDialogButton {
-                        label: "Load"
-                        enabled: !renameDialog._applying
-                                 && presetCombo.editText.length > 0
-                                 && presetStore.patternFor(presetCombo.editText).length > 0
-                        onClicked: {
-                            presetStore.setLastUsed(presetCombo.editText)
-                            patternField.text =
-                                presetStore.patternFor(presetCombo.editText)
+                        store: presetStore
+                        pattern: patternField.text
+                        busy: renameDialog._applying
+                        onLoaded: function (pattern) {
+                            patternField.text = pattern
                             renameDialog._refreshPreview()
                             previewDebounce.stop() // text set armed it; done
-                            renameDialog._flash(
-                                "Loaded preset '" + presetCombo.editText + "'")
                         }
-                    }
-                    ToolDialogButton {
-                        label: "Save"
-                        enabled: !renameDialog._applying
-                                 && presetCombo.editText.trim().length > 0
-                                 && patternField.text.length > 0
-                        onClicked: {
-                            presetStore.save(presetCombo.editText,
-                                             patternField.text)
-                            presetStore.setLastUsed(presetCombo.editText)
-                            renameDialog._flash(
-                                "Saved preset '" + presetCombo.editText.trim() + "'")
-                        }
-                    }
-                    ToolDialogButton {
-                        label: "Delete"
-                        // Only a name that actually resolves to a preset can
-                        // be deleted (same existence test Load uses).
-                        enabled: !renameDialog._applying
-                                 && presetCombo.editText.length > 0
-                                 && presetStore.patternFor(presetCombo.editText).length > 0
-                        onClicked: {
-                            var name = presetCombo.editText
-                            presetStore.remove(name)
-                            // patternsChanged already cleared the box (name no
-                            // longer resolves); this is the belt to that brace.
-                            presetCombo.currentIndex = -1
-                            renameDialog._setPresetText("")
-                            renameDialog._flash("Deleted preset '" + name + "'")
-                        }
+                        onFlash: function (message) { renameDialog._flash(message) }
                     }
                 }
             }
@@ -670,6 +567,7 @@ Window {
                         onClicked: renameDialog._apply(false)
                     }
                     ToolDialogButton {
+                        id: okButton
                         label: "OK"
                         accent: true
                         enabled: renameDialog._canApply

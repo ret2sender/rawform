@@ -45,9 +45,10 @@
 // (write-through means the file is always the truth). Safe: no observers
 // exist yet, so the load's emission reaches nobody.
 //
-// QML_ANONYMOUS: not creatable from QML (no file name to create it with); the
-// subclasses are the QML_ELEMENT types, and their instances expose these
-// invokables through the meta-object chain.
+// Named for QML but not creatable from it (no file name to create it with):
+// the subclasses are the creatable QML_ELEMENT types, and the shared
+// PresetRow declares its `store` property as this base type so either
+// subclass's instance binds to it with full member checking.
 //
 // Ships EMPTY by design: no seed presets.
 
@@ -56,7 +57,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QObject>
-#include <QQmlEngine> // QML_ANONYMOUS
+#include <QQmlEngine> // QML_ELEMENT / QML_UNCREATABLE
 #include <QString>
 #include <QVariantList>
 
@@ -64,7 +65,8 @@ namespace rawform {
 
 class NamedPatternStore : public QObject {
     Q_OBJECT
-    QML_ANONYMOUS
+    QML_ELEMENT
+    QML_UNCREATABLE("NamedPatternStore is abstract: use one of its subclasses")
 
 public:
     ~NamedPatternStore() override = default;

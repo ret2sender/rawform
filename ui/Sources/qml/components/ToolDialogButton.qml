@@ -21,10 +21,16 @@
 // ToolDialogButton.qml
 //
 // The footer button of the frameless tool dialogs (Settings, Properties,
-// Custom Columns, Rename Files, Find): one fixed look, a text label, and an
-// `accent` variant for the primary action (OK, Rename). A Rectangle with
-// handlers rather than a Controls Button, so nothing from the style leaks in;
-// the dialogs draw everything else themselves for the same reason.
+// Custom Columns, Rename Files, Find, Edit Value, the ReplayGain scan
+// overlay): one fixed look, a text label, and an `accent` variant for the
+// primary action (OK, Rename). An AbstractButton drawn entirely here, so
+// nothing from the style leaks in while the control still gives what a
+// button owes the keyboard and assistive technology: Tab focus, Space and
+// Return/Enter to activate, the button role with the label as its name, and
+// the default-button flag on the accent variant (the dialog roots route an
+// unclaimed Enter to it). The focus ring follows ThemedSwitch and
+// ThemedComboBox: a 1 px Theme.textPrimary stroke, shown for keyboard focus
+// only (visualFocus), never for a click.
 //
 // The instantiation site owns only what varies: `label`, `accent`, `enabled`,
 // `onClicked`, and its layout attachment.
@@ -32,29 +38,57 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic
 import com.rawform.app
 
-Rectangle {
+AbstractButton {
     id: root
 
     property string label: ""
     property bool accent: false
-    signal clicked()
 
+    text: root.label
+    padding: 0
+    hoverEnabled: true
     implicitWidth: Math.max(72, btnText.implicitWidth + 28)
     implicitHeight: 30
-    radius: 5
-    color: !enabled ? Theme.surfaceControl
-         : hover.hovered ? (accent ? Theme.accentButtonHover : Theme.surfaceControlHover)
-         : (accent ? Theme.accentSoft : Theme.buttonFace)
-    border.color: accent ? "transparent" : Theme.border
-    border.width: accent ? 0 : 1
     opacity: enabled ? 1.0 : 0.5
 
-    Text {
+    Accessible.name: root.label
+    Accessible.defaultButton: root.accent
+
+    /// Activate as a click would, when the button can be clicked at all;
+    /// returns whether it was. The dialog roots route an Enter that nothing
+    /// else claimed to their accent button through this.
+    function activate() {
+        if (!root.enabled || !root.visible)
+            return false
+        root.clicked()
+        return true
+    }
+
+    // Return and Enter activate the focused button itself, ahead of the
+    // dialog root's default-button handler (a focused Cancel must cancel).
+    // Space is the control's own.
+    Keys.onReturnPressed: function (event) { root.activate(); event.accepted = true }
+    Keys.onEnterPressed: function (event) { root.activate(); event.accepted = true }
+
+    background: Rectangle {
+        radius: 5
+        color: !root.enabled ? Theme.surfaceControl
+             : root.hovered ? (root.accent ? Theme.accentButtonHover
+                                           : Theme.surfaceControlHover)
+             : (root.accent ? Theme.accentSoft : Theme.buttonFace)
+        border.color: root.visualFocus ? Theme.textPrimary
+                    : root.accent ? "transparent" : Theme.border
+        border.width: (root.accent && !root.visualFocus) ? 0 : 1
+    }
+
+    contentItem: Text {
         id: btnText
-        anchors.centerIn: parent
         text: root.label
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
         // The disabled state overrides the accent text color: textOnAccent
         // over the disabled gray face is invisible (an OK button that went
         // blank while a write was in flight).
@@ -64,6 +98,4 @@ Rectangle {
         font.pixelSize: 12
         font.weight: Font.Bold
     }
-    HoverHandler { id: hover }
-    TapHandler { onTapped: if (root.enabled) root.clicked() }
 }

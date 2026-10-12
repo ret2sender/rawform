@@ -240,45 +240,4 @@ Item {
 
         Item { Layout.fillHeight: true }  // push rows to the top
     }
-
-    // -----------------------------------------------------------------------
-    // Generalized segmented selector: the RG pane's Off/Track/Album control with
-    // the labels and segment width as properties, since this page needs four
-    // different segment sets. Picked index == enum value by construction (the
-    // labels arrays above are in enum order).
-    // -----------------------------------------------------------------------
-    component SegmentSelect: Row {
-        id: ss
-        property var labels: []
-        property int segWidth: 68
-        property int value: 0
-        signal picked(int value)
-        spacing: 0
-
-        Repeater {
-            model: ss.labels
-            delegate: Rectangle {
-                id: seg
-                required property int index
-                required property string modelData
-                width: ss.segWidth
-                height: 26
-                color: ss.value === seg.index ? Theme.accentSoft
-                     : segHover.hovered ? Theme.surfaceControlHover : Theme.surfaceControl
-                border.color: Theme.border
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: seg.modelData
-                    color: ss.value === seg.index ? Theme.textOnAccent : Theme.textSecondary
-                    font.family: pane.uiFont
-                    font.pixelSize: 11
-                    font.weight: ss.value === seg.index ? Font.Bold : Font.Normal
-                }
-                HoverHandler { id: segHover }
-                TapHandler { onTapped: ss.picked(seg.index) }
-            }
-        }
-    }
 }

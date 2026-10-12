@@ -28,7 +28,7 @@
 // Layout: String (what to find); Filter (where to look: ':'-separated column
 // titles, custom column names, field ids or %token% patterns, see
 // search/PlaylistSearchFilter.h; empty searches the visible columns); Preset
-// (the Filter text under a name, RenameFilesDialog's row verbatim, backed by
+// (the Filter text under a name, the shared PresetRow backed by
 // SearchPresetStore); a footer with the match count and Close.
 //
 // The search itself is PlaylistSearch (C++): this file only pushes the two
@@ -195,14 +195,6 @@ Window {
         findDialog.selection.setCurrentIndex(findDialog.view.index(row, 0),
                                              ItemSelectionModel.NoUpdate)
         findDialog.revealRow(row)
-    }
-
-    // Sets the preset box text through BOTH channels (the contentItem's text
-    // binding is severed the first time the user types; see the same helper
-    // in RenameFilesDialog).
-    function _setPresetText(t) {
-        presetCombo.editText = t
-        presetEditor.text = t
     }
 
     function _flash(msg) {
@@ -381,84 +373,12 @@ Window {
                     font.family: findDialog.uiFont
                     font.pixelSize: 12
                 }
-                RowLayout {
+                PresetRow {
                     Layout.fillWidth: true
-                    spacing: 8
-                    ThemedComboBox {
-                        id: presetCombo
-                        Layout.fillWidth: true
-                        editable: true   // the edit text doubles as the save-as name
-                        textRole: "name"
-                        model: presetStore.catalog()
-                        // The editable content item, RenameFilesDialog's
-                        // verbatim: selectByMouse on, the themed edit menu,
-                        // no background (the combo draws its own frame).
-                        contentItem: TextField {
-                            id: presetEditor
-                            background: null
-                            enabled: presetCombo.editable
-                            font: presetCombo.font
-                            text: presetCombo.editable ? presetCombo.editText
-                                                       : presetCombo.displayText
-                            selectByMouse: true
-                            verticalAlignment: Text.AlignVCenter
-                            ContextMenu.menu: ThemedEditMenu { editor: presetEditor }
-                        }
-                        onActivated: function (index) {
-                            findDialog._setPresetText(presetCombo.textAt(index))
-                        }
-                        Connections {
-                            target: presetStore
-                            function onPatternsChanged() {
-                                // Reassigning the model stomps the edit text;
-                                // keep a typed name that still exists (the
-                                // save flow), clear one that does not (the
-                                // delete flow).
-                                var typed = presetCombo.editText
-                                presetCombo.model = presetStore.catalog()
-                                var i = presetCombo.find(typed)
-                                if (i >= 0) {
-                                    presetCombo.currentIndex = i
-                                    findDialog._setPresetText(typed)
-                                } else {
-                                    presetCombo.currentIndex = -1
-                                    findDialog._setPresetText("")
-                                }
-                            }
-                        }
-                    }
-                    ToolDialogButton {
-                        label: "Load"
-                        enabled: presetCombo.editText.length > 0
-                                 && presetStore.patternFor(presetCombo.editText).length > 0
-                        onClicked: {
-                            presetStore.setLastUsed(presetCombo.editText)
-                            filterField.text = presetStore.patternFor(presetCombo.editText)
-                            findDialog._flash("Loaded preset '" + presetCombo.editText + "'")
-                        }
-                    }
-                    ToolDialogButton {
-                        label: "Save"
-                        enabled: presetCombo.editText.trim().length > 0
-                                 && filterField.text.length > 0
-                        onClicked: {
-                            presetStore.save(presetCombo.editText, filterField.text)
-                            presetStore.setLastUsed(presetCombo.editText)
-                            findDialog._flash("Saved preset '" + presetCombo.editText.trim() + "'")
-                        }
-                    }
-                    ToolDialogButton {
-                        label: "Delete"
-                        enabled: presetCombo.editText.length > 0
-                                 && presetStore.patternFor(presetCombo.editText).length > 0
-                        onClicked: {
-                            var name = presetCombo.editText
-                            presetStore.remove(name)
-                            presetCombo.currentIndex = -1
-                            findDialog._setPresetText("")
-                            findDialog._flash("Deleted preset '" + name + "'")
-                        }
-                    }
+                    store: presetStore
+                    pattern: filterField.text
+                    onLoaded: function (pattern) { filterField.text = pattern }
+                    onFlash: function (message) { findDialog._flash(message) }
                 }
             }
 

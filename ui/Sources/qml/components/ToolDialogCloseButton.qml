@@ -46,6 +46,7 @@ Button {
 
     implicitHeight: 22
     implicitWidth: 22
+    Accessible.name: "Close"
     // 20 x 20 content box, matching the glyph's sourceSize, so the icon
     // never overflows the box the MultiEffect layer captures.
     padding: 1

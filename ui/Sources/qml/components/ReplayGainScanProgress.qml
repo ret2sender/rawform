@@ -116,27 +116,10 @@ Item {
                 width: parent.width
                 height: 30
 
-                Rectangle {
-                    id: cancelBtn
+                ToolDialogButton {
                     anchors.right: parent.right
-                    width: Math.max(72, cancelText.implicitWidth + 28)
-                    height: 30
-                    radius: 5
-                    color: cancelHover.hovered ? Theme.surfaceControlHover : Theme.buttonFace
-                    border.color: Theme.border
-                    border.width: 1
-
-                    Text {
-                        id: cancelText
-                        anchors.centerIn: parent
-                        text: "Cancel"
-                        color: Theme.textPrimary
-                        font.family: root.uiFont
-                        font.pixelSize: 12
-                        font.weight: Font.Bold
-                    }
-                    HoverHandler { id: cancelHover }
-                    TapHandler { onTapped: if (root.controller) root.controller.cancel() }
+                    label: "Cancel"
+                    onClicked: if (root.controller) root.controller.cancel()
                 }
             }
         }

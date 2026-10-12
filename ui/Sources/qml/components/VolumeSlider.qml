@@ -106,6 +106,32 @@ Item {
     // -----------------------------------------------------------------------
     signal moved(real level)
 
+    // Keyboard and assistive technology. The bar is a Tab stop; Up/Right and
+    // Down/Left step by wheelStep, Home and End go to silence and full. A
+    // plain Item carries no visualFocus, so the ring keys off activeFocus;
+    // the MouseArea never takes focus, so in practice only the keyboard puts
+    // it there.
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Slider
+    Accessible.name: "Volume"
+    Accessible.description: Math.round(root._levelRatio * 100) + " percent"
+                            + (root.muted ? ", muted" : "")
+    Keys.onPressed: function (event) {
+        var next = -1
+        if (event.key === Qt.Key_Right || event.key === Qt.Key_Up)
+            next = root._levelRatio + root.wheelStep
+        else if (event.key === Qt.Key_Left || event.key === Qt.Key_Down)
+            next = root._levelRatio - root.wheelStep
+        else if (event.key === Qt.Key_Home)
+            next = 0
+        else if (event.key === Qt.Key_End)
+            next = 1
+        else
+            return
+        root._emit(Math.max(0, Math.min(1, next)))
+        event.accepted = true
+    }
+
     // Match the SeekBar's comfortable hit target so the thin bar is easy to grab
     // and the two bars line up row-for-row in the PlayerBar.
     implicitHeight: barHeight + 12
@@ -169,6 +195,8 @@ Item {
         height: root.barHeight
         radius: root.barRadius
         color: root.trackColor
+        border.color: root.playheadColor
+        border.width: root.activeFocus ? 1 : 0
 
         Rectangle {
             id: fill

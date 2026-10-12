@@ -91,11 +91,44 @@ Item {
     property real  stepBadgeLift: 8
     property real  stepBadgePopFrom: 0.85
 
+    // How far one Left/Right press moves the position while the bar has
+    // keyboard focus (the playlist's own Left/Right step is 5 s too).
+    property real keyStepSeconds: 5
+
     // -----------------------------------------------------------------------
-    // Output. Emitted exactly once, on release (click or drag end), with the
-    // absolute target time in seconds.
+    // Output. seekRequested is emitted exactly once, on release (click or
+    // drag end), with the absolute target time in seconds; stepRequested on
+    // each Left/Right press with the signed step, for the host to route to
+    // the controller's relative seek (which clamps and reports the badge).
     // -----------------------------------------------------------------------
     signal seekRequested(real seconds)
+    signal stepRequested(real deltaSeconds)
+
+    // Keyboard and assistive technology. The bar is a Tab stop; Left/Right
+    // step, Home rewinds. A plain Item carries no visualFocus, so the ring
+    // keys off activeFocus; the MouseArea never takes focus, so in practice
+    // only the keyboard puts it there.
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Slider
+    Accessible.name: "Seek position"
+    Accessible.description: Format.mmss(root.positionSeconds) + " of "
+                            + Format.mmss(root.durationSeconds)
+    Keys.onLeftPressed: function (event) {
+        if (root.seekable)
+            root.stepRequested(-root.keyStepSeconds)
+        event.accepted = true
+    }
+    Keys.onRightPressed: function (event) {
+        if (root.seekable)
+            root.stepRequested(root.keyStepSeconds)
+        event.accepted = true
+    }
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Home && root.seekable) {
+            root.seekRequested(0)
+            event.accepted = true
+        }
+    }
 
     // A comfortable hit target: the visible bar stays barHeight, but the row is a
     // little taller so the thin bar is easy to grab. Purely a usability gain; the
@@ -218,6 +251,8 @@ Item {
         height: root.barHeight
         radius: root.barRadius
         color: root.trackColor
+        border.color: root.playheadColor
+        border.width: root.activeFocus ? 1 : 0
 
         Rectangle {
             id: fill

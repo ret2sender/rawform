@@ -20,17 +20,16 @@
 
 // ThemedMenuBar.qml
 //
-// The main window's menu bar: File, Edit, View, Playback and Help labels in
-// a Row, each with a themed drop-down (ThemedMenu) opened through the host
-// window's openMenu so the popup is positioned under its label, and an
-// Alt+letter shortcut that toggles it.
+// The main window's menu bar: File, Edit, View, Playback and Help titles in
+// a Row (MenuTitle: the label, the hover tint, the Alt+letter toggle and the
+// click), each declaring its themed drop-down (ThemedMenu) in place, so the
+// items and the signals they raise read top to bottom in this one file.
 //
 // Everything the bar can DO is a signal (addFilesRequested, settingsRequested,
 // aboutRequested, ...); the host owns the doing. The bar holds no reference
 // to dialogs, stores, views or windows, so it instantiates anywhere and the
-// wiring reads in one place at the host. The only host member it touches is
-// openMenu, resolved through the Window attached property rather than an
-// ancestor id.
+// wiring reads in one place at the host. The only host member reached is
+// openMenu, which MenuTitle resolves through the Window attached property.
 //
 // A command's keyboard shortcut is declared on its menu item (see
 // ThemedMenuItem's `shortcut`): the item owns the trigger and the hint, so a
@@ -47,12 +46,6 @@ Rectangle {
     id: root
     color: "transparent"
     implicitHeight: 24
-
-    // The host window, resolved via the Window attached property rather than
-    // an ancestor id. openMenu is declared on MainWindow's ApplicationWindow
-    // root, and Window.window IS that object, so the member resolves. It is
-    // the only host-window member this file touches.
-    readonly property var hostWindow: root.Window.window
 
     // Everything this menu bar can DO is a signal; the host owns the doing.
     // The bar renders labels, opens/closes its menus, and emits. It holds no
@@ -95,43 +88,12 @@ Rectangle {
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         spacing: 20
+        Accessible.role: Accessible.MenuBar
 
-        Text {
-            id: fileMenuLabel
-            color: fileMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
-            font.family: Theme.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-            text: "<u>F</u>ile"
-
-            HoverHandler { id: fileMenuHover }
-
-            Shortcut {
-                context: Qt.ApplicationShortcut
-                sequence: "Alt+F"
-
-                onActivated: fileMenu.visible
-                    ? fileMenu.close()
-                    : root.hostWindow.openMenu(fileMenuLabel, fileMenu)
-            }
-
-            TapHandler {
-                property bool wasOpenOnPress: false
-
-                onPressedChanged: {
-                    if (pressed)
-                        wasOpenOnPress = fileMenu.visible
-                }
-
-                onTapped: {
-                    if (wasOpenOnPress)
-                        fileMenu.close()
-                    else
-                        root.hostWindow.openMenu(fileMenuLabel, fileMenu)
-                }
-            }
-
-            ThemedMenu {
+        MenuTitle {
+            label: "<u>F</u>ile"
+            mnemonic: "Alt+F"
+            menu: ThemedMenu {
                 id: fileMenu
 
                 ThemedMenuItem {
@@ -168,42 +130,10 @@ Rectangle {
             }
         }
 
-        Text {
-            id: editMenuLabel
-            color: editMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
-            font.family: Theme.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-            text: "<u>E</u>dit"
-
-            HoverHandler { id: editMenuHover }
-
-            Shortcut {
-                context: Qt.ApplicationShortcut
-                sequence: "Alt+E"
-
-                onActivated: editMenu.visible
-                    ? editMenu.close()
-                    : root.hostWindow.openMenu(editMenuLabel, editMenu)
-            }
-
-            TapHandler {
-                property bool wasOpenOnPress: false
-
-                onPressedChanged: {
-                    if (pressed)
-                        wasOpenOnPress = editMenu.visible
-                }
-
-                onTapped: {
-                    if (wasOpenOnPress)
-                        editMenu.close()
-                    else
-                        root.hostWindow.openMenu(editMenuLabel, editMenu)
-                }
-            }
-
-            ThemedMenu {
+        MenuTitle {
+            label: "<u>E</u>dit"
+            mnemonic: "Alt+E"
+            menu: ThemedMenu {
                 id: editMenu
 
                 ThemedMenuItem {
@@ -233,54 +163,10 @@ Rectangle {
             }
         }
 
-        Text {
-            id: viewMenuLabel
-            color: viewMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
-            font.family: Theme.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-            text: "<u>V</u>iew"
-
-            HoverHandler { id: viewMenuHover }
-
-            Shortcut {
-                // Application context, not the default
-                // window context: while the menu is open
-                // it holds the keyboard focus scope, and a
-                // window-context shortcut would go dormant
-                // there, so the second Alt+V would never
-                // fire and the menu wouldn't toggle closed.
-                context: Qt.ApplicationShortcut
-                sequence: "Alt+V"
-
-                onActivated: viewMenu.visible
-                    ? viewMenu.close()
-                    : root.hostWindow.openMenu(viewMenuLabel, viewMenu)
-            }
-
-            TapHandler {
-                // The menu closes itself on a press outside it
-                // (including a press on this label), so by the
-                // time onTapped fires it may already be closing.
-                // Capture whether it was up at press time, before
-                // that reaction, so a click on "View" while open
-                // closes it rather than immediately reopening.
-                property bool wasOpenOnPress: false
-
-                onPressedChanged: {
-                    if (pressed)
-                        wasOpenOnPress = viewMenu.visible
-                }
-
-                onTapped: {
-                    if (wasOpenOnPress)
-                        viewMenu.close()
-                    else
-                        root.hostWindow.openMenu(viewMenuLabel, viewMenu)
-                }
-            }
-
-            ThemedMenu {
+        MenuTitle {
+            label: "<u>V</u>iew"
+            mnemonic: "Alt+V"
+            menu: ThemedMenu {
                 id: viewMenu
 
                 ThemedMenuItem {
@@ -294,42 +180,10 @@ Rectangle {
             }
         }
 
-        Text {
-            id: playbackMenuLabel
-            color: playbackMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
-            font.family: Theme.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-            text: "<u>P</u>layback"
-
-            HoverHandler { id: playbackMenuHover }
-
-            Shortcut {
-                context: Qt.ApplicationShortcut
-                sequence: "Alt+P"
-
-                onActivated: playbackMenu.visible
-                    ? playbackMenu.close()
-                    : root.hostWindow.openMenu(playbackMenuLabel, playbackMenu)
-            }
-
-            TapHandler {
-                property bool wasOpenOnPress: false
-
-                onPressedChanged: {
-                    if (pressed)
-                        wasOpenOnPress = playbackMenu.visible
-                }
-
-                onTapped: {
-                    if (wasOpenOnPress)
-                        playbackMenu.close()
-                    else
-                        root.hostWindow.openMenu(playbackMenuLabel, playbackMenu)
-                }
-            }
-
-            ThemedMenu {
+        MenuTitle {
+            label: "<u>P</u>layback"
+            mnemonic: "Alt+P"
+            menu: ThemedMenu {
                 id: playbackMenu
 
                 // The transport commands, each a twin of a PlayerBar button.
@@ -398,42 +252,10 @@ Rectangle {
             }
         }
 
-        Text {
-            id: helpMenuLabel
-            color: helpMenuHover.hovered ? Theme.accentHover : Theme.textPrimary
-            font.family: Theme.uiFont
-            font.pixelSize: 12
-            font.weight: Font.Bold
-            text: "<u>H</u>elp"
-
-            HoverHandler { id: helpMenuHover }
-
-            Shortcut {
-                context: Qt.ApplicationShortcut
-                sequence: "Alt+H"
-
-                onActivated: helpMenu.visible
-                    ? helpMenu.close()
-                    : root.hostWindow.openMenu(helpMenuLabel, helpMenu)
-            }
-
-            TapHandler {
-                property bool wasOpenOnPress: false
-
-                onPressedChanged: {
-                    if (pressed)
-                        wasOpenOnPress = helpMenu.visible
-                }
-
-                onTapped: {
-                    if (wasOpenOnPress)
-                        helpMenu.close()
-                    else
-                        root.hostWindow.openMenu(helpMenuLabel, helpMenu)
-                }
-            }
-
-            ThemedMenu {
+        MenuTitle {
+            label: "<u>H</u>elp"
+            mnemonic: "Alt+H"
+            menu: ThemedMenu {
                 id: helpMenu
 
                 ThemedMenuItem {

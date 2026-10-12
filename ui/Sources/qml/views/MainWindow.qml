@@ -256,6 +256,32 @@ ApplicationWindow {
         menuId.popup(menuLabelId, 0, menuLabelId.height + 4)
     }
 
+    // Cycle the playlist tabs from the keyboard, wrapping at both ends.
+    // Ctrl+Tab / Ctrl+Shift+Tab on Linux and Windows, Control+Tab /
+    // Control+Shift+Tab on macOS ("Meta" is the Control key in Qt's macOS
+    // spelling, since "Ctrl" there is Command, whose Tab is the system app
+    // switcher). Explicit sequences rather than StandardKey.NextChild, which
+    // expands to Cmd+Tab on macOS and to the Forward media key everywhere.
+    function _cycleTab(step) {
+        var count = PlaylistTabs.count
+        if (count < 2)
+            return
+        PlaylistTabs.currentIndex = (PlaylistTabs.currentIndex + step + count) % count
+    }
+    Shortcut {
+        sequence: Qt.platform.os === "osx" ? "Meta+Tab" : "Ctrl+Tab"
+        onActivated: applicationWindow._cycleTab(1)
+    }
+    Shortcut {
+        // Both spellings: a shifted Tab arrives as Key_Backtab on X11 and
+        // Windows (Qt's own PreviousChild binding is Ctrl+Shift+Backtab), and
+        // as Shift+Tab on some other keymaps.
+        sequences: Qt.platform.os === "osx"
+                   ? ["Meta+Shift+Tab", "Meta+Shift+Backtab"]
+                   : ["Ctrl+Shift+Tab", "Ctrl+Shift+Backtab"]
+        onActivated: applicationWindow._cycleTab(-1)
+    }
+
     // The saved DEFAULT column arrangement is applied per TAB in C++:
     // PlaylistTabs.setDefaultLayout() (fed the preset from main.cpp) seeds each
     // brand-new tab, and restored/opened tabs carry their own saved layout. All

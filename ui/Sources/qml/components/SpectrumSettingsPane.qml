@@ -31,8 +31,9 @@
 // exactly as the ReplayGain rows do.
 //
 // The row is a SettingsRow with its own SettingsResetMenu, as on the sibling
-// panes; with a single row there is no label column to align. The selector is a
-// local inline component styled to the app.
+// panes; with a single row there is no label column to align. The selector is
+// the shared SegmentSelect; values 0 (Output) and 1 (Source) match
+// SpectrumProvider's source ints, so the picked value maps straight through.
 
 pragma ComponentBehavior: Bound
 
@@ -82,7 +83,9 @@ Item {
             resetMenu: resetMenu
             onReset: if (pane.settings) pane.settings.spectrumSource = pane.provider.sourceDefault
 
-            SourceSelect {
+            SegmentSelect {
+                labels: ["Output", "Source"]
+                segWidth: 72
                 value: pane.settings ? pane.settings.spectrumSource : 0
                 onPicked: function (v) {
                     if (pane.settings) pane.settings.spectrumSource = v
@@ -105,43 +108,5 @@ Item {
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top
-    }
-
-    // -----------------------------------------------------------------------
-    // Segmented Output / Source selector, the two-choice sibling of the ReplayGain
-    // Off / Track / Album control. Values 0 (Output) and 1 (Source) match
-    // SpectrumProvider's source ints, so the picked value maps straight through.
-    // -----------------------------------------------------------------------
-    component SourceSelect: Row {
-        id: ss
-        property int value: 0
-        signal picked(int value)
-        spacing: 0
-
-        Repeater {
-            model: ["Output", "Source"]
-            delegate: Rectangle {
-                id: seg
-                required property int index
-                required property string modelData
-                width: 72
-                height: 26
-                color: ss.value === seg.index ? Theme.accentSoft
-                     : segHover.hovered ? Theme.surfaceControlHover : Theme.surfaceControl
-                border.color: Theme.border
-                border.width: 1
-
-                Text {
-                    anchors.centerIn: parent
-                    text: seg.modelData
-                    color: ss.value === seg.index ? Theme.textOnAccent : Theme.textSecondary
-                    font.family: pane.uiFont
-                    font.pixelSize: 11
-                    font.weight: ss.value === seg.index ? Font.Bold : Font.Normal
-                }
-                HoverHandler { id: segHover }
-                TapHandler { onTapped: ss.picked(seg.index) }
-            }
-        }
     }
 }

@@ -137,6 +137,7 @@ Control {
             iconHeight: TitleBarStyle.iconHeight
             restColor: TitleBarStyle.controlBackground
             hoverColor: TitleBarStyle.controlHover
+            Accessible.name: "Minimize"
 
             onClicked: root.Window.window.showMinimized()
         }
@@ -164,6 +165,7 @@ Control {
             iconHeight: TitleBarStyle.iconHeight
             restColor: TitleBarStyle.controlBackground
             hoverColor: TitleBarStyle.controlHover
+            Accessible.name: maximizeButton.windowMaximized ? "Restore" : "Maximize"
 
             onClicked: maximizeButton.windowMaximized
                 ? root.Window.window.showNormal()
@@ -178,6 +180,7 @@ Control {
             restColor: TitleBarStyle.closeBackground
             hoverColor: TitleBarStyle.closeHover
             cornerRadius: TitleBarStyle.closeCornerRadius
+            Accessible.name: "Close"
 
             onClicked: root.Window.window.close()
         }

@@ -61,6 +61,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
 Item {
@@ -89,39 +90,41 @@ Item {
     }
 
     // -----------------------------------------------------------------------
-    // Transport button. An icon-only hit target: the 24x24 SVG glyph rendered
-    // via AppIcon (whose explicit sourceSize keeps it crisp when the window
-    // crosses DPI boundaries), with no background plate in any state. All
-    // feedback is opacity on the root: rest 0.85, hover 1.0, disabled 0.35.
-    // Rest sits below 1.0 precisely so hover has headroom to lift, and the
-    // lift IS the hover affordance since there is no plate tint. `enabled`
-    // propagates to the MouseArea and HoverHandler, so
-    // an inert button also loses the pointing-hand cursor, and a disabled
-    // Item's handlers never see events, which is why hovered can never be
-    // stuck true while disabled; the ternary tests `enabled` first anyway to
-    // keep the precedence explicit rather than incidental.
+    // Transport button. An icon-only AbstractButton: the 24x24 SVG glyph
+    // rendered via AppIcon (whose explicit sourceSize keeps it crisp when the
+    // window crosses DPI boundaries), with no background plate in any state.
+    // All feedback is opacity on the root: rest 0.85, hover 1.0, disabled
+    // 0.35. Rest sits below 1.0 precisely so hover has headroom to lift, and
+    // the lift IS the hover affordance since there is no plate tint. A
+    // disabled control never reports hovered, which is why hovered can never
+    // be stuck true while disabled; the ternary tests `enabled` first anyway
+    // to keep the precedence explicit rather than incidental.
+    //
+    // Deliberately out of the Tab chain (NoFocus): every transport verb has
+    // an app-wide shortcut (Space, Ctrl+`, Ctrl+<, Ctrl+>), and a Tab-focused
+    // Stop under the app-wide Space shortcut would play/pause instead of
+    // stopping. The button role and `name` are what assistive technology
+    // gets from it.
     // -----------------------------------------------------------------------
-    component TpBtn: Item {
+    component TpBtn: AbstractButton {
         id: btn
-        property url icon
-        signal activated()
+        property url glyph
+        property string name: ""
 
         width: 24
         height: 24
-        opacity: !btn.enabled ? 0.35 : (btnHover.hovered ? 1.0 : 0.85)
+        padding: 0
+        focusPolicy: Qt.NoFocus
+        hoverEnabled: true
+        opacity: !btn.enabled ? 0.35 : (btn.hovered ? 1.0 : 0.85)
+        Accessible.name: btn.name
 
-        AppIcon {
-            anchors.centerIn: parent
-            source: btn.icon
+        contentItem: AppIcon {
+            source: btn.glyph
             iconSize: 24
         }
 
-        HoverHandler { id: btnHover }
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: btn.activated()
-        }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 
     RowLayout {
@@ -143,30 +146,34 @@ Item {
             spacing: 22
 
             TpBtn {
-                icon: Qt.resolvedUrl("../../icons/app/track_controls/stop.svg")
+                glyph: Qt.resolvedUrl("../../icons/app/track_controls/stop.svg")
+                name: "Stop"
                 // Nothing to stop when already stopped.
                 enabled: !AudioController.isStopped
-                onActivated: AudioController.stop()
+                onClicked: AudioController.stop()
             }
             TpBtn {
-                icon: Qt.resolvedUrl("../../icons/app/track_controls/previous.svg")
+                glyph: Qt.resolvedUrl("../../icons/app/track_controls/previous.svg")
+                name: "Previous"
                 // Organic navigation needs a live cursor to move from.
                 enabled: AudioController.playingRow >= 0
-                onActivated: AudioController.previous()
+                onClicked: AudioController.previous()
             }
             TpBtn {
-                // Single toggling button: the SVG source swaps on the playing
-                // state.
-                icon: Qt.resolvedUrl(AudioController.isPlaying
+                // Single toggling button: the glyph and the name swap on
+                // the playing state.
+                glyph: Qt.resolvedUrl(AudioController.isPlaying
                     ? "../../icons/app/track_controls/pause.svg"
                     : "../../icons/app/track_controls/play.svg")
+                name: AudioController.isPlaying ? "Pause" : "Play"
                 // Always live: play has the from-Stopped fallback to the active tab.
-                onActivated: AudioController.playPauseToggle()
+                onClicked: AudioController.playPauseToggle()
             }
             TpBtn {
-                icon: Qt.resolvedUrl("../../icons/app/track_controls/next.svg")
+                glyph: Qt.resolvedUrl("../../icons/app/track_controls/next.svg")
+                name: "Next"
                 enabled: AudioController.playingRow >= 0
-                onActivated: AudioController.next()
+                onClicked: AudioController.next()
             }
         }
 
@@ -292,6 +299,11 @@ Item {
                 onSeekRequested: function (seconds) {
                     AudioController.seekSeconds(seconds)
                 }
+                // The bar's own Left/Right (while it has keyboard focus) take
+                // the same relative-seek path as the playlist's keys.
+                onStepRequested: function (deltaSeconds) {
+                    AudioController.seekBy(deltaSeconds)
+                }
 
                 // The keyboard step badge, the same split as the seek itself:
                 // the controller reports each accepted step's effective delta,
@@ -334,48 +346,59 @@ Item {
             // the mute control (this design has no dedicated mute glyph): a click
             // toggles mute, the text dims while muted, and an oblique slash is
             // struck across the digits as an unmistakable muted mark. The readout is
-            // a container Item so the slash can sit OVER the glyphs at full strength
-            // (a child of the Text would inherit its dimmed opacity) and the click
-            // target can cover the whole row.
-            Item {
+            // a checkable button (a Tab stop; Space toggles; "Mute" with its
+            // checked state for assistive technology) drawn as a container so
+            // the slash can sit OVER the glyphs at full strength (a child of the
+            // Text would inherit its dimmed opacity) and the click target can
+            // cover the whole row. The check mirrors the controller's muted
+            // state: a click reports through onClicked, and the C++-side flip
+            // of `checked` leaves the binding in place (the ThemedSwitch rule).
+            AbstractButton {
                 id: volumeReadout
                 Layout.fillWidth: true
                 implicitHeight: volumePercentText.implicitHeight
-
-                Text {
-                    id: volumePercentText
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: AudioController.volumePercent + "%"
-                    color: Theme.textPrimary
-                    opacity: AudioController.muted ? 0.55 : 1.0
-                    font.family: Theme.uiFont
-                    font.pixelSize: 12
-                    font.weight: Font.Bold
+                padding: 0
+                checkable: true
+                checked: AudioController.muted
+                onClicked: AudioController.toggleMute()
+                Accessible.name: "Mute"
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                background: Rectangle {
+                    color: "transparent"
+                    border.color: Theme.textPrimary
+                    border.width: volumeReadout.visualFocus ? 1 : 0
                 }
+                contentItem: Item {
+                    Text {
+                        id: volumePercentText
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: AudioController.volumePercent + "%"
+                        color: Theme.textPrimary
+                        opacity: AudioController.muted ? 0.55 : 1.0
+                        font.family: Theme.uiFont
+                        font.pixelSize: 12
+                        font.weight: Font.Bold
+                    }
 
-                // The oblique mute slash: a thin bar across just the digits (sized
-                // to the painted glyph width, not the full column), rotated to an
-                // oblique angle. Full strength so it reads clearly over the dimmed
-                // number. transformOrigin defaults to the item center, so it pivots
-                // in place.
-                Rectangle {
-                    visible: AudioController.muted
-                    anchors.horizontalCenter: volumePercentText.horizontalCenter
-                    anchors.verticalCenter: volumePercentText.verticalCenter
-                    width: volumePercentText.contentWidth
-                    height: 1.5
-                    radius: 1
-                    color: Theme.textPrimary
-                    opacity: 0.40
-                    rotation: -20
-                    antialiasing: true
-                }
+                    // The oblique mute slash: a thin bar across just the digits (sized
+                    // to the painted glyph width, not the full column), rotated to an
+                    // oblique angle. Full strength so it reads clearly over the dimmed
+                    // number. transformOrigin defaults to the item center, so it pivots
+                    // in place.
+                    Rectangle {
+                        visible: AudioController.muted
+                        anchors.horizontalCenter: volumePercentText.horizontalCenter
+                        anchors.verticalCenter: volumePercentText.verticalCenter
+                        width: volumePercentText.contentWidth
+                        height: 1.5
+                        radius: 1
+                        color: Theme.textPrimary
+                        opacity: 0.40
+                        rotation: -20
+                        antialiasing: true
+                    }
 
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: AudioController.toggleMute()
                 }
             }
 

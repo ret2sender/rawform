@@ -722,6 +722,11 @@ Window {
         border.color: Theme.separatorStrong
         border.width: 1
 
+        // The default button: an Enter that no field or control claimed on
+        // the way up activates the accent button (OK), when it is enabled.
+        Keys.onReturnPressed: function (event) { event.accepted = okButton.activate() }
+        Keys.onEnterPressed: function (event) { event.accepted = okButton.activate() }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 1
@@ -767,36 +772,75 @@ Window {
                 Layout.leftMargin: 12
                 Layout.rightMargin: 12
 
+                // The tab strip. Each tab is a button, so the strip is in the
+                // Tab chain and reads as page tabs to assistive technology;
+                // Left/Right move the current tab and the focus together.
                 Row {
+                    id: tabStrip
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     spacing: 4
+                    Accessible.role: Accessible.PageTabList
+
+                    // Switch from the keyboard: the focus ring follows the tab.
+                    function switchFromKey(index) {
+                        var next = Math.max(0, Math.min(tabs.count - 1, index))
+                        propertiesWindow._switchTab(next)
+                        var item = tabs.itemAt(next)
+                        if (item)
+                            item.forceActiveFocus(Qt.TabFocusReason)
+                    }
+
                     Repeater {
+                        id: tabs
                         model: ["Metadata", "Details", "ReplayGain"]
-                        delegate: Rectangle {
+                        delegate: AbstractButton {
                             id: tab
                             required property int index
                             required property string modelData
+                            readonly property bool current:
+                                propertiesWindow.currentTab === tab.index
                             width: tabLabel.implicitWidth + 28
                             height: 28
-                            radius: 2
-                            color: propertiesWindow.currentTab === tab.index ? Theme.surfaceSelected : Theme.surfaceTabIdle
-                            Text {
+                            padding: 0
+                            onClicked: propertiesWindow._switchTab(tab.index)
+
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: tab.modelData
+                            Accessible.selected: tab.current
+
+                            Keys.onLeftPressed: function (event) {
+                                tabStrip.switchFromKey(tab.index - 1)
+                                event.accepted = true
+                            }
+                            Keys.onRightPressed: function (event) {
+                                tabStrip.switchFromKey(tab.index + 1)
+                                event.accepted = true
+                            }
+
+                            background: Rectangle {
+                                radius: 2
+                                color: tab.current ? Theme.surfaceSelected
+                                                   : Theme.surfaceTabIdle
+                                border.color: Theme.textPrimary
+                                border.width: tab.visualFocus ? 1 : 0
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 2
+                                    color: tab.current ? Theme.accent : "transparent"
+                                }
+                            }
+                            contentItem: Text {
                                 id: tabLabel
-                                anchors.centerIn: parent
                                 text: tab.modelData
-                                color: propertiesWindow.currentTab === tab.index ? Theme.textPrimary : Theme.textDim
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                color: tab.current ? Theme.textPrimary : Theme.textDim
                                 font.family: propertiesWindow.uiFont
                                 font.pixelSize: 12
                             }
-                            Rectangle {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: 2
-                                color: propertiesWindow.currentTab === tab.index ? Theme.accent : "transparent"
-                            }
-                            TapHandler { onTapped: propertiesWindow._switchTab(tab.index) }
                         }
                     }
                 }
@@ -1034,6 +1078,7 @@ Window {
                         onClicked: propertiesWindow._apply(false)
                     }
                     ToolDialogButton {
+                        id: okButton
                         label: "OK"
                         accent: true
                         enabled: !propertiesWindow._applying

@@ -50,6 +50,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic  // AbstractButton for the nav rows
 import QtQuick.Layouts
 import QtQuick.Window
 
@@ -225,6 +226,11 @@ Window {
         border.color: Theme.separatorStrong
         border.width: 1
 
+        // The default button: an Enter that no field or control claimed on
+        // the way up activates the accent button (OK), when it is enabled.
+        Keys.onReturnPressed: function (event) { event.accepted = okButton.activate() }
+        Keys.onEnterPressed: function (event) { event.accepted = okButton.activate() }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 1   // sit inside the 1 px border
@@ -287,45 +293,85 @@ Window {
                     ]
                     id: navPane
 
+                    // Each row is a button, so the nav is in the Tab chain and
+                    // reads as page tabs to assistive technology; Up/Down move
+                    // the current page and the focus together.
                     Column {
+                        id: navColumn
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.topMargin: 8
+                        Accessible.role: Accessible.PageTabList
+
+                        function switchFromKey(index) {
+                            var next = Math.max(0, Math.min(navRows.count - 1, index))
+                            navPane.currentIndex = next
+                            var item = navRows.itemAt(next)
+                            if (item)
+                                item.forceActiveFocus(Qt.TabFocusReason)
+                        }
 
                         Repeater {
+                            id: navRows
                             model: navPane.navModel
-                            delegate: Rectangle {
+                            delegate: AbstractButton {
                                 id: navDelegate
                                 required property int index
                                 required property var modelData
+                                readonly property bool current:
+                                    navPane.currentIndex === navDelegate.index
                                 width: navPane.width
                                 height: 34
-                                color: navPane.currentIndex === index ? "#241F33"
-                                     : navHover.hovered ? "#1E1E1E" : "transparent"
+                                padding: 0
+                                hoverEnabled: true
+                                onClicked: navPane.currentIndex = navDelegate.index
 
-                                Rectangle {  // active accent bar
-                                    visible: navPane.currentIndex === navDelegate.index
-                                    anchors.left: parent.left
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-                                    width: 3
-                                    color: Theme.accentSoft
+                                Accessible.role: Accessible.PageTab
+                                Accessible.name: navDelegate.modelData.label
+                                Accessible.selected: navDelegate.current
+
+                                Keys.onUpPressed: function (event) {
+                                    navColumn.switchFromKey(navDelegate.index - 1)
+                                    event.accepted = true
+                                }
+                                Keys.onDownPressed: function (event) {
+                                    navColumn.switchFromKey(navDelegate.index + 1)
+                                    event.accepted = true
                                 }
 
-                                Text {
-                                    anchors.left: parent.left
-                                    // Sub-sections indent one step per depth.
-                                    anchors.leftMargin: 16 + navDelegate.modelData.depth * 14
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: navDelegate.modelData.label
-                                    color: navPane.currentIndex === navDelegate.index ? Theme.textPrimary : "#B8B8B8"
-                                    font.family: settingsWindow.uiFont
-                                    font.pixelSize: 12
-                                    font.weight: navPane.currentIndex === navDelegate.index ? Font.Bold : Font.Normal
+                                background: Rectangle {
+                                    color: navDelegate.current ? "#241F33"
+                                         : navDelegate.hovered ? "#1E1E1E" : "transparent"
+                                    border.color: Theme.textPrimary
+                                    border.width: navDelegate.visualFocus ? 1 : 0
+
+                                    Rectangle {  // active accent bar
+                                        visible: navDelegate.current
+                                        anchors.left: parent.left
+                                        anchors.top: parent.top
+                                        anchors.bottom: parent.bottom
+                                        width: 3
+                                        color: Theme.accentSoft
+                                    }
                                 }
-                                HoverHandler { id: navHover }
-                                TapHandler { onTapped: navPane.currentIndex = navDelegate.index }
+
+                                contentItem: Item {
+                                    Text {
+                                        anchors.left: parent.left
+                                        // Sub-sections indent one step per depth.
+                                        anchors.leftMargin:
+                                            16 + navDelegate.modelData.depth * 14
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: navDelegate.modelData.label
+                                        color: navDelegate.current ? Theme.textPrimary
+                                                                   : "#B8B8B8"
+                                        font.family: settingsWindow.uiFont
+                                        font.pixelSize: 12
+                                        font.weight: navDelegate.current ? Font.Bold
+                                                                         : Font.Normal
+                                    }
+                                }
                             }
                         }
                     }
@@ -402,6 +448,7 @@ Window {
                         onClicked: settingsWindow.applyStaged()
                     }
                     ToolDialogButton {
+                        id: okButton
                         label: "OK"
                         accent: true
                         onClicked: { settingsWindow.applyStaged(); settingsWindow.dismiss() }
