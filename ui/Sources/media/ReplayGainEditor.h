@@ -45,13 +45,16 @@
 #include <QStringList>
 #include <QVariantList>
 
+#include "metadata/ApplyPorts.h"       // ReplayGainWritePort, the base
 #include "playback/AudioController.h"  // complete type: the audio Q_PROPERTY,
                                        // which moc must see fully defined to
                                        // build its meta-type.
 
 namespace rawform {
 
-class ReplayGainEditor : public QObject {
+/// The ReplayGainWritePort the Properties apply sequencer drives; the port
+/// declares apply()'s contract and the applied() completion signal.
+class ReplayGainEditor : public ReplayGainWritePort {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
@@ -88,14 +91,11 @@ public:
     /// canonical form). Absent fields are left untouched. Pathless entries are
     /// skipped. Dedupes by path (later edits to the same path win field by field)
     /// and writes on the global thread pool.
-    Q_INVOKABLE void apply(const QVariantList& edits);
+    Q_INVOKABLE void apply(const QVariantList& edits) override;
 
 signals:
     void busyChanged();
     void audioChanged();
-    /// GUI thread, when the write pass finishes. @p okCount files were written;
-    /// @p failedPaths could not be (read-only, unsupported format, gone).
-    void applied(int okCount, const QStringList& failedPaths);
 
 private:
     void onFinished();

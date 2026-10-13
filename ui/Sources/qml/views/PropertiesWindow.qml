@@ -29,28 +29,19 @@
 // onClosing handler destroys the instance, taking its per-window editors,
 // models, and scan controller with it.
 //
-// The window snapshots the selection on open and stages edits in the panes; Apply/OK
-// commit through MetadataEditor and ReplayGainEditor (off-thread TagLib writes), then the
-// OWNING TAB's MetadataReloader (captured at creation, deliberately not a live binding:
-// the active tab can change under a non-modal window) force-reloads the written files so
-// the model, metadata pane, and (via the controller's dataRevision subscription) the
-// playing track's RG factor all refresh, and the pane re-pulls fresh values.
-//
-// Track identity is PATH-BASED throughout (plus subsong for the re-pull keys):
-// every write and scan targets the file captured at open, and the re-pull remaps
-// the open-time keys to CURRENT rows via rowsForKeys. Playlist row numbers are
-// positions, not identities; a reorder, sort, or removal between opening this
-// window and hitting Apply must never redirect a write to a different file.
-//
-// Lifetime of the captured world: _model and reloader belong to the owning tab,
-// which can close while this window is open (the window itself is parented to
-// the long-lived PlaylistView, so it survives). Both are typed object
-// properties, which read back null once the object is destroyed, so every
-// post-open touch guards with a null test; a dead model or reloader
-// skips its phase, and a reload pass orphaned by a dying reloader is completed
-// by the reloader's destructor token flush. The file writes are path-based and
-// land regardless; when nothing is left to re-pull from, the panes adopt the
-// staged values as their new baseline instead (see _finishApply).
+// The window snapshots the selection on open and stages edits in the panes;
+// Apply/OK commit through MetadataEditor and ReplayGainEditor (off-thread
+// TagLib writes), then the OWNING TAB's MetadataReloader (captured at
+// creation, deliberately not a live binding: the active tab can change under
+// a non-modal window) force-reloads the written files so the model, metadata
+// pane, and (via the controller's dataRevision subscription) the playing
+// track's RG factor all refresh, and the pane re-pulls fresh values. That
+// whole sequence, the captured selection, the staging flags and the window
+// status live in PropertiesApplyController (see its banner for the phases,
+// the token and the liveness rules); this file keeps the widgets and the
+// three things only they can do: commit or discard an open cell editor
+// around a pass, close the window on a finished OK, and flush the playlist
+// cache after a write.
 //
 // Cross-window semantics (multiple windows over the same tracks): each window
 // snapshots at open and there is no cross-window sync; last write wins,
@@ -62,16 +53,10 @@
 //   Apply  : apply, stay open
 //   Cancel : discard staged edits, close
 //
-// Sequence: _apply -> [meta write] -> [rg write] -> reloader.reloadPaths of the
-// TOUCHED paths only (the union of what the two editors actually targeted) ->
-// pathsReloaded(our token) -> _finishApply (re-pull + maybe close). The token
-// matters: refreshed() only fires when something changed and can belong to an
-// unrelated conditional pass, so waiting on it could hang (written tracks all
-// left the playlist: empty pass, no signal) or finish early (a revalidation
-// pass completing first). _applying gates the footer AND the titlebar X so a
-// pass cannot be double-fired and the instance cannot be destroyed mid-write
-// from the UI (the editors' destructors wait out an in-flight pass as the
-// backstop for OS-initiated closes).
+// The controller's `busy` gates the footer AND the titlebar X so a pass
+// cannot be double-fired and the instance cannot be destroyed mid-write from
+// the UI (the editors' destructors wait out an in-flight pass as the backstop
+// for OS-initiated closes).
 //
 // Scanning: the pane's ReplayGain right-click menu also GENERATES values. Its
 // scanRequested signal drives ReplayGainScanController off-thread (a progress
@@ -83,18 +68,16 @@
 // Tools menu (footer left): window-scoped ReplayGain and file actions. The scan / clear
 // entries reuse the pane's staging machinery but act over EVERY row (requestScanAll /
 // clearAllReplayGain), ignoring the pane's row sub-selection; the pane's own right-click
-// menu stays selection-scoped. "Reload info" force-re-reads the selection's files from
-// disk through the owning tab's reloader and re-pulls all three tabs, DISCARDING staged
-// edits by design (it is the take-disk-truth action). It runs under the same _applying
-// gate as Apply but with its own token (_infoReloadToken), so the apply and reload
-// sequencers can never complete each other through the shared pathsReloaded handler.
+// menu stays selection-scoped. "Reload info" (the controller's reloadInfo)
+// force-re-reads the selection's files from disk and re-pulls all three
+// tabs, DISCARDING staged edits by design.
 //
 // Messages: ONE surface, the PropertiesLogBar between the tab strip and the
 // tab content. Everything transient the window or its panes produce is composed
 // into it by priority (see the bar's binding): a menu hover hint (the Tools
 // menu, or the visible pane's right-click menu) while a menu is open, else
 // the busy label while a pass runs, else the visible pane's own error, else
-// the window status (_statusMsg / _statusLevel, set through _setStatus).
+// the window status (the controller's statusText / statusLevel).
 // The panes render no messages of their own; they expose menuHint / hintText
 // properties and this window reads them. Sitting above the panes, the bar is
 // out of every popup's path (the Tools menu opens upward from the footer, the
@@ -102,15 +85,13 @@
 //
 // Menu layout: metadata actions first (Add new field, Auto track number,
 // Remove tags), then a ReplayGain submenu holding all five RG entries, then
-// Reload info. Remove tags is STAGED like everything else in this window:
-// it blanks every metadata field row (removeAllFields), stages RG clears, and
-// raises _stripAllStaged; Apply / OK then hands the selection's file paths to
-// MetadataEditor as stripAllPaths, whose write pass structurally strips MP3
-// tag blocks (deliberately overriding the ID3v1 / APE Preserve settings) and,
-// on other formats, replaces the whole property map and clears unsupported
-// and complex properties (embedded pictures included). The flag clears when
-// the pass that carried it finishes, success or not (re-invoke Remove tags to
-// retry a failure), and on Reload info, the discard-staging action.
+// Reload info. Remove tags is STAGED like everything else in this window
+// (the controller's stageStripAll); Apply / OK then hands the selection's
+// file paths to MetadataEditor as stripAllPaths, whose write pass
+// structurally strips MP3 tag blocks (deliberately overriding the ID3v1 /
+// APE Preserve settings) and, on other formats, replaces the whole property
+// map and clears unsupported and complex properties (embedded pictures
+// included).
 
 pragma ComponentBehavior: Bound
 
@@ -131,44 +112,12 @@ Window {
     // at createObject time. A VALUE capture on purpose, never a live binding:
     // the host's root.reloader tracks the ACTIVE tab, and a tab switch under
     // this non-modal window must not silently retarget the post-apply reload.
-    // Typed, so it reads back null once the tab (and with it the reloader) is
-    // destroyed.
+    // Handed to the controller once, in openFor.
     property MetadataReloader reloader: null
 
     property Item menuBlurSource: windowBody
     property int currentTab: 0   // Metadata is the default tab
 
-    // Apply state. Typed like `reloader`, for the same null-on-death read.
-    property PlaylistModel _model: null
-    property var _rows: []
-    // Durable { path, subsong } identity keys for the open-time selection (see
-    // PlaylistModel::trackKeys). _rows is only a convenience mirror of their
-    // CURRENT positions; _keys is what survives a playlist mutation.
-    property var _keys: []
-    // Unique file paths the in-flight apply actually writes (union of the two
-    // editors' edit targets), computed in _apply. The reload phase re-reads
-    // exactly these, not the whole selection: with path identity we know
-    // precisely which files changed, so a 500-track selection with one edited
-    // file re-parses one file.
-    property var _touchedPaths: []
-    // Token of our pending reloadPaths pass; _finishApply runs only when the
-    // reloader reports THIS token done (see the banner on why not refreshed()).
-    property int _reloadToken: -1
-    property bool _applying: false
-    property bool _closeAfter: false
-    // Window status for the log bar: the message and its severity (info |
-    // warning | error, the bar's level vocabulary). Always set together
-    // through _setStatus so the color can never lag the text.
-    property string _statusMsg: ""
-    property string _statusLevel: "info"
-    // What the footer's busy slot reads while _applying is up: "Applying..."
-    // for the Apply / OK sequencer, "Reloading..." for the Tools reload.
-    // _applying itself stays the single any-file-operation gate for both.
-    property string _busyText: ""
-    // Token of a pending Tools "Reload info" pass. Kept separate from
-    // _reloadToken so the shared onPathsReloaded handler routes each pass to
-    // its own finisher and the two sequencers can never complete each other.
-    property int _infoReloadToken: -1
     // Hover hint of the highlighted Tools menu item, shown in the log bar
     // while non-empty; the menu clears it on close.
     property string toolsHint: ""
@@ -223,14 +172,6 @@ Window {
         propertiesWindow.close() // -> onClosing -> destroy
     }
 
-    // Set (or clear, with an empty message) the window status shown in the
-    // log bar. Failures are errors; a pass that had nothing to act on, or a
-    // staged intent worth confirming, is a warning.
-    function _setStatus(msg, level) {
-        propertiesWindow._statusMsg = msg
-        propertiesWindow._statusLevel = level === undefined ? "info" : level
-    }
-
     // Open the Edit Value dialog for a field row: any multi-track edit, the
     // pane's explicit single-track "Edit" action, or the multiline routing
     // from an edit-in-place entry point. Feeds the dialog from the model,
@@ -269,25 +210,18 @@ Window {
     // Feed the fresh instance its selection and show it. Called by the host
     // exactly once, right after createObject; the defaults of a new instance
     // cover everything a reused window would have to reset by hand (tab,
-    // staging, status, apply bookkeeping, half-open editors).
+    // staging, status, apply bookkeeping, half-open editors). The controller
+    // is wired here, with the reloader the host set at creation, and its
+    // setPlaylist takes the identity snapshot and fills the three models.
     function openFor(model, rows) {
         if (!model || !rows || rows.length === 0) {
             propertiesWindow.destroy() // never shown; do not leak the instance
             return
         }
-        propertiesWindow._model = model
-        propertiesWindow._rows = rows.slice()
-        // The durable identity snapshot: everything after this moment addresses
-        // these tracks by (path, subsong), never by playlist position.
-        propertiesWindow._keys = model.trackKeys(rows)
-        // The RG model ingests through replayGainRows C++-to-C++: one
-        // reset, no per-row JS, snapshot semantics identical to before.
-        rgModel.setSelection(model, rows)
-        // Feed the read-only tabs their selection snapshots. Both models copy the
-        // TrackData out, so they stay valid even if the playlist selection changes
-        // while the window is open (the RG snapshot above works the same way).
-        metaModel.setSelection(model, rows)
-        detailsModel.setSelection(model, rows)
+        applyController.setModels(metaModel, rgModel, detailsModel)
+        applyController.setEditors(metaEditor, rgEditor)
+        applyController.setReloader(propertiesWindow.reloader)
+        applyController.setPlaylist(model, rows.slice())
         show()
         raise()
         requestActivate()
@@ -327,7 +261,7 @@ Window {
         sequences: [StandardKey.Cancel]
         enabled: propertiesWindow.visible
                  && WindowFocus.focusWindow === propertiesWindow
-                 && !propertiesWindow._applying
+                 && !applyController.busy
                  && !propertiesWindow._editDialogActive
                  && ((propertiesWindow.currentTab === 0
                       && metaPane.editingRow < 0)
@@ -380,179 +314,25 @@ Window {
             detailsView.forceActiveFocus()
     }
 
-    // Apply / OK commit BOTH tabs in one pass: metadata edits first, then
-    // ReplayGain, then a single reload + re-pull. The two editors are async, so
-    // this runs as a small phase sequencer chained off their applied() signals:
-    //   _apply -> [meta phase] -> _applyRgPhase -> [rg phase] -> _reloadPhase ->
-    //   reloader.pathsReloaded(_reloadToken) -> _finishApply.
-    // _anyWrote gates the reload; per-editor failures accumulate for the footer.
-    property var _pendingRgEdits: []
-    property var _metaFailed: []
-    property var _rgFailed: []
-    property bool _anyWrote: false
-    // Remove-tags staging. _stripAllStaged is the user's staged intent
-    // (raised by Tools > Remove tags, an Apply-enabler in its own right, since
-    // blanking already-blank fields stages nothing in the model); it clears
-    // when the pass that carried it finishes, and on Reload info.
-    // _pendingStripPaths is the payload of the in-flight pass, captured in
-    // _apply so _finishApply knows whether this pass carried the strip.
-    property bool _stripAllStaged: false
-    property var _pendingStripPaths: []
-
-    // Unique file paths of the open-time selection, from the durable identity
-    // keys (subsong siblings share one physical file, so dedupe). Feeds the
-    // Remove-tags strip payload and the Tools reload.
-    function _selectionPaths() {
-        var seen = ({})
-        var paths = []
-        for (var i = 0; i < propertiesWindow._keys.length; i++) {
-            var p = propertiesWindow._keys[i].path
-            if (p && seen[p] !== true) {
-                seen[p] = true
-                paths.push(p)
-            }
-        }
-        return paths
-    }
-
-    // Tools > Remove tags: stage the whole removal for review. Blanks
-    // every metadata field row (session-only customs drop), stages RG clears
-    // across all rows, and raises the strip flag that _apply converts into
-    // MetadataEditor's stripAllPaths. Nothing touches disk until Apply / OK;
-    // Cancel closes the window with it, Reload info discards it.
+    // Tools > Remove tags: stage the whole removal for review. Discards any
+    // open cell editor first (the row set may shift as session-only customs
+    // drop), then the controller blanks every metadata field row, stages RG
+    // clears across all rows and raises the strip flag. Nothing touches disk
+    // until Apply / OK; Cancel closes the window with it, Reload info
+    // discards it.
     function _removeAllTags() {
-        metaPane.cancelEdit()     // discard any open inline editor; the row set
-                                  // may shift as session-only customs drop
+        metaPane.cancelEdit()
         rgPane.closeAnyEditor()
-        metaModel.removeAllFields()
-        rgModel.clearAllReplayGain()
-        propertiesWindow._stripAllStaged = true
-        propertiesWindow._setStatus("Remove tags staged; Apply / OK writes it.", "warning")
+        applyController.stageStripAll()
     }
 
+    // Apply / OK: stage an edit the user left open in the cell, then hand
+    // the pass to the controller; finished(true) closes the window.
     function _apply(closeAfter) {
-        if (propertiesWindow._applying)
+        if (applyController.busy)
             return
-        metaPane.commitOpenEditor() // stage an edit the user left open in the cell
-        var metaEdits = metaModel.collectEdits()
-        var rgEdits = rgModel.collectEdits()
-        // The staged Remove tags resolves to the selection's unique paths
-        // HERE, at commit time, so the strip and the reload see the same set.
-        var stripPaths = propertiesWindow._stripAllStaged
-                ? propertiesWindow._selectionPaths() : []
-        if (metaEdits.length === 0 && rgEdits.length === 0
-                && stripPaths.length === 0) { // nothing staged anywhere
-            if (closeAfter)
-                propertiesWindow._closeWindow()
-            return
-        }
-        // The union of file paths this pass will actually write: both editors'
-        // edit maps carry the target path, and every strip path is written by
-        // definition, so the reload phase can re-read exactly what changed
-        // instead of force-parsing the whole selection.
-        var touched = ({})
-        var i
-        for (i = 0; i < metaEdits.length; i++)
-            touched[metaEdits[i].path] = true
-        for (i = 0; i < rgEdits.length; i++)
-            touched[rgEdits[i].path] = true
-        for (i = 0; i < stripPaths.length; i++)
-            touched[stripPaths[i]] = true
-        propertiesWindow._touchedPaths = Object.keys(touched)
-
-        propertiesWindow._closeAfter = closeAfter
-        propertiesWindow._setStatus("")
-        propertiesWindow._busyText = "Applying\u2026"
-        propertiesWindow._applying = true
-        propertiesWindow._metaFailed = []
-        propertiesWindow._rgFailed = []
-        propertiesWindow._anyWrote = false
-        propertiesWindow._pendingRgEdits = rgEdits
-        propertiesWindow._pendingStripPaths = stripPaths
-        if (metaEdits.length > 0 || stripPaths.length > 0)
-            metaEditor.apply(metaEdits, stripPaths) // -> onApplied -> _applyRgPhase
-        else
-            propertiesWindow._applyRgPhase()
-    }
-
-    function _applyRgPhase() {
-        if (propertiesWindow._pendingRgEdits.length > 0)
-            rgEditor.apply(propertiesWindow._pendingRgEdits) // -> _reloadPhase
-        else
-            propertiesWindow._reloadPhase()
-    }
-
-    function _reloadPhase() {
-        // Re-read only the files this pass wrote. reloadPaths hands back a
-        // token and signals pathsReloaded(token) when exactly that pass is done
-        // (an empty resolution still runs as an empty pass), so the sequencer
-        // can neither hang on a pass that never runs nor finish early on an
-        // unrelated pass's refreshed(). The null test matters: the owning tab
-        // (and its reloader) may have died since open, and a call into a dead
-        // reloader would throw and strand the sequencer.
-        if (propertiesWindow._anyWrote && propertiesWindow.reloader !== null)
-            propertiesWindow._reloadToken =
-                propertiesWindow.reloader.reloadPaths(propertiesWindow._touchedPaths)
-        else
-            propertiesWindow._finishApply()
-    }
-
-    function _finishApply() {
-        propertiesWindow._reloadToken = -1
-        // Re-pull fresh on-disk values into all three tabs ONLY when something
-        // actually landed. setSelection clears the metadata staging, so on a total
-        // write failure we deliberately skip it: the staged edits survive and the
-        // user can retry. (On partial success the written files refresh and the
-        // failed ones keep their prior values; the footer reports the count.)
-        if (propertiesWindow._anyWrote) {
-            // Remap the open-time identity keys to CURRENT rows: positions may
-            // have shifted since open, and the model itself may be dead (the
-            // owning tab closed, which reads as null here). Tracks that left
-            // the playlist drop out of the mapping.
-            var modelAlive = propertiesWindow._model !== null
-            var cur = modelAlive
-                    ? propertiesWindow._model.rowsForKeys(propertiesWindow._keys)
-                    : []
-            if (cur.length > 0) {
-                propertiesWindow._rows = cur
-                propertiesWindow._keys = propertiesWindow._model.trackKeys(cur)
-                rgModel.setSelection(propertiesWindow._model, cur)
-                metaModel.setSelection(propertiesWindow._model, cur)
-                detailsModel.setSelection(propertiesWindow._model, cur)
-            } else {
-                // Nothing left to re-pull from (the tracks, or the whole tab,
-                // are gone), but the writes landed on disk regardless. Fold the
-                // staged values into the panes' baselines so the dirty markers
-                // clear and the window shows what is on disk now; without this,
-                // Apply looks like it did nothing (staging dots persist) even
-                // though the files were written. Failed paths revert instead,
-                // matching what the re-pull path shows for a failed file.
-                metaModel.adoptEdits(propertiesWindow._metaFailed)
-                rgModel.adoptEdits(propertiesWindow._rgFailed)
-            }
-            // A write marks the playlist tab dirty (dataChanged -> markDirty ->
-            // debounced autosave). Force that write now so the .rwfpl cache
-            // reflects the edit immediately, not just on the debounce.
-            PlaylistTabs.flushPendingWrites()
-        }
-
-        var failed = propertiesWindow._metaFailed.concat(propertiesWindow._rgFailed)
-        if (failed.length > 0)
-            propertiesWindow._setStatus(failed.length + " file(s) could not be written.",
-                                        "error")
-        // The strip intent is consumed by the pass that carried it,
-        // success or not; a failure is reported above and Remove tags can be
-        // re-invoked. (The METADATA staging's survival on total failure is a
-        // separate mechanism and unchanged: setSelection was skipped above.)
-        if (propertiesWindow._pendingStripPaths.length > 0) {
-            propertiesWindow._stripAllStaged = false
-            propertiesWindow._pendingStripPaths = []
-        }
-        propertiesWindow._anyWrote = false
-        propertiesWindow._applying = false
-        if (propertiesWindow._closeAfter && failed.length === 0)
-            propertiesWindow._closeWindow()
-        propertiesWindow._closeAfter = false
+        metaPane.commitOpenEditor()
+        applyController.apply(closeAfter)
     }
 
     function _cancel() {
@@ -561,61 +341,13 @@ Window {
         propertiesWindow._closeWindow()
     }
 
-    // Tools "Reload info": force-re-read the selection's files from disk and
-    // re-pull all three tabs. DISCARDS staged edits by design: setSelection
-    // clears the metadata staging and resets the RG model the same way, so
-    // what the window shows afterwards is exactly what is on disk.
-    // Runs under the apply gate (_applying), so the footer, titlebar X, and
-    // panes lock identically to an Apply pass, but completes through its own
-    // token (see _infoReloadToken). A reloader dying mid-pass is covered the
-    // same way as in the apply path: its destructor flushes the pending token
-    // through onPathsReloaded, so this sequencer always finishes too.
+    // Tools "Reload info": the controller's reload pass, which locks the
+    // footer, titlebar X and panes like an Apply pass. A running scan holds
+    // it off; reloadStarting() below discards the half-open cell editors.
     function _reloadInfo() {
-        if (propertiesWindow._applying || scanController.busy)
+        if (scanController.busy)
             return
-        if (propertiesWindow.reloader === null || propertiesWindow._model === null) {
-            propertiesWindow._setStatus("Owning playlist is gone; nothing to reload.",
-                                        "warning")
-            return
-        }
-        // Unique file paths from the durable identity keys (subsong siblings
-        // share one physical file; the reloader is path-directed, so dedupe).
-        var paths = propertiesWindow._selectionPaths()
-        if (paths.length === 0)
-            return
-        // Discard any half-open cell editor first, like a tab switch does;
-        // the data underneath is about to be replaced. The staged Remove tags
-        // is discarded with the rest of the staging: reload is the
-        // take-disk-truth action.
-        metaPane.closeEdit()
-        rgPane.closeAnyEditor()
-        propertiesWindow._stripAllStaged = false
-        propertiesWindow._setStatus("")
-        propertiesWindow._busyText = "Reloading\u2026"
-        propertiesWindow._applying = true
-        propertiesWindow._infoReloadToken =
-                propertiesWindow.reloader.reloadPaths(paths)
-    }
-
-    function _finishReload() {
-        propertiesWindow._infoReloadToken = -1
-        // Same remap as _finishApply: positions may have shifted since open,
-        // and the model may have died while the pass ran (null then).
-        var cur = propertiesWindow._model !== null
-                ? propertiesWindow._model.rowsForKeys(propertiesWindow._keys)
-                : []
-        if (cur.length > 0) {
-            propertiesWindow._rows = cur
-            propertiesWindow._keys = propertiesWindow._model.trackKeys(cur)
-            rgModel.setSelection(propertiesWindow._model, cur)
-            metaModel.setSelection(propertiesWindow._model, cur)
-            detailsModel.setSelection(propertiesWindow._model, cur)
-        } else {
-            // Nothing left to re-pull from; the panes keep showing the
-            // open-time snapshot, staged edits included.
-            propertiesWindow._setStatus("Tracks are no longer in the playlist.", "warning")
-        }
-        propertiesWindow._applying = false
+        applyController.reloadInfo()
     }
 
     // Both write editors get the playback link so apply() can stop the
@@ -652,50 +384,29 @@ Window {
             if (results.length > 0)
                 rgModel.stageScanResults(results)
             if (failedPaths.length > 0)
-                propertiesWindow._setStatus(failedPaths.length + " file(s) could not be scanned.",
-                                            "error")
+                applyController.setStatus(
+                    failedPaths.length + " file(s) could not be scanned.", "error")
         }
     }
 
-    Connections {
-        target: metaEditor
-        function onApplied(okCount, failedPaths) {
-            propertiesWindow._metaFailed = failedPaths
-            if (okCount > 0)
-                propertiesWindow._anyWrote = true
-            propertiesWindow._applyRgPhase()
+    // The apply and reload sequencer (see its banner). The window answers
+    // its three signals with what only the window can do.
+    PropertiesApplyController {
+        id: applyController
+        onFinished: function (closeRequested) {
+            if (closeRequested)
+                propertiesWindow._closeWindow()
         }
-    }
-
-    Connections {
-        target: rgEditor
-        function onApplied(okCount, failedPaths) {
-            propertiesWindow._rgFailed = failedPaths
-            if (okCount > 0)
-                propertiesWindow._anyWrote = true
-            propertiesWindow._reloadPhase()
+        // The data underneath is about to be replaced: discard any half-open
+        // cell editor first, like a tab switch does.
+        onReloadStarting: {
+            metaPane.closeEdit()
+            rgPane.closeAnyEditor()
         }
-    }
-
-    Connections {
-        target: propertiesWindow.reloader
-        enabled: propertiesWindow.reloader !== null
-        ignoreUnknownSignals: true
-        function onPathsReloaded(token) {
-            // Only OUR pass completes a sequencer, and each token routes to
-            // its own finisher (apply vs Tools reload; the tokens come from
-            // the same reloader counter, so they can never collide).
-            // refreshed() is not used here on purpose: it fires for any pass
-            // that changed something and stays silent for one that did not
-            // (see the banner). If the reloader dies while we wait, its
-            // DESTRUCTOR flushes the pending tokens through this same handler
-            // (QObject::destroyed cannot be relied on from QML Connections),
-            // so both sequencers always finish.
-            if (propertiesWindow._applying && token === propertiesWindow._reloadToken)
-                propertiesWindow._finishApply()
-            else if (propertiesWindow._applying && token === propertiesWindow._infoReloadToken)
-                propertiesWindow._finishReload()
-        }
+        // A write marks the playlist tab dirty (dataChanged -> markDirty ->
+        // debounced autosave). Force that write now so the .rwfpl cache
+        // reflects the edit immediately, not just on the debounce.
+        onFilesWritten: PlaylistTabs.flushPendingWrites()
     }
 
     Rectangle {
@@ -730,7 +441,7 @@ Window {
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
                     text: {
-                        var n = propertiesWindow._rows.length
+                        var n = applyController.rowCount
                         return n > 0 ? ("Properties - " + n + (n === 1 ? " item" : " items"))
                                      : "Properties"
                     }
@@ -744,7 +455,7 @@ Window {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
-                    enabled: !propertiesWindow._applying
+                    enabled: !applyController.busy
                     onClicked: propertiesWindow._cancel()
                 }
             }
@@ -839,10 +550,11 @@ Window {
             // Priority, top to bottom: a menu hover hint (Tools, or the
             // VISIBLE pane's right-click menu), the busy label, the visible
             // pane's own error, the window status. The pane hints clear
-            // themselves on menu close and the busy label is gated by
-            // _applying, so each tenant yields as soon as it is stale; only the
-            // window status persists until the next _setStatus. Hints and the
-            // busy label read as info; the status carries its own level.
+            // themselves on menu close and the busy label is gated by the
+            // controller's busy, so each tenant yields as soon as it is
+            // stale; only the window status persists until the next
+            // setStatus. Hints and the busy label read as info; the status
+            // carries its own level.
             PropertiesLogBar {
                 Layout.fillWidth: true
                 Layout.leftMargin: 14
@@ -856,14 +568,14 @@ Window {
                     propertiesWindow.currentTab === 0 ? metaPane.hintText : ""
                 text: propertiesWindow.toolsHint.length > 0 ? propertiesWindow.toolsHint
                     : _paneHint.length > 0 ? _paneHint
-                    : propertiesWindow._applying ? propertiesWindow._busyText
+                    : applyController.busy ? applyController.busyText
                     : _paneError.length > 0 ? _paneError
-                    : propertiesWindow._statusMsg
+                    : applyController.statusText
                 level: (propertiesWindow.toolsHint.length > 0
                         || _paneHint.length > 0
-                        || propertiesWindow._applying) ? "info"
+                        || applyController.busy) ? "info"
                      : _paneError.length > 0 ? "error"
-                     : propertiesWindow._statusLevel
+                     : applyController.statusLevel
             }
 
             // ----- tab content ---------------------------------------------
@@ -880,7 +592,7 @@ Window {
                     anchors.topMargin: 10
                     anchors.bottomMargin: 6
                     visible: propertiesWindow.currentTab === 0
-                    enabled: !propertiesWindow._applying
+                    enabled: !applyController.busy
                     model: metaModel
                     onEditFieldRequested: function (row) { propertiesWindow._openEditDialog(row) }
                     onAddFieldRequested: function () { propertiesWindow._openAddDialog() }
@@ -909,16 +621,16 @@ Window {
                     anchors.topMargin: 10
                     anchors.bottomMargin: 6
                     visible: propertiesWindow.currentTab === 2
-                    enabled: !propertiesWindow._applying && !scanController.busy
+                    enabled: !applyController.busy && !scanController.busy
                     controller: AudioController
                     model: rgModel
 
                     onScanRequested: function (items, mode) {
-                        propertiesWindow._setStatus("")
+                        applyController.setStatus("")
                         scanController.scan(items, mode)
                     }
                     onScanNoop: function (message) {
-                        propertiesWindow._setStatus(message, "warning")
+                        applyController.setStatus(message, "warning")
                     }
                 }
             }
@@ -937,7 +649,7 @@ Window {
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
                     label: "Tools"
-                    enabled: !propertiesWindow._applying && !scanController.busy
+                    enabled: !applyController.busy && !scanController.busy
                     onClicked: toolsMenu.open()
 
                     // The window-scoped Tools menu (footer left). Parented to
@@ -1048,7 +760,7 @@ Window {
 
                     ToolDialogButton {
                         label: "Cancel"
-                        enabled: !propertiesWindow._applying
+                        enabled: !applyController.busy
                         onClicked: propertiesWindow._cancel()
                     }
                     ToolDialogButton {
@@ -1057,15 +769,15 @@ Window {
                         // Remove tags on already-blank fields stages nothing in
                         // either model, yet the strip still has work to do.
                         enabled: (metaModel.dirty || rgModel.dirty
-                                  || propertiesWindow._stripAllStaged)
-                                 && !propertiesWindow._applying
+                                  || applyController.stripStaged)
+                                 && !applyController.busy
                         onClicked: propertiesWindow._apply(false)
                     }
                     ToolDialogButton {
                         id: okButton
                         label: "OK"
                         accent: true
-                        enabled: !propertiesWindow._applying
+                        enabled: !applyController.busy
                         onClicked: propertiesWindow._apply(true)
                     }
                 }
@@ -1117,7 +829,7 @@ Window {
     // Resize edges: this window is frameless on every platform, so the grips
     // are unconditional. Declared after windowBody so they sit above the scan
     // and Edit Value overlays; resizing during a write or scan is harmless
-    // (both overlays keep blocking the body), so no _applying gate. topInset
+    // (both overlays keep blocking the body), so no busy gate. topInset
     // keeps the top strip off the title bar's move zone.
     WindowResizeGrips {
         target: propertiesWindow

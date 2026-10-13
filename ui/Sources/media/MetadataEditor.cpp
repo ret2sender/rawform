@@ -302,7 +302,7 @@ MetadataEditor::WriteResult writeOne(const Job& j) {
 
 }  // namespace
 
-MetadataEditor::MetadataEditor(QObject* parent) : QObject(parent) {
+MetadataEditor::MetadataEditor(QObject* parent) : MetadataWritePort(parent) {
     QObject::connect(&m_watcher, &QFutureWatcher<WriteResult>::finished,
                      this, &MetadataEditor::onFinished);
 }

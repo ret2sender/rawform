@@ -85,7 +85,7 @@ ReloadResult reloadOne(const ReloadItem& item) {
 MetadataReloader::MetadataReloader(PlaylistModel* model,
                                    QItemSelectionModel* selection,
                                    QObject* parent)
-    : QObject(parent), m_model(model), m_selection(selection) {
+    : ReloadPort(parent), m_model(model), m_selection(selection) {
     // Debounce so a held arrow key (selection changing every keystroke) settles
     // into ONE pass instead of dispatching pool work on every step.
     m_debounce.setSingleShot(true);

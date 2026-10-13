@@ -63,6 +63,7 @@
 #pragma once
 
 #include "media/TrackData.h"
+#include "metadata/ApplyPorts.h" // ReloadPort, the base
 
 #include <QDateTime>
 #include <QFutureWatcher>
@@ -105,7 +106,9 @@ struct ReloadResult {
     TrackData     data;
 };
 
-class MetadataReloader : public QObject {
+/// Also the ReloadPort the Properties apply sequencer drives: the port
+/// declares reloadPaths()'s contract and the pathsReloaded() signal.
+class MetadataReloader : public ReloadPort {
     Q_OBJECT
     /// Nameable so the views can type the handles they keep (a typed object
     /// property reads back null once the tab's instance dies), never created
@@ -155,7 +158,7 @@ public:
     /// token instead of refreshed() is what makes the window's apply sequencer
     /// safe: refreshed() is emitted only when something changed and can belong
     /// to an unrelated conditional pass that happened to be in flight.
-    Q_INVOKABLE int reloadPaths(const QStringList& paths);
+    Q_INVOKABLE int reloadPaths(const QStringList& paths) override;
 
     /// Load-time cache validation: stat the WHOLE playlist (conditional), re-read
     /// changed files, and flag missing/unreadable rows as unavailable. Call once
@@ -167,11 +170,6 @@ signals:
     /// Emitted once per pass, after any rows were re-read or flagged, so the
     /// metadata pane (which snapshots the selection's values) can re-aggregate.
     void refreshed();
-
-    /// Emitted when the reloadPaths() pass identified by @p token has finished,
-    /// whether or not anything changed (unlike refreshed). The Properties
-    /// window's apply sequencer waits on its own token here.
-    void pathsReloaded(int token);
 
     void busyChanged();
 

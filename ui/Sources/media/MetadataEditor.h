@@ -80,6 +80,7 @@
 #include <QStringList>
 #include <QVariantList>
 
+#include "metadata/ApplyPorts.h"       // MetadataWritePort, the base
 #include "playback/AudioController.h"  // complete type: the audio Q_PROPERTY,
                                        // which moc must see fully defined to
                                        // build its meta-type (ReplayGainEditor
@@ -87,7 +88,9 @@
 
 namespace rawform {
 
-class MetadataEditor : public QObject {
+/// The MetadataWritePort the Properties apply sequencer drives; the port
+/// declares apply()'s contract and the applied() completion signal.
+class MetadataEditor : public MetadataWritePort {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
@@ -129,14 +132,11 @@ public:
     /// Always ends with an applied() emission so the caller's sequencer can chain
     /// uniformly even when nothing was writable.
     Q_INVOKABLE void apply(const QVariantList& edits,
-                           const QStringList& stripAllPaths = {});
+                           const QStringList& stripAllPaths = {}) override;
 
 signals:
     void busyChanged();
     void audioChanged();
-    /// GUI thread, when the write pass finishes. @p okCount files were written;
-    /// @p failedPaths could not be (read-only, unsupported format, gone).
-    void applied(int okCount, const QStringList& failedPaths);
 
 private:
     void onFinished();

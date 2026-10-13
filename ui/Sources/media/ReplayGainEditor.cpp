@@ -142,7 +142,7 @@ ReplayGainEditor::WriteResult writeOne(const Job& j) {
 
 }  // namespace
 
-ReplayGainEditor::ReplayGainEditor(QObject* parent) : QObject(parent) {
+ReplayGainEditor::ReplayGainEditor(QObject* parent) : ReplayGainWritePort(parent) {
     QObject::connect(&m_watcher, &QFutureWatcher<WriteResult>::finished,
                      this, &ReplayGainEditor::onFinished);
 }

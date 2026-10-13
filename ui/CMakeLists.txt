@@ -270,6 +270,11 @@ set(APP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ReplayGainRowsModel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/MetadataReloader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/MetadataReloader.h
+        # The Properties window's apply / reload sequencer and the port
+        # bases its collaborators (the two editors, the reloader) derive from.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ApplyPorts.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesApplyController.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesApplyController.h
 
         # playlist/: playlist model, .rwfpl / .m3u file+store, tab session manager
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
@@ -760,6 +765,46 @@ if(RAWFORM_BUILD_TESTS)
             yaml-cpp::yaml-cpp
     )
     rawform_add_ui_test(playback_queue rawform_queue_test)
+
+    # ------------------------------------------------------------------
+    # The Properties apply-sequencer test: every phase of an Apply / OK
+    # and of Tools > Reload info, driven by stand-ins for the two editors
+    # and the reloader (the ApplyPorts bases) that touch no file, over the
+    # real pane models and PlaylistModel. Same spine as the queue test;
+    # Qt-Quick-free, filesystem-free, no TagLib.
+    # ------------------------------------------------------------------
+    add_executable(rawform_apply_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PropertiesApplyControllerTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ApplyPorts.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesApplyController.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesApplyController.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/MetadataModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/MetadataModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesMetadataModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/PropertiesMetadataModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ReplayGainRowsModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ReplayGainRowsModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/PatternEvaluator.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
+    )
+    target_include_directories(rawform_apply_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media
+    )
+    target_link_libraries(rawform_apply_test PRIVATE
+            Qt6::Core
+            Qt6::Qml
+            yaml-cpp::yaml-cpp
+    )
+    rawform_add_ui_test(properties_apply rawform_apply_test)
 endif()
 
 # ---------------------------------------------------------------------------
