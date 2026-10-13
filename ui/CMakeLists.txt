@@ -106,7 +106,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../audio
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Concurrent Core Gui Quick QuickControls2 Svg Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Concurrent Core Gui Quick QuickControls2 Svg)
 
 # ---------------------------------------------------------------------------
 # yaml-cpp: the format of every per-user store under userConfigDir()
@@ -537,7 +537,6 @@ target_link_libraries(rawform PRIVATE
         # this the dev build works (plugin found in the Qt install) and the
         # deployed build silently shows no window icon.
         Qt6::Svg
-        Qt6::Widgets
         yaml-cpp::yaml-cpp
         TagLib::tag
         rawform_audio
