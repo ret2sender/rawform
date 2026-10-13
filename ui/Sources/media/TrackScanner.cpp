@@ -53,20 +53,11 @@ namespace {
 
 // --- Format gating ---------------------------------------------------------
 
-/// Audio extensions we add to a playlist: everything TagLib reads, plus ac3/dts,
-/// which TagLib cannot parse but the engine reads through its FFmpeg metadata
-/// probe (TrackReader's reader cascade) and decodes through its FFmpeg
-/// fallback, so they import and play on an FFmpeg-enabled build. Lower-case, no
-/// dot.
 bool isAudioSuffix(const QString& suffixLower) {
-    static const QSet<QString> kAudio = {
-        QStringLiteral("flac"), QStringLiteral("mp3"),  QStringLiteral("wav"),
-        QStringLiteral("ogg"),  QStringLiteral("oga"),  QStringLiteral("opus"),
-        QStringLiteral("m4a"),  QStringLiteral("mp4"),  QStringLiteral("aac"),
-        QStringLiteral("wv"),   QStringLiteral("ape"),  QStringLiteral("wma"),
-        QStringLiteral("aiff"), QStringLiteral("aif"),  QStringLiteral("mpc"),
-        QStringLiteral("tta"),  QStringLiteral("ac3"),  QStringLiteral("dts"),
-    };
+    static const QSet<QString> kAudio = [] {
+        const QStringList list = TrackScanner::audioSuffixes();
+        return QSet<QString>(list.cbegin(), list.cend());
+    }();
     return kAudio.contains(suffixLower);
 }
 
@@ -195,6 +186,22 @@ TrackScanner::TrackScanner(QObject* parent)
     m_flushTimer.setSingleShot(true);
     m_flushTimer.setInterval(33); // ~1 frame: coalesce bursts into one insertion
     connect(&m_flushTimer, &QTimer::timeout, this, &TrackScanner::flush);
+}
+
+/// Everything TagLib reads (Speex through its Ogg reader), plus ac3/dts,
+/// which TagLib cannot parse but the engine reads through its FFmpeg metadata
+/// probe (TrackReader's reader cascade) and decodes through its FFmpeg
+/// fallback, so they import and play on an FFmpeg-enabled build.
+QStringList TrackScanner::audioSuffixes() {
+    return {
+        QStringLiteral("flac"), QStringLiteral("mp3"),  QStringLiteral("wav"),
+        QStringLiteral("ogg"),  QStringLiteral("oga"),  QStringLiteral("opus"),
+        QStringLiteral("spx"),  QStringLiteral("m4a"),  QStringLiteral("mp4"),
+        QStringLiteral("aac"),  QStringLiteral("wv"),   QStringLiteral("ape"),
+        QStringLiteral("wma"),  QStringLiteral("aiff"), QStringLiteral("aif"),
+        QStringLiteral("mpc"),  QStringLiteral("tta"),  QStringLiteral("ac3"),
+        QStringLiteral("dts"),
+    };
 }
 
 void TrackScanner::scan(const QList<QUrl>& urls, int at) {

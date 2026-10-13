@@ -271,7 +271,7 @@ Item {
 
     // Stroke overlay: drawn last, on top of the content, so the rounded border
     // is never erased at the corners. Transparent fill; hover animates the
-    // alpha 10% -> 100%, matching PlaylistView.
+    // alpha 10% -> 25%, matching PlaylistView.
     Rectangle {
         id: strokeOverlay
         anchors.fill: parent

@@ -1,0 +1,5 @@
+<!-- The combo box indicator: an up and a down chevron, 12 x 18. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="12" height="18" viewBox="0 0 12 18">
+  <path fill="none" stroke="#d0d0d0" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round" d="M1.5 7 6 2.5 10.5 7M1.5 11 6 15.5 10.5 11"/>
+</svg>

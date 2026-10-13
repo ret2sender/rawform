@@ -464,6 +464,7 @@ qt_add_qml_module(rawform
         Sources/fonts/Inter-Italic-VariableFont_opsz,wght.ttf
         Sources/fonts/JetBrainsMono-VariableFont_wght.ttf
         Sources/fonts/JetBrainsMono-Italic-VariableFont_wght.ttf
+        Sources/icons/app/dialogs/double_arrow.svg
         Sources/icons/app/dialogs/menu_arrow.svg
         Sources/icons/app/dialogs/tool_dialog_close_x.svg
         Sources/icons/app/track_controls/stop.svg

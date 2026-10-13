@@ -320,6 +320,7 @@ Item {
                 Repeater {
                     model: ["Track Gain", "Album Gain", "Track Peak", "Album Peak"]
                     delegate: Item {
+                        id: headerCell
                         required property string modelData
                         width: pane._numW
                         height: 26
@@ -327,7 +328,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 10
                             anchors.verticalCenter: parent.verticalCenter
-                            text: parent.modelData
+                            text: headerCell.modelData
                             color: Theme.textMuted
                             font.family: pane.uiFont
                             font.pixelSize: Theme.fontSizeBody
@@ -619,6 +620,7 @@ Item {
     // A read-only Summary row: label left, value right-aligned under Track Gain.
     // -----------------------------------------------------------------------
     component SummaryRow: Item {
+        id: summaryRow
         property string label: ""
         property string value: ""
         implicitHeight: 24
@@ -626,7 +628,7 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: 4
             anchors.verticalCenter: parent.verticalCenter
-            text: parent.label
+            text: summaryRow.label
             color: Theme.textPrimary
             font.family: pane.uiFont
             font.pixelSize: Theme.fontSizeBody
@@ -635,7 +637,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: pane._numW * 3 + 10
             anchors.verticalCenter: parent.verticalCenter
-            text: parent.value
+            text: summaryRow.value
             color: "#D6D6D6"
             font.family: pane.uiFont
             font.pixelSize: Theme.fontSizeBody

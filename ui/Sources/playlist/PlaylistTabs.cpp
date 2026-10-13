@@ -466,9 +466,13 @@ void PlaylistTabs::insertTab(Tab* tab, int at) {
     beginInsertRows(QModelIndex(), at, at);
     m_tabs.insert(at, tab);
     endInsertRows();
-    // Inserting before the current tab shifts its index right by one.
-    if (m_current >= at)
-        ++m_current; // no signal: the active tab object didn't change
+    // Inserting before the current tab shifts its index right by one. The
+    // active tab object is unchanged, but its index is what the tab strip's
+    // highlight reads, so the index signal goes out.
+    if (m_current >= at) {
+        ++m_current;
+        emit currentIndexChanged();
+    }
     emit countChanged();
     writeSessionManifest();
 }
@@ -1356,21 +1360,30 @@ void PlaylistTabs::restoreSession() {
         return;
     }
 
+    // The active tab is the manifest ENTRY at the saved index, found again
+    // by name in the restored order: an entry whose live file vanished
+    // drops out above, and a positional restore would then land one tab
+    // off. A saved index with no surviving entry falls back to the first.
+    const QString activeName = (savedActive >= 0 && savedActive < saved.size())
+                                   ? saved.at(savedActive) : QString();
+    int restoredActive = 0;
     for (const QString& f : ordered) {
         if (f == kQueueSentinel) {
             // The queue tab re-enters the strip at the position it was left.
             insertTab(m_queueTab, static_cast<int>(m_tabs.size()));
             emit queueVisibleChanged();
-            continue;
+        } else {
+            const QString path = dir + QLatin1Char('/') + f;
+            Tab* tab = makeTab(QStringLiteral("…")); // provisional; real title from META
+            tab->livePath = path;                    // adopt the existing live file
+            const int at = static_cast<int>(m_tabs.size());
+            insertTab(tab, at);
+            loadInto(tab, path, /*materializeCopy*/ false, /*adoptStoredTitle*/ true);
         }
-        const QString path = dir + QLatin1Char('/') + f;
-        Tab* tab = makeTab(QStringLiteral("…")); // provisional; real title from META
-        tab->livePath = path;                    // adopt the existing live file
-        const int at = static_cast<int>(m_tabs.size());
-        insertTab(tab, at);
-        loadInto(tab, path, /*materializeCopy*/ false, /*adoptStoredTitle*/ true);
+        if (!activeName.isEmpty() && f == activeName)
+            restoredActive = static_cast<int>(m_tabs.size()) - 1;
     }
-    setCurrentIndex(qBound(0, savedActive, static_cast<int>(m_tabs.size()) - 1));
+    setCurrentIndex(qBound(0, restoredActive, static_cast<int>(m_tabs.size()) - 1));
 
     m_restoring = false;
     writeSessionManifest(); // settle the manifest to the restored state

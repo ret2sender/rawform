@@ -391,9 +391,9 @@ Item {
     // the ShortcutOverride phase, before focus-item key delivery, so Escape
     // rides the proven idiom. Enabled ONLY while the table itself holds active
     // focus, which (a) keeps it from swallowing the Escape that cancels a tab
-    // rename or a dialog editor, and (b) guarantees at most one of the live
-    // per-tab PlaylistView instances arms this sequence at a time (two enabled
-    // matches would be ambiguous and Qt would fire neither's onActivated).
+    // rename or a dialog editor, and (b) keeps this sequence disarmed while
+    // another window's Escape is live (two enabled matches would be
+    // ambiguous and Qt would fire neither's onActivated).
     // onActivatedAmbiguously covers the one legal overlap, the log console's
     // own Escape-to-close while the table is focused: both ambiguous handlers
     // run, so the console still closes and the selection clears with it.
@@ -1223,7 +1223,7 @@ Item {
     // The rounded frame. The content sits inside, rounded and clipped; the
     // 1px stroke is drawn LAST as a sibling overlay on top of the content, so
     // opaque cells (e.g. the header) can never paint over the corner arc.
-    // 10% opacity at rest, animating to 100% on hover over the whole area.
+    // 10% opacity at rest, animating to 25% on hover over the whole area.
     Item {
         id: playlistFrame
         anchors.fill: parent
@@ -1596,9 +1596,9 @@ Item {
                     // Ctrl/Cmd+A selects all; Delete/Backspace removes the
                     // selection (Backspace is the "Delete" key on macOS).
                     // Enter also reveals an off-screen current row;
-                    // Ctrl/Cmd+F reveals the playing track, switching to its
+                    // Ctrl/Cmd+T reveals the playing track, switching to its
                     // owning tab first when needed;
-                    // Ctrl/Cmd+Shift+F centers the selected tracks' area.
+                    // Ctrl/Cmd+Shift+T centers the selected tracks' area.
                     // Left / Right (no Ctrl) seek playback by seekStepSeconds;
                     // the accumulation and rate limiting of a held key live in
                     // the controller, which also makes them no-ops with no

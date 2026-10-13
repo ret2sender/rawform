@@ -45,7 +45,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 
-Item {
+QtObject {
     id: store
 
     // Hard cap on retained lines; the console shows the tail, older lines drop

@@ -45,7 +45,7 @@
 // since nothing would be matched against them. The first typed term rebuilds
 // them, one window later.
 //
-// The search set (R1 default): the Filter's valid entries, or, when the Filter
+// The search set: the Filter's valid entries, or, when the Filter
 // is empty, the model's VISIBLE columns in visual order, native fields as
 // themselves and custom columns as their patterns. A Filter with entries but
 // none valid yields an empty set, and an empty set means "no search in
@@ -175,7 +175,7 @@ private:
     /// validation context). One pass over the model.
     void refreshExtraTagKeys();
 
-    /// The R1 default search set: the model's visible columns, in visual
+    /// The default search set: the model's visible columns, in visual
     /// order, custom columns as their patterns.
     [[nodiscard]] QList<search::Searchable> visibleColumnSet() const;
 

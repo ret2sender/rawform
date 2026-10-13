@@ -558,6 +558,7 @@ Item {
 
                 // Toolbar: Copy / Paste + selection / error hint.
                 component MiniButton: Rectangle {
+                    id: miniButton
                     property string label: ""
                     property bool on: true
                     signal clicked()
@@ -566,7 +567,7 @@ Item {
                     border.color: Theme.border; border.width: 1
                     opacity: on ? 1 : 0.5
                     Text {
-                        id: mbText; anchors.centerIn: parent; text: parent.label
+                        id: mbText; anchors.centerIn: parent; text: miniButton.label
                         color: Theme.textSecondary
                         font.family: dlg.uiFont
                         font.pixelSize: Theme.fontSizeSmall

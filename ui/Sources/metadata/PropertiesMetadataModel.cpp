@@ -89,12 +89,6 @@ QString multipleMarker() {
 // while keeping the worst-case layout cost trivial.
 constexpr qsizetype kDisplayCapChars = 2048;
 
-// U+2026 HORIZONTAL ELLIPSIS, built from a QChar so the source stays pure ASCII
-// (same convention as the guillemet marker above).
-QChar displayEllipsis() {
-    return QChar(0x2026);
-}
-
 // Cap a single display value. Used for the uniform branch of collapseList (a
 // selection can agree on a huge value, e.g. a shared album-wide log tag; agreeing
 // does not make it renderable) and for any other one-value display surface.
@@ -102,7 +96,7 @@ QString capDisplay(const QString& s) {
     if (s.size() <= kDisplayCapChars)
         return s;
     QString out = s.left(kDisplayCapChars);
-    out.append(displayEllipsis());
+    out.append(u'…');
     return out;
 }
 
@@ -287,7 +281,7 @@ QString PropertiesMetadataModel::collapseList(const QStringList& perTrack, bool&
     out.reserve(kDisplayCapChars + 2);
     for (qsizetype i = 0; i < perTrack.size(); ++i) {
         if (out.size() >= kDisplayCapChars) {
-            out.append(displayEllipsis()); // more entries remain past the cap
+            out.append(u'…'); // more entries remain past the cap
             return out;
         }
         if (i > 0)
@@ -296,7 +290,7 @@ QString PropertiesMetadataModel::collapseList(const QStringList& perTrack, bool&
         const qsizetype room = kDisplayCapChars - out.size();
         if (v.size() > room) {
             out += QStringView{ v }.left(room);
-            out.append(displayEllipsis());
+            out.append(u'…');
             return out;
         }
         out += v;
@@ -647,7 +641,7 @@ void PropertiesMetadataModel::stageFieldValues(const QString& key, const QString
     const int n = static_cast<int>(m_selection.size());
     if (perTrackValues.size() != n) // contract: exactly one value per selected track
         return;
-    if (rowForKey(key) < 0) // only known field/custom rows are stageable in 2b-i
+    if (rowForKey(key) < 0) // only known field/custom rows are stageable
         return;
     QStringList newList;
     newList.reserve(perTrackValues.size());

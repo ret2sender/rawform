@@ -115,10 +115,9 @@ Window {
     // open combo popup consumes Escape itself (CloseOnEscape) before this
     // can match, so a dropdown never falls through to a close.
     //
-    // The visible && strict-focus gate, doubly load-bearing here. This
-    // window is a hide()-reused instance AND there is one per live
-    // PlaylistView (per tab), so without the gate several forever-enabled
-    // copies of this shortcut sit in Qt's shortcut map at once; a
+    // The visible && strict-focus gate, load-bearing here. This window is a
+    // hide()-reused instance, so without the gate a forever-enabled copy of
+    // this shortcut sits in Qt's shortcut map while the window is hidden; a
     // still-enabled shortcut in a HIDDEN window keeps matching, every Escape
     // anywhere goes ambiguous (Qt fires neither onActivated, rotating
     // activatedAmbiguously instead), and other windows' Escape reads as dead
@@ -270,8 +269,7 @@ Window {
     // on DOUBLE-CLICK, committing on editing-finished and discarding on Esc. A
     // single click is forwarded as rowClicked (the row uses it for selection).
     // Self-contained, it references no outer ids (the font family is passed in),
-    // reused by both the Name and Pattern cells. Moved here with the window: it
-    // was used nowhere else in PlaylistView.
+    // reused by both the Name and Pattern cells.
     // -----------------------------------------------------------------------
     component EditableCell: Item {
         id: editableCell

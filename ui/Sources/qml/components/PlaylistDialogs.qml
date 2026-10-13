@@ -66,8 +66,13 @@ Item {
     FileDialog {
         id: addFilesDialog
         fileMode: FileDialog.OpenFiles
+        // The audio list is the scanner's own, so the filter can never drift
+        // from what a scan admits; the playlist suffixes are the two it reads.
         nameFilters: [
-            "Audio & playlists (*.flac *.mp3 *.wav *.ogg *.oga *.opus *.m4a *.mp4 *.aac *.wv *.ape *.wma *.aiff *.aif *.mpc *.tta *.ac3 *.dts *.m3u *.m3u8)",
+            "Audio & playlists ("
+                + TrackScanner.audioSuffixes().map(function (s) { return "*." + s })
+                                              .join(" ")
+                + " *.m3u *.m3u8)",
             "All files (*)"
         ]
         title: "Add files"

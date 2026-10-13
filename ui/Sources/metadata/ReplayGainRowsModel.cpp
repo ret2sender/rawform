@@ -34,6 +34,7 @@
 #include <QSet>
 #include <QVariantMap>
 
+#include <algorithm> // std::min, std::max
 #include <cmath>
 
 namespace rawform {

@@ -1874,6 +1874,8 @@ void AudioController::persistPlaybackSettingsNow() {
     content += "# output_device: persistent device id to pin output to; empty follows the system default.\n";
     content += "# output_device_name: the pinned device's display name, for showing it while disconnected.\n";
     content += "# replaygain_scan_skip_existing: skip files/albums with RG info when scanning.\n";
+    content += "# bit_perfect: true switches the device to the track's rate when it\n";
+    content += "#              can clock it; false always resamples.\n";
     content += out.c_str();
     content += '\n';
 

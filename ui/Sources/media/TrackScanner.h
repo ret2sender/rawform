@@ -83,6 +83,10 @@ public:
     /// contents are merged in (deduped).
     Q_INVOKABLE void scan(const QList<QUrl>& urls, int at = -1);
 
+    /// The audio file suffixes a scan admits (lower-case, no dot), the one
+    /// list behind both the scanner's filter and the Add files dialog's.
+    Q_INVOKABLE static QStringList audioSuffixes();
+
 signals:
     /// A request actually began (after any queue wait), so the receiver can
     /// resolve @p requestedAt against the model's current rowCount.

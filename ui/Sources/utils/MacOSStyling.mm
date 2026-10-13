@@ -169,8 +169,7 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
                               QString::fromNSString(action));
 }
 
-- (void)onWillEnterFullScreen:(NSNotification*)notification {
-    (void)notification;
+- (void)onWillEnterFullScreen:(__unused NSNotification*)notification {
     // Capture the true windowed frame BEFORE the transition, while the window is
     // still windowed. We stamp this exact frame back on exit so the window
     // cannot drift shorter on each fullscreen round trip.
@@ -178,8 +177,7 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
     _haveWindowedFrame = YES;
 }
 
-- (void)onEnterFullScreen:(NSNotification*)notification {
-    (void)notification;
+- (void)onEnterFullScreen:(__unused NSNotification*)notification {
     // No title bar exists in fullscreen, so drop the QML content offset; leaving
     // it at the windowed height would shift the content up by a title-bar strip
     // and leave a matching gap at the bottom of the screen.
@@ -187,8 +185,7 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
         _quickWindow->setProperty("nativeTitleBarHeight", 0);
 }
 
-- (void)onExitFullScreen:(NSNotification*)notification {
-    (void)notification;
+- (void)onExitFullScreen:(__unused NSNotification*)notification {
     // Defer one runloop pass: Qt runs its own post-fullscreen geometry update on
     // this same notification, and doing our work inline races it (the race that
     // would shrink the window on each cycle). On the next pass the style mask
@@ -199,8 +196,7 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
                         waitUntilDone:NO];
 }
 
-- (void)onDeminiaturize:(NSNotification*)notification {
-    (void)notification;
+- (void)onDeminiaturize:(__unused NSNotification*)notification {
     [self applyTitleBarStyling];
 }
 

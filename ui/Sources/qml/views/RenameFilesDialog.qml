@@ -573,10 +573,8 @@ Window {
         }
     }
 
-    // Resize edges, from the shared component (this dialog's private grips
-    // were the first in the app and moved to WindowResizeGrips when the main
-    // window and Properties adopted them). topInset keeps the top strip off
-    // the title bar's move zone.
+    // Resize edges, from the shared component. topInset keeps the top strip
+    // off the title bar's move zone.
     WindowResizeGrips {
         target: renameDialog
         topInset: 40

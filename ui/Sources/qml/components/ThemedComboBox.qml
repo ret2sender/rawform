@@ -46,7 +46,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Controls.impl
 import com.rawform.app
 
 ComboBox {
@@ -87,13 +86,14 @@ ComboBox {
         verticalAlignment: Text.AlignVCenter
     }
 
-    // Basic's own arrow asset, recolored; the impl import exists for this and is the
-    // one Basic itself uses.
-    indicator: ColorImage {
+    // The app's own arrow glyph (Theme.textSecondary in the SVG), rasterized
+    // at the logical size times the device pixel ratio like every AppIcon.
+    indicator: AppIcon {
         x: control.width - width - control.padding
         y: control.topPadding + (control.availableHeight - height) / 2
-        color: Theme.textSecondary
-        source: "qrc:/qt-project.org/imports/QtQuick/Controls/Basic/images/double-arrow.png"
+        iconWidth: 12
+        iconHeight: 18
+        source: "../../icons/app/dialogs/double_arrow.svg"
         opacity: control.enabled ? 1 : 0.4
     }
 

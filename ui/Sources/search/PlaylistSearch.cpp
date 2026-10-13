@@ -44,7 +44,7 @@ using search::Searchable;
 
 namespace {
 
-/// The coalescing window for the O(rows) work (R6).
+/// The coalescing window for the O(rows) work.
 constexpr int kCoalesceMs = 120;
 
 } // namespace
@@ -286,7 +286,7 @@ void PlaylistSearch::reparse() {
     }
     ctx.extraTagKeys = m_extraTagKeys;
     m_parsed = search::parseFilter(m_filterText, ctx);
-    // R1 default: an EMPTY Filter searches what the user sees. A Filter with
+    // The default: an EMPTY Filter searches what the user sees. A Filter with
     // entries but no valid one is an empty set (no search in force), not the
     // default; falling back silently would hide the mistake.
     m_searchSet = m_filterText.trimmed().isEmpty() ? visibleColumnSet()
