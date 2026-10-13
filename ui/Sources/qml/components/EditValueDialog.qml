@@ -288,7 +288,9 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: dlg.addMode ? "Add Field" : ("Edit Value : " + dlg.fieldLabel)
                 color: Theme.textPrimary
-                font.family: dlg.uiFont; font.pixelSize: 14; font.weight: Font.Bold
+                font.family: dlg.uiFont
+                font.pixelSize: Theme.fontSizeSubheading
+                font.weight: Font.Bold
                 elide: Text.ElideRight
                 width: parent.width - 24
             }
@@ -315,7 +317,7 @@ Item {
             anchors.left: parent.left; anchors.leftMargin: 14
             text: "Field name:"
             color: Theme.textMuted
-            font.family: dlg.uiFont; font.pixelSize: 12
+            font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
         }
         // Inline key error sits on the label line, right-aligned, so it never shifts
         // the layout.
@@ -328,7 +330,7 @@ Item {
             elide: Text.ElideLeft
             text: dlg.keyError
             color: Theme.dangerSoft
-            font.family: dlg.uiFont; font.pixelSize: 11
+            font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
         }
         Rectangle {
             id: fnBox
@@ -348,7 +350,7 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 text: dlg.fieldKey
                 color: "#8C8C8C" // read-only: dimmed
-                font.family: dlg.uiFont; font.pixelSize: 12
+                font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
                 elide: Text.ElideRight
             }
 
@@ -362,7 +364,7 @@ Item {
                 verticalAlignment: TextInput.AlignVCenter
                 background: null
                 color: Theme.textPrimary
-                font.family: dlg.uiFont; font.pixelSize: 12
+                font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
                 selectByMouse: true
                 placeholderText: "New field name"
                 placeholderTextColor: Theme.textDisabled
@@ -433,7 +435,7 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     color: valueTab.current ? Theme.textPrimary : Theme.textMuted
-                    font.family: dlg.uiFont; font.pixelSize: 12
+                    font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
                 }
             }
 
@@ -479,7 +481,7 @@ Item {
                     verticalAlignment: TextInput.AlignVCenter
                     background: null
                     color: "#FFFFFF"
-                    font.family: dlg.uiFont; font.pixelSize: 12
+                    font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
                     selectByMouse: true
                     // Seeded imperatively by reopen() (see there); onTextEdited keeps
                     // _single in sync without a binding that user input could break.
@@ -515,7 +517,7 @@ Item {
                         leftPadding: 6; rightPadding: 6; topPadding: 5; bottomPadding: 5
                         background: null
                         color: "#FFFFFF"
-                        font.family: dlg.uiFont; font.pixelSize: 12
+                        font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeBody
                         selectByMouse: true
                         wrapMode: TextEdit.Wrap
                         // Seeded imperatively by reopen(). onTextChanged (TextEdit
@@ -545,7 +547,7 @@ Item {
                 anchors.left: parent.left
                 text: "Return confirms; Cmd/Ctrl+Return inserts a line break"
                 color: "#7C7C7C"
-                font.family: dlg.uiFont; font.pixelSize: 11
+                font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
             }
 
             // --- Individual Values -----------------------------------------
@@ -565,7 +567,9 @@ Item {
                     opacity: on ? 1 : 0.5
                     Text {
                         id: mbText; anchors.centerIn: parent; text: parent.label
-                        color: Theme.textSecondary; font.family: dlg.uiFont; font.pixelSize: 11
+                        color: Theme.textSecondary
+                        font.family: dlg.uiFont
+                        font.pixelSize: Theme.fontSizeSmall
                     }
                     HoverHandler { id: mbHover; enabled: parent.on }
                     TapHandler { enabled: parent.on; onTapped: parent.clicked() }
@@ -598,7 +602,7 @@ Item {
                              ? (dlg._selectedIndices().length + " selected")
                              : "Click # / name to select rows")
                     color: dlg._pasteError !== "" ? Theme.dangerSoft : "#7C7C7C"
-                    font.family: dlg.uiFont; font.pixelSize: 11
+                    font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
                 }
 
                 // Column header.
@@ -612,17 +616,17 @@ Item {
                         x: 4; anchors.verticalCenter: parent.verticalCenter
                         width: 28; horizontalAlignment: Text.AlignRight
                         text: "#"; color: Theme.textDim
-                        font.family: dlg.uiFont; font.pixelSize: 11
+                        font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
                     }
                     Text {
                         x: 40; anchors.verticalCenter: parent.verticalCenter
                         text: "Track"; color: Theme.textDim
-                        font.family: dlg.uiFont; font.pixelSize: 11
+                        font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
                     }
                     Text {
                         x: parent.width / 2 + 8; anchors.verticalCenter: parent.verticalCenter
                         text: "Value"; color: Theme.textDim
-                        font.family: dlg.uiFont; font.pixelSize: 11
+                        font.family: dlg.uiFont; font.pixelSize: Theme.fontSizeSmall
                     }
                     Rectangle {
                         anchors.bottom: parent.bottom
@@ -690,14 +694,16 @@ Item {
                                 width: 28; horizontalAlignment: Text.AlignRight
                                 text: (cell.index + 1)
                                 color: "#7C7C7C"
-                                font.family: dlg.uiFont; font.pixelSize: 11
+                                font.family: dlg.uiFont
+                                font.pixelSize: Theme.fontSizeSmall
                             }
                             Text {
                                 x: 40; anchors.verticalCenter: parent.verticalCenter
                                 width: parent.width / 2 - 48
                                 text: dlg.trackLabels[cell.index] !== undefined ? dlg.trackLabels[cell.index] : ""
                                 color: Theme.textMuted
-                                font.family: dlg.uiFont; font.pixelSize: 11
+                                font.family: dlg.uiFont
+                                font.pixelSize: Theme.fontSizeSmall
                                 elide: Text.ElideRight
                             }
                             Rectangle {
@@ -725,7 +731,8 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                     text: String(cell.model.value).replace(/\r?\n/g, "\u21B5")
                                     color: Theme.textPrimary
-                                    font.family: dlg.uiFont; font.pixelSize: 11
+                                    font.family: dlg.uiFont
+                                    font.pixelSize: Theme.fontSizeSmall
                                     elide: Text.ElideRight
                                 }
 
@@ -740,7 +747,8 @@ Item {
                                     verticalAlignment: TextInput.AlignVCenter
                                     background: null
                                     color: Theme.textPrimary
-                                    font.family: dlg.uiFont; font.pixelSize: 11
+                                    font.family: dlg.uiFont
+                                    font.pixelSize: Theme.fontSizeSmall
                                     selectByMouse: true
                                     validator: RegularExpressionValidator {
                                         regularExpression: new RegExp(dlg.validatorPattern)

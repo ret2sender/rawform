@@ -248,7 +248,7 @@ Item {
             text: root._db(root._cursorRatio)
             color: root.bubbleTextColor
             font.family: root.bubbleFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             font.weight: Font.Bold
         }
     }
@@ -299,14 +299,37 @@ Item {
 
         // Wheel nudges by one step per notch, from the CURRENT level (not a drag
         // ratio), so a scroll without a prior click still steps from where the bar
-        // is. angleDelta.y is positive scrolling up (louder), negative down. The
-        // tab strip uses the same onWheel-on-the-consuming-MouseArea shape. We also
-        // park the hover cursor on the new level so the pipe and dB bubble jump to
-        // it and climb with each notch (the pointer x is irrelevant to a wheel
-        // change); the next mouse move hands the cursor back to the pointer.
+        // is. Positive is up (louder), negative down. The tab strip uses the same
+        // onWheel-on-the-consuming-MouseArea shape. We also park the hover cursor
+        // on the new level so the pipe and dB bubble jump to it and climb with
+        // each notch (the pointer x is irrelevant to a wheel change); the next
+        // mouse move hands the cursor back to the pointer.
+        //
+        // A touchpad reports the gesture in small fragments rather than whole
+        // notches, so the delta accumulates until it amounts to one: a swipe
+        // moves a few steps instead of running the bar to an end. pixelDelta
+        // (one step per 20 px) is preferred when the device supplies it, and
+        // the angle unit of 120 per notch otherwise; a purely horizontal event
+        // leaves the level alone.
+        property real _wheelAccum: 0
+        readonly property real _wheelUnit: 120
+        readonly property real _wheelPixelsPerStep: 20
         onWheel: function (wheel) {
-            var dir = wheel.angleDelta.y > 0 ? 1 : -1
-            var next = Math.max(0, Math.min(1, root._levelRatio + dir * root.wheelStep))
+            var px = wheel.pixelDelta.y
+            var delta = px !== 0 ? px * (hit._wheelUnit / hit._wheelPixelsPerStep)
+                                 : wheel.angleDelta.y
+            if (delta === 0) {
+                wheel.accepted = false
+                return
+            }
+            if (hit._wheelAccum * delta < 0)   // a reversal starts over
+                hit._wheelAccum = 0
+            hit._wheelAccum += delta
+            var steps = Math.trunc(hit._wheelAccum / hit._wheelUnit)
+            if (steps === 0)
+                return
+            hit._wheelAccum -= steps * hit._wheelUnit
+            var next = Math.max(0, Math.min(1, root._levelRatio + steps * root.wheelStep))
             root._hoverRatio = next
             root._emit(next)
         }

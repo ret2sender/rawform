@@ -255,7 +255,7 @@ Window {
                     text: "Settings"
                     color: Theme.textPrimary
                     font.family: settingsWindow.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
 
@@ -367,7 +367,7 @@ Window {
                                         color: navDelegate.current ? Theme.textPrimary
                                                                    : "#B8B8B8"
                                         font.family: settingsWindow.uiFont
-                                        font.pixelSize: 12
+                                        font.pixelSize: Theme.fontSizeBody
                                         font.weight: navDelegate.current ? Font.Bold
                                                                          : Font.Normal
                                     }

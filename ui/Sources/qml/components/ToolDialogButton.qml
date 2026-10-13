@@ -95,7 +95,7 @@ AbstractButton {
         color: !root.enabled ? Theme.textDisabled
              : root.accent ? Theme.textOnAccent : Theme.textPrimary
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         font.weight: Font.Bold
     }
 }

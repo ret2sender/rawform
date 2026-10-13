@@ -201,19 +201,6 @@ public:
     /// gives a failed file.
     Q_INVOKABLE void adoptEdits(const QStringList& failedPaths);
 
-    /// Discard staging: every current value returns to its original, selection
-    /// clears. Named revertEdits, NOT revert: QAbstractItemModel declares a
-    /// virtual revert() slot (the submit / revert editing protocol), and an
-    /// unmarked same-name method is a shadowing error under AppleClang's
-    /// -Winconsistent-missing-override, while MARKING it override would hijack
-    /// the protocol slot so a generic base-class revert() call could silently
-    /// discard staged user edits. A distinct name keeps the two APIs apart
-    /// (and pairs with adoptEdits). Reverting to the ORIGINALS rather than to
-    /// an open-time snapshot matters after adoptEdits: the originals are then
-    /// the adopted baseline, so a revert cannot resurrect stale pre-apply
-    /// values (the scenario a snapshot replay would allow).
-    Q_INVOKABLE void revertEdits();
-
 signals:
     void countChanged();
     void summaryChanged();

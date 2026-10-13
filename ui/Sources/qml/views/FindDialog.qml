@@ -70,9 +70,9 @@ Window {
     // filter proxy (what the view shows; rows below are ITS rows) and its
     // selection: the host binds all three to the active tab, so a tab switch
     // re-runs the search against the new tab and moves the filter with it.
-    property var model: null
-    property var view: null
-    property var selection: null
+    property PlaylistModel model: null
+    property PlaylistFilterProxy view: null
+    property ItemSelectionModel selection: null
     /// Ask the host to make @p row current and center it in the playlist.
     signal revealRow(int row)
 
@@ -249,7 +249,7 @@ Window {
                     text: "Find"
                     color: Theme.textPrimary
                     font.family: findDialog.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
                 ToolDialogCloseButton {
@@ -274,13 +274,13 @@ Window {
                     text: "String"
                     color: Theme.textPrimary
                     font.family: findDialog.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                 }
                 TextField {
                     id: stringField
                     Layout.fillWidth: true
                     font.family: findDialog.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     selectByMouse: true
                     background: Rectangle {
                         radius: 4
@@ -304,13 +304,13 @@ Window {
                     text: "Filter"
                     color: Theme.textPrimary
                     font.family: findDialog.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                 }
                 TextField {
                     id: filterField
                     Layout.fillWidth: true
                     font.family: Theme.monoFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     selectByMouse: true
                     placeholderText: "Artist:Album:%composer%  (empty: the visible columns)"
                     background: Rectangle {
@@ -371,7 +371,7 @@ Window {
                     text: "Preset"
                     color: Theme.textPrimary
                     font.family: findDialog.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                 }
                 PresetRow {
                     Layout.fillWidth: true
@@ -408,7 +408,7 @@ Window {
                          : (search.active && search.matchCount === 0) ? Theme.danger
                          : Theme.textFaint
                     font.family: findDialog.uiFont
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontSizeSmall
                 }
                 RowLayout {
                     id: footerButtons

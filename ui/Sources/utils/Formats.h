@@ -24,7 +24,8 @@
 // carriers so the playlist columns and the Properties panes render the same
 // fact the same way (the scenario this prevents: the file-size column and
 // the metadata pane each formatting bytes on their own, so one file shows
-// two different sizes). One definition, both consumers.
+// two different sizes, or a 75-minute file reading 75:03 in one place and
+// 1:15:03 in the other). One definition, both consumers.
 //
 // Deliberately small: only formats used by MORE THAN ONE surface live here.
 // A single-surface format (the metadata pane's "M:SS.mmm (N samples)"
@@ -35,14 +36,21 @@
 
 #pragma once
 
+#include <QDateTime>
 #include <QString>
 #include <QtGlobal>  // qint64
 
 namespace rawform::formats {
 
-/// "m:ss" from milliseconds (seconds zero-padded, minutes not); empty when
-/// unknown (ms <= 0). The playlist Duration column shape.
-[[nodiscard]] QString durationText(int ms);
+/// "m:ss" from milliseconds (seconds zero-padded, minutes not), rolling into
+/// "h:mm:ss" past an hour (minutes then zero-padded); empty when unknown
+/// (ms <= 0). The playlist Length column shape, and the clock part of the
+/// Properties pane's duration.
+[[nodiscard]] QString durationText(qint64 ms);
+
+/// "yyyy-MM-dd HH:mm:ss", the one date-time shape on every surface (sortable,
+/// locale-free); empty when the stamp is invalid.
+[[nodiscard]] QString dateTimeText(const QDateTime& dt);
 
 /// Compact human-readable size, e.g. "53.2 MB" (1024-based traditional units,
 /// one decimal, locale-formatted); empty when unknown (bytes <= 0).

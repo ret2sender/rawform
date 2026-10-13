@@ -63,6 +63,16 @@ QtObject {
     readonly property string monoFont: _monoLoader.name
 
     // -----------------------------------------------------------------------
+    // Type scale, in pixels, named by the role each size plays. One glyph
+    // size (the 17 px +/- strip in Custom Columns) stays literal at its site.
+    // -----------------------------------------------------------------------
+    readonly property int fontSizeSmall: 11       // hints, segment labels, secondary rows
+    readonly property int fontSizeBody: 12        // labels, fields, menus, table text
+    readonly property int fontSizeTitle: 13       // window titles, the status line
+    readonly property int fontSizeSubheading: 14  // subheadings; the small glyph controls
+    readonly property int fontSizeHeading: 16     // pane headings, section rows, arrows
+
+    // -----------------------------------------------------------------------
     // Palette, tier 1: values with one unambiguous role across the app.
     // -----------------------------------------------------------------------
 

@@ -391,22 +391,15 @@ public:
     /// the first cleared every dirty flag.
     Q_INVOKABLE void flushPendingWrites();
 
-    /// Liveness probe for QML. The non-modal Properties windows hold VALUE
-    /// captures of a tab's model and reloader, and the tab can die under them;
-    /// a QML `var` wrapping a destroyed QObject is not reliably null/falsy in
-    /// every JS context (a dangling wrapper can stay truthy and then throw on
-    /// the method call). Marshaling it to a QObject* parameter IS reliable:
-    /// the engine's own deletion tracking passes nullptr for a dead object.
-    /// Lives here because this object owns the tabs whose lifetimes are being
-    /// probed, and it is a singleton every window can reach.
-    Q_INVOKABLE [[nodiscard]] bool objectAlive(QObject* object) const {
-        return object != nullptr;
-    }
-
 signals:
     void countChanged();
     void activeSearchChanged();
     void currentIndexChanged();
+    /// A notable non-error event for the session log: a playlist file that
+    /// could not be read (the tab opens empty, titled "Unreadable playlist").
+    /// The host appends it to the log at warning level, like the
+    /// controller's warningOccurred.
+    void warningOccurred(const QString& message);
     /// The Playback Queue tab entered or left the strip.
     void queueVisibleChanged();
     /// Emitted BEFORE the active tab flips (m_current still points at the

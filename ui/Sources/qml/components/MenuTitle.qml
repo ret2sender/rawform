@@ -53,7 +53,7 @@ Text {
 
     color: titleHover.hovered ? Theme.accentHover : Theme.textPrimary
     font.family: Theme.uiFont
-    font.pixelSize: 12
+    font.pixelSize: Theme.fontSizeBody
     font.weight: Font.Bold
     text: root.label
 

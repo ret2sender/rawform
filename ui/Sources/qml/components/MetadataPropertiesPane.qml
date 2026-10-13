@@ -418,13 +418,13 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 8; width: root.nameColumnWidth - 8
                     text: "Name"; color: Theme.textDim
-                    font.family: root.uiFont; font.pixelSize: 12
+                    font.family: root.uiFont; font.pixelSize: Theme.fontSizeBody
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     x: root.nameColumnWidth + 8
                     text: "Value"; color: Theme.textDim
-                    font.family: root.uiFont; font.pixelSize: 12
+                    font.family: root.uiFont; font.pixelSize: Theme.fontSizeBody
                 }
                 Rectangle {
                     anchors.bottom: parent.bottom
@@ -585,7 +585,9 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left; anchors.leftMargin: 8
                                 text: rdel.display; color: Theme.textAccent
-                                font.family: root.uiFont; font.pixelSize: 16; font.weight: Font.Bold
+                                font.family: root.uiFont
+                                font.pixelSize: Theme.fontSizeHeading
+                                font.weight: Font.Bold
                             }
                         }
 
@@ -603,7 +605,8 @@ Item {
                                 anchors.left: parent.left; anchors.leftMargin: 8
                                 text: rdel.display
                                 color: addMA.containsMouse ? Theme.accentSoft : Theme.textFaint
-                                font.family: root.uiFont; font.pixelSize: 12
+                                font.family: root.uiFont
+                                font.pixelSize: Theme.fontSizeBody
                             }
                             // A single click opens the Add Field dialog (this row is an
                             // action affordance, not data). Commit any inline editor
@@ -653,7 +656,8 @@ Item {
                                 x: 8; width: root.nameColumnWidth - 12
                                 text: rdel.display
                                 color: rdel.isCustom ? "#8C8C8C" : Theme.textMuted
-                                font.family: root.uiFont; font.pixelSize: 12
+                                font.family: root.uiFont
+                                font.pixelSize: Theme.fontSizeBody
                                 elide: Text.ElideRight
                             }
 
@@ -686,7 +690,8 @@ Item {
                                 width: parent.width - root.nameColumnWidth - 16
                                 text: String(rdel.value).replace(/\r?\n/g, "\u21B5")
                                 color: rdel.isDirty ? Theme.accentSoft : Theme.textPrimary
-                                font.family: root.uiFont; font.pixelSize: 12
+                                font.family: root.uiFont
+                                font.pixelSize: Theme.fontSizeBody
                                 elide: Text.ElideRight
                             }
 
@@ -743,7 +748,8 @@ Item {
                                 padding: 0; leftPadding: 4; rightPadding: 4
                                 topPadding: 0; bottomPadding: 0
                                 color: "#FFFFFF"
-                                font.family: root.uiFont; font.pixelSize: 12
+                                font.family: root.uiFont
+                                font.pixelSize: Theme.fontSizeBody
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
                                 validator: RegularExpressionValidator {
@@ -895,6 +901,6 @@ Item {
         color: "transparent"; radius: 4; border.width: 2
         property real strokeOpacity: paneHover.hovered ? 0.25 : 0.10
         Behavior on strokeOpacity { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
-        border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, strokeOpacity)
+        border.color: Qt.alpha(Theme.accentSoft, strokeOpacity)
     }
 }

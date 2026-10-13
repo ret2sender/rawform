@@ -76,7 +76,7 @@ Item {
             text: "ReplayGain"
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 16
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.Bold
         }
 
@@ -203,7 +203,7 @@ Item {
             text: sb.glyph
             color: Theme.textSecondary
             font.family: pane.uiFont
-            font.pixelSize: 14
+            font.pixelSize: Theme.fontSizeSubheading
             font.weight: Font.Bold
         }
         HoverHandler { id: sbHover }
@@ -252,7 +252,7 @@ Item {
                     text: dbf.value.toFixed(1)
                     color: Theme.textPrimary
                     font.family: pane.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     horizontalAlignment: TextInput.AlignRight
                     width: 42
                     selectByMouse: true
@@ -272,7 +272,7 @@ Item {
                     text: "dB"
                     color: Theme.textDim
                     font.family: pane.uiFont
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontSizeSmall
                 }
             }
         }

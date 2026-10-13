@@ -107,10 +107,11 @@ struct ReloadResult {
 
 class MetadataReloader : public QObject {
     Q_OBJECT
-    /// Registered anonymously: QML never creates or names one, it reaches the
-    /// per-tab instance through PlaylistTabs.activeReloader and the typed
-    /// handles the windows keep, and qmllint needs the type to check those.
-    QML_ANONYMOUS
+    /// Nameable so the views can type the handles they keep (a typed object
+    /// property reads back null once the tab's instance dies), never created
+    /// from QML: PlaylistTabs owns one per tab.
+    QML_ELEMENT
+    QML_UNCREATABLE("MetadataReloader instances are created by PlaylistTabs")
 
     /// True while a reload/validation pass is running. Bound by QML to a status
     /// indicator.

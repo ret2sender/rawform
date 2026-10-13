@@ -118,7 +118,7 @@ Row {
                 verticalAlignment: Text.AlignVCenter
                 color: seg.checked ? Theme.textOnAccent : Theme.textSecondary
                 font.family: Theme.uiFont
-                font.pixelSize: 11
+                font.pixelSize: Theme.fontSizeSmall
                 font.weight: seg.checked ? Font.Bold : Font.Normal
             }
         }

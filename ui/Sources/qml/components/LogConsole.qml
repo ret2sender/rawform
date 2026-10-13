@@ -57,7 +57,7 @@ Rectangle {
     color: Theme.surfaceInset
     radius: 4
     border.width: 2
-    border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, 0.18)
+    border.color: Qt.alpha(Theme.accentSoft, 0.18)
 
     Behavior on height {
         NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
@@ -110,7 +110,7 @@ Rectangle {
             selectionColor: Theme.selectionFill
             selectedTextColor: Theme.textPrimary
             font.family: Theme.monoFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
             text: consolePanel.logText
 
             // Content grew (a line was appended): follow to the bottom only if the
@@ -126,6 +126,6 @@ Rectangle {
         text: "No events yet."
         color: Theme.textDisabled
         font.family: Theme.monoFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
     }
 }

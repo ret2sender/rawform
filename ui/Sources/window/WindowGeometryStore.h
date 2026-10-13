@@ -29,19 +29,26 @@
 //     the QML side guards the save to Window.Windowed visibility, so the
 //     last GOOD windowed geometry in the file survives a maximized or
 //     fullscreen quit.
-//   - Size is always restored; position only when it still lands on a connected
-//     screen. A position saved on a since-disconnected monitor would open
-//     the window off-screen, so load() validates the saved rect against
-//     QGuiApplication::screens() and, on rejection, reports hasSavedPosition
-//     false so the QML falls back to dead-center on the launch screen.
+//   - Size is always restored, clamped to the primary screen's available area
+//     (a 1800 x 1040 default or a saved size from a larger monitor must not
+//     open bigger than the screen; MainWindow.qml's own minimums still apply
+//     below that). Position only when it still lands on a connected screen.
+//     A position saved on a since-disconnected monitor would open the window
+//     off-screen, so load() validates the saved rect against
+//     QGuiApplication::screens() and, on rejection, computes the startup
+//     position itself: dead-center on the primary screen's available area.
+//     startupX/startupY are therefore always a usable position, and the QML
+//     binds them as plain constants (no live dependency on the window's own
+//     size or on the Screen attached property, either of which would re-center
+//     the window on every resize or monitor change on cocoa, xcb and windows).
 //   - Position is PLATFORM-CONDITIONAL. Wayland's xdg-shell gives a
 //     client no way to read or set a toplevel's global position: QWindow's
 //     x/y there only echo what the client last wrote, and writes are ignored
 //     (the compositor alone places windows). On such a platform the store
 //     stops pretending: save() ignores its x/y arguments, hasSavedPosition
-//     reports false so the QML keeps its (inert but honest) centering
-//     fallback, and any x/y already in the file are PRESERVED verbatim on
-//     rewrite instead of clobbered with echo values, so a setup that also
+//     reports false (the startup position is then the inert but honest
+//     centered one), and any x/y already in the file are PRESERVED verbatim
+//     on rewrite instead of clobbered with echo values, so a setup that also
 //     runs X11 sessions keeps its real coordinates. Size is client-side on
 //     every platform and stays unconditional.
 //
@@ -90,12 +97,12 @@ class WindowGeometryStore : public QObject {
     /// binds these).
     Q_PROPERTY(int startupWidth READ startupWidth NOTIFY geometryLoaded)
     Q_PROPERTY(int startupHeight READ startupHeight NOTIFY geometryLoaded)
-    /// Startup position, meaningful only when hasSavedPosition is true; the QML
-    /// binding falls back to screen-centering otherwise, so first run (no file),
-    /// a rejected off-screen position, and a position-less platform all
-    /// open dead-center.
+    /// Startup position: the validated saved position, else the centered one
+    /// the store computed, so first run (no file), a rejected off-screen
+    /// position, and a position-less platform all open dead-center.
     Q_PROPERTY(int startupX READ startupX NOTIFY geometryLoaded)
     Q_PROPERTY(int startupY READ startupY NOTIFY geometryLoaded)
+    /// Whether that position came from the file (see hasSavedPosition()).
     Q_PROPERTY(bool hasSavedPosition READ hasSavedPosition NOTIFY geometryLoaded)
 
 public:
@@ -106,8 +113,9 @@ public:
     [[nodiscard]] int  startupHeight() const { return m_height; }
     [[nodiscard]] int  startupX() const { return m_x; }
     [[nodiscard]] int  startupY() const { return m_y; }
-    /// The file carrying a validated position is not enough; the running
-    /// platform must also be able to apply one.
+    /// Whether startupX/startupY come from the file (validated against the
+    /// connected screens) rather than from the centering fallback; false too on
+    /// a platform that cannot apply a position at all.
     [[nodiscard]] bool hasSavedPosition() const {
         return m_fileHasPosition && m_platformCanPosition;
     }
@@ -142,6 +150,11 @@ private:
     /// clobber each other (each write re-emits everything the store holds).
     void writeFile() const;
 
+    /// Clamp the size to the primary screen's available area and, with no
+    /// validated position, center the rect on it. Runs at the end of load()
+    /// on every path, the malformed-file one included.
+    void placeOnPrimaryScreen();
+
     /// Defaults, used when there is no file, the file is malformed, or an
     /// individual key is absent.
     int  m_width            = 1800;
@@ -151,8 +164,8 @@ private:
     /// Two facts, not one: the FILE carrying a validated position (drives
     /// what writeFile emits and what a rewrite preserves) is a different fact
     /// from this PLATFORM being able to use it (folded into the
-    /// hasSavedPosition property QML reads). On Wayland the first can be true,
-    /// from an X11 session's save, while the second must read false.
+    /// hasSavedPosition property). On Wayland the first can be true, from an
+    /// X11 session's save, while the second must read false.
     bool m_fileHasPosition    = false;
     bool m_platformCanPosition = true;
 

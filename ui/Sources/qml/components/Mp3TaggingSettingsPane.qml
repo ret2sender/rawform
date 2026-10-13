@@ -91,7 +91,7 @@ Item {
             text: "Tagging / MP3"
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 16
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.Bold
         }
 
@@ -128,7 +128,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: (pane.settings && pane.settings.id3v2Version === 1)
                   ? "Newer revision, enables UTF-8; old software may not read it."
                   : "The most widely compatible revision."
@@ -160,7 +160,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: {
                 if (!pane.settings) return ""
                 switch (pane.settings.id3v1Mode) {
@@ -225,7 +225,7 @@ Item {
                     && pane.settings.id3v2Version === 0)
                    ? Theme.warning : Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: {
                 if (!pane.settings) return ""
                 if (pane.settings.id3v2Encoding === 2 && pane.settings.id3v2Version === 0)

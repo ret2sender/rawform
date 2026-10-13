@@ -150,7 +150,7 @@ MenuItem {
         id: _metrics
         font.family: Theme.uiFont
         font.italic: root.textItalic
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         text: root.text
     }
 
@@ -158,7 +158,7 @@ MenuItem {
     TextMetrics {
         id: _hintMetrics
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         text: root._hintText
     }
 
@@ -174,7 +174,7 @@ MenuItem {
         color: !root.enabled ? "#5E5E5E"
                              : (root.highlighted ? Theme.textPrimary : Theme.textFaint)
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         text: root._hintText
         visible: root._hintText !== ""
     }
@@ -217,7 +217,7 @@ MenuItem {
                              : (root.highlighted ? Theme.accentHover : Theme.textPrimary)
         font.family: Theme.uiFont
         font.italic: root.textItalic
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         leftPadding: root.textLeftPadding
         // Arrow clearance when a submenu arrow is present (12 px arrow, 8 px
         // right margin, 6 px gap); a plain trailing margin otherwise; plus

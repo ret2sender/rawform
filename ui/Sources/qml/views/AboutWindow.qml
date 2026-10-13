@@ -138,7 +138,7 @@ Window {
                     text: "About"
                     color: Theme.textPrimary
                     font.family: Theme.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
 
@@ -189,7 +189,7 @@ Window {
                         Layout.topMargin: 14
                         color: versionText.copied ? Theme.accent : Theme.textPrimary
                         font.family: Theme.monoFont
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontSizeTitle
                         text: versionText.copied
                               ? "Copied!"
                               : "Version " + AppInfo.version
@@ -221,7 +221,7 @@ Window {
                         Layout.topMargin: 8
                         color: Theme.textMuted
                         font.family: Theme.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         text: "Built with Qt " + AppInfo.qtVersion
                     }
 
@@ -230,7 +230,7 @@ Window {
                         Layout.topMargin: 12
                         color: Theme.textMuted
                         font.family: Theme.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         horizontalAlignment: Text.AlignHCenter
                         text: "Copyright \u00A9 2026 Etienne Fleurant\n"
                               + "Released under the GNU GPL v3.0 or later"
@@ -249,7 +249,7 @@ Window {
                             id: githubLink
                             color: githubHover.hovered ? Theme.accentHover : Theme.accentSoft
                             font.family: Theme.uiFont
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeBody
                             font.underline: true
                             text: "GitHub"
 
@@ -267,7 +267,7 @@ Window {
                             id: noticesLink
                             color: noticesHover.hovered ? Theme.accentHover : Theme.accentSoft
                             font.family: Theme.uiFont
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeBody
                             font.underline: true
                             text: "Third-party notices"
 

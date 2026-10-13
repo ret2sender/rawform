@@ -206,7 +206,7 @@ int CustomColumnRegistry::indexOf(const QString& id) const {
     return -1;
 }
 
-void CustomColumnRegistry::persist() const {
+void CustomColumnRegistry::persist() {
     const QString path = customColumnsPath();
 
     // Emit a sequence under a top-level `columns:` key, preserving user order
@@ -234,7 +234,10 @@ void CustomColumnRegistry::persist() const {
     content += out.c_str();
     content += '\n';
 
-    yamlfile::writeAtomically(path, content);
+    if (!yamlfile::writeAtomically(path, content)) {
+        emit persistFailed(
+            QStringLiteral("Could not save the custom columns to %1").arg(path));
+    }
 }
 
 } // namespace rawform

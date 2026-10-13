@@ -69,7 +69,7 @@ Rectangle {
         text: cell.display
         color: Theme.textPrimary
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         font.weight: Font.Bold
         elide: Text.ElideRight
         horizontalAlignment: cell.alignment

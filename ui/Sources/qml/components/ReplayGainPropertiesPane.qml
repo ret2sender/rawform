@@ -25,8 +25,8 @@
 //
 // State: everything row-shaped lives in ReplayGainRowsModel (C++),
 // bound in as `model` by the host window, which also owns the model's
-// lifecycle (setSelection on open and re-pull, collectEdits / adoptEdits /
-// revertEdits on the apply path, clearAllReplayGain from the Tools menu).
+// lifecycle (setSelection on open and re-pull, collectEdits / adoptEdits on
+// the apply path, clearAllReplayGain from the Tools menu).
 // This file keeps only what belongs to Items: gestures (click modifiers,
 // drag-select resolving pointer to row in view space, keyboard focus
 // juggling), the right-click menu, the cell editors, and the scanNoop
@@ -237,9 +237,6 @@ Item {
         pane._dragSelLast = -1
     }
 
-    // collectEdits / adoptEdits / revertEdits moved to ReplayGainRowsModel
-    //; the host window calls the model directly on the apply path.
-
     // --- scanning ----------------------------------------------------------
     // Scope resolution, grouping, and the skip-existing rules live in
     // ReplayGainRowsModel.scanItems; this wrapper keeps only what is
@@ -312,7 +309,7 @@ Item {
                 elide: Text.ElideRight
                 color: Theme.textMuted
                 font.family: pane.uiFont
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontSizeBody
                 font.weight: Font.DemiBold
             }
             Row {
@@ -333,7 +330,7 @@ Item {
                             text: parent.modelData
                             color: Theme.textMuted
                             font.family: pane.uiFont
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeBody
                             font.weight: Font.DemiBold
                         }
                     }
@@ -436,7 +433,7 @@ Item {
                     elide: Text.ElideRight
                     color: Theme.textPrimary
                     font.family: pane.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                 }
                 Row {
                     id: cells
@@ -484,7 +481,7 @@ Item {
                           : "")
                     color: Theme.textAccent
                     font.family: pane.uiFont
-                    font.pixelSize: 14
+                    font.pixelSize: Theme.fontSizeSubheading
                 }
                 Item { width: 1; height: 6 }
 
@@ -539,7 +536,7 @@ Item {
             text: ec.text
             color: ec.dirty ? Theme.accentSoft : "#D6D6D6"
             font.family: pane.uiFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
         }
         // Modified-from-original accent dot, matching the Settings pane. Sits at the
         // left of the cell; the value is right-aligned so they never collide.
@@ -584,7 +581,7 @@ Item {
             anchors.fill: parent
             visible: false
             font.family: pane.uiFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
             color: Theme.textPrimary
             horizontalAlignment: TextInput.AlignRight
             leftPadding: 6
@@ -632,7 +629,7 @@ Item {
             text: parent.label
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
         }
         Text {
             anchors.right: parent.right
@@ -641,7 +638,7 @@ Item {
             text: parent.value
             color: "#D6D6D6"
             font.family: pane.uiFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
         }
     }
 
@@ -663,7 +660,7 @@ Item {
             text: ser.label
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
         }
         EditCell {
             anchors.right: parent.right

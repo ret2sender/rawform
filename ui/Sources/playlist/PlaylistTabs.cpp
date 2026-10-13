@@ -1050,7 +1050,7 @@ void PlaylistTabs::loadInto(Tab* tab, const QString& localPath,
     QPointer<PlaylistModel> target = tab->model;
     auto* watcher = new QFutureWatcher<PlaylistReadResult>(this);
     connect(watcher, &QFutureWatcher<PlaylistReadResult>::finished, this,
-            [this, watcher, target, materializeCopy, adoptStoredTitle]() {
+            [this, watcher, target, localPath, materializeCopy, adoptStoredTitle]() {
                 const PlaylistReadResult res = watcher->result();
                 watcher->deleteLater();
                 if (!target)
@@ -1061,8 +1061,19 @@ void PlaylistTabs::loadInto(Tab* tab, const QString& localPath,
                 Tab* t = m_tabs.at(idx);
 
                 if (!res.ok()) {
-                    qWarning("rawform: live playlist load failed: %s",
+                    // The tab stays open and empty, named for what happened
+                    // rather than keeping the provisional title the restore
+                    // gave it, and the session log gets the line (the console
+                    // alone is not a surface the user sees). Autosave is
+                    // re-enabled: an edit to this tab writes a readable file
+                    // over the unreadable one.
+                    qWarning("rawform: playlist load failed: %s",
                              qUtf8Printable(res.message));
+                    t->title = QStringLiteral("Unreadable playlist");
+                    emit dataChanged(index(idx, 0), index(idx, 0), { TitleRole });
+                    emit warningOccurred(
+                        QStringLiteral("Could not read playlist %1: %2")
+                            .arg(localPath, res.message));
                     t->suppressAutosave = false;
                     return;
                 }

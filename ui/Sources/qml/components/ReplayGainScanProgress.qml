@@ -38,7 +38,7 @@ import QtQuick
 Item {
     id: root
 
-    property var controller: null   // ReplayGainScanController
+    property ReplayGainScanController controller: null
     property string uiFont: Theme.uiFont
 
     visible: controller !== null && controller.busy
@@ -76,7 +76,7 @@ Item {
                 text: "Scanning ReplayGain"
                 color: Theme.textPrimary
                 font.family: root.uiFont
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontSizeTitle
                 font.weight: Font.Bold
             }
 
@@ -92,7 +92,7 @@ Item {
                 }
                 color: Theme.textInactive
                 font.family: root.uiFont
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontSizeBody
             }
 
             // Overall progress (track count plus within-track fraction).

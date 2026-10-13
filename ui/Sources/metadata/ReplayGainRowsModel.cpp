@@ -486,20 +486,6 @@ void ReplayGainRowsModel::adoptEdits(const QStringList& failedPaths) {
     recomputeSummary(); // everything is clean (or reverted) now
 }
 
-void ReplayGainRowsModel::revertEdits() {
-    const int n = static_cast<int>(m_rows.size());
-    m_anchor = -1;
-    if (n == 0)
-        return;
-    for (Row& r : m_rows) {
-        r.tg = r.tg0; r.ag = r.ag0; r.tp = r.tp0; r.ap = r.ap0;
-        r.sel = false;
-    }
-    emit dataChanged(index(0), index(n - 1),
-                     { SelRole, TgRole, AgRole, TpRole, ApRole });
-    recomputeSummary();
-}
-
 // --- summary ---------------------------------------------------------------
 
 void ReplayGainRowsModel::recomputeSummary() {

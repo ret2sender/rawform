@@ -306,7 +306,7 @@ Item {
             text: Format.mmss(root._cursorRatio * root.durationSeconds)
             color: root.bubbleTextColor
             font.family: root.timeFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             font.weight: Font.Bold
         }
     }
@@ -328,7 +328,7 @@ Item {
         text: (root._stepTotal > 0 ? "+" : "") + Math.round(root._stepTotal)
         color: root.fillColor
         font.family: root.timeFont
-        font.pixelSize: 11
+        font.pixelSize: Theme.fontSizeSmall
         font.weight: Font.Bold
         transformOrigin: Item.Bottom
         y: track.y - height - 2 - lift

@@ -80,7 +80,7 @@ Item {
     TextMetrics {
         id: valueMetrics
         font.family: root.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
     }
 
     // Measure every row's Value string and keep the widest. metaTable.rows is
@@ -232,7 +232,8 @@ Item {
                         color: Theme.textAccent
                         text: mcell.display
                         font.family: root.uiFont
-                        font.pixelSize: root.model && root.model.isSectionRow(mcell.row) ? 16 : 12
+                        font.pixelSize: root.model && root.model.isSectionRow(mcell.row)
+                                        ? Theme.fontSizeHeading : Theme.fontSizeBody
                         font.weight: Font.Bold
                     }
                 }
@@ -258,7 +259,7 @@ Item {
                         // Name column dimmer than the value, matching the design.
                         color: mcell.column === 0 ? Theme.textMuted : Theme.textPrimary
                         font.family: root.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         elide: Text.ElideRight
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -282,6 +283,6 @@ Item {
         Behavior on strokeOpacity {
             NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
         }
-        border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, strokeOpacity)
+        border.color: Qt.alpha(Theme.accentSoft, strokeOpacity)
     }
 }

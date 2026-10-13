@@ -1294,11 +1294,14 @@ void AudioController::stop() {
 }
 
 bool AudioController::stopIfPlayingAny(const QStringList& paths) {
-    // See the header for the full contract and caveats. m_hasTrack covers
+    // See the header for the full contract and caveats. hasTrack() covers
     // both Playing and Paused, exactly the states in which the engine's decoder
     // holds the file handle; while Stopped there is no decoder and a write is
-    // unconditionally safe.
-    if (!m_hasTrack || m_path.isEmpty() || !paths.contains(m_path)) {
+    // unconditionally safe. The raw m_hasTrack would not do: it stays set
+    // through Stop (the remembered track the cursor can restart), so a write
+    // to the last-played file after Stop would stop again and log a false
+    // "Stopped playback" warning.
+    if (!hasTrack() || m_path.isEmpty() || !paths.contains(m_path)) {
         return false;
     }
     const QString name = QFileInfo(m_path).fileName();

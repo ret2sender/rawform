@@ -39,6 +39,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>  // std::min
 #include <optional>
 #include <string>
 
@@ -90,6 +91,7 @@ void WindowGeometryStore::load() {
     // logged and ignored the same way.
     const auto text = yamlfile::readAll(windowSettingsPath());
     if (!text) {
+        placeOnPrimaryScreen();
         return;
     }
 
@@ -159,6 +161,7 @@ void WindowGeometryStore::load() {
         m_height          = 1040;
         m_fileHasPosition = false;
         m_toolSizes.clear();
+        placeOnPrimaryScreen();
         return;
     }
 
@@ -169,12 +172,31 @@ void WindowGeometryStore::load() {
     // Deliberately NOT gated on m_platformCanPosition: this records what the
     // FILE holds, so a Wayland session preserves an X11 session's coordinates
     // through its rewrites; hasSavedPosition() applies the platform gate
-    // on the way out to QML.
+    // on the way out.
     if (haveX && haveY &&
         rectTouchesAnyScreen(QRect(x, y, m_width, m_height))) {
         m_x              = x;
         m_y              = y;
         m_fileHasPosition = true;
+    }
+    placeOnPrimaryScreen();
+}
+
+// ---------------------------------------------------------------------------
+void WindowGeometryStore::placeOnPrimaryScreen() {
+    const QScreen* screen = QGuiApplication::primaryScreen();
+    if (screen == nullptr) {
+        return;  // headless: the defaults stand, nothing to measure against
+    }
+    // The available area excludes panels and docks, so a window sized to it
+    // is fully visible; the window's own minimums (MainWindow.qml) may still
+    // exceed a very small screen, which is then the window manager's call.
+    const QRect area = screen->availableGeometry();
+    m_width  = std::min(m_width, area.width());
+    m_height = std::min(m_height, area.height());
+    if (!m_fileHasPosition) {
+        m_x = area.x() + (area.width() - m_width) / 2;
+        m_y = area.y() + (area.height() - m_height) / 2;
     }
 }
 

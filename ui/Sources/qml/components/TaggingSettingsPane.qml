@@ -52,7 +52,7 @@ Item {
             text: "Tagging"
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 16
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.Bold
         }
 
@@ -69,7 +69,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: "Format-specific tagging preferences live in the sub-sections "
                 + "on the left; MP3 is the only one so far. Options that apply "
                 + "to every format will appear on this page."

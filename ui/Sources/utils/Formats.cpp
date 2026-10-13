@@ -25,17 +25,29 @@
 
 #include "Formats.h"
 
+#include <QLatin1Char>
 #include <QLocale>
 
 namespace rawform::formats {
 
-QString durationText(int ms) {
+QString durationText(qint64 ms) {
     if (ms <= 0)
         return {};
-    const int totalSec = ms / 1000;
-    const int minutes  = totalSec / 60;
-    const int seconds  = totalSec % 60;
+    const qint64 totalSec = ms / 1000;
+    const qint64 hours    = totalSec / 3600;
+    const qint64 minutes  = (totalSec / 60) % 60;
+    const qint64 seconds  = totalSec % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(seconds, 2, 10, QLatin1Char('0'));
+    }
     return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+QString dateTimeText(const QDateTime& dt) {
+    return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString{};
 }
 
 QString fileSizeText(qint64 bytes) {

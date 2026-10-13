@@ -67,6 +67,8 @@ Rectangle {
     signal openPlaylistRequested()
     signal savePlaylistRequested()
     signal closePlaylistRequested()
+    /// File > Quit (Linux and Windows; macOS quits from the application menu).
+    signal quitRequested()
     signal findRequested()
     signal reloadSelectedRequested()
     signal removeUnavailableRequested()
@@ -126,6 +128,21 @@ Rectangle {
                     text: "Close playlist"
                     shortcut: "Ctrl+W"
                     onTriggered: root.closePlaylistRequested()
+                }
+                // macOS quits from the native application menu (Cmd+Q), so
+                // the entry and its separator exist only on the other two
+                // platforms. The separator sizes on the platform test, not on
+                // `visible`, which a closed popup propagates as false.
+                MenuSeparator {
+                    visible: Qt.platform.os !== "osx"
+                    height: Qt.platform.os === "osx" ? 0 : implicitHeight
+                }
+                ThemedMenuItem {
+                    text: "Quit"
+                    // Spelled out: StandardKey.Quit has no Windows binding.
+                    shortcut: "Ctrl+Q"
+                    collapsed: Qt.platform.os === "osx"
+                    onTriggered: root.quitRequested()
                 }
             }
         }

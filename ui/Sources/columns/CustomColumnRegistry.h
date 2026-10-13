@@ -119,14 +119,19 @@ signals:
     /// manager re-reads the table.
     void columnsChanged();
 
+    /// A write to playlist_custom_columns.yaml failed (@p message names the
+    /// file). The in-memory state stands and the edit still shows, so the
+    /// manager window routes the message to the session log.
+    void persistFailed(QString message);
+
 private:
     /// Index of @p id in m_columns, or -1.
     [[nodiscard]] int indexOf(const QString& id) const;
 
     /// Write the whole list to playlist_custom_columns.yaml (atomic; a failed
-    /// write logs a warning and keeps the in-memory state). User order is
-    /// preserved.
-    void persist() const;
+    /// write logs a warning, emits persistFailed and keeps the in-memory
+    /// state). User order is preserved.
+    void persist();
 
     QList<CustomColumn> m_columns;
 };

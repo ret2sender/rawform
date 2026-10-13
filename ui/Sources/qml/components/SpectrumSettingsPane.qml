@@ -63,7 +63,7 @@ Item {
             text: "Spectrum view"
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 16
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.Bold
         }
 
@@ -101,7 +101,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: (pane.settings && pane.settings.spectrumSource === 1)
                   ? "Source: the decoded signal at full scale, unaffected by the volume."
                   : "Output: the signal as heard, so the bars follow the volume fader."

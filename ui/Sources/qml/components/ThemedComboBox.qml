@@ -58,7 +58,7 @@ ComboBox {
     readonly property bool displayTruncated: control.contentItem === label && label.truncated
 
     font.family: Theme.uiFont
-    font.pixelSize: 12
+    font.pixelSize: Theme.fontSizeBody
     spacing: 6
     padding: 6
     leftPadding: padding

@@ -129,7 +129,7 @@ Item {
             text: "Playback"
             color: Theme.textPrimary
             font.family: pane.uiFont
-            font.pixelSize: 16
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.Bold
         }
 
@@ -198,7 +198,7 @@ Item {
                         color: Theme.textPrimary
                         text: deviceTip.text
                         font.family: pane.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         wrapMode: Text.Wrap
                     }
                     background: Rectangle {
@@ -217,7 +217,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: "\"Follow system default\" tracks the system's output choice, moving with it when it changes; picking a device pins rawform's audio to it, even if the system default later moves (remembered across restarts, by stable device identity). Applies on Apply or OK; if something is playing, the audio moves immediately and keeps its position. A remembered device that is not connected is kept as the choice and rawform falls back to the default until it returns."
         }
 
@@ -258,7 +258,7 @@ Item {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             font.family: pane.uiFont
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontSizeSmall
             text: (pane.settings && !pane.settings.bitPerfect)
                   ? "Off: rawform leaves the device's sample rate alone. The device returns to its own rate (restoring one an earlier track had switched) and every track is resampled to it. Takes effect at the next track."
                   : "On: the device follows each track's sample rate when it can; rates beyond the hardware fall back to the nearest supported rate in the same family (192 kHz plays at 96 kHz on a 96 kHz-max device). The device's own rate is restored when playback stops or rawform quits. Takes effect at the next track."

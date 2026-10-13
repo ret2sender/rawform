@@ -31,10 +31,8 @@
 
 #include "columns/ColumnSchema.h" // fieldFromString, ColumnField
 
-#include <QDateTime>
 #include <QLatin1Char>
 #include <QLatin1String>
-#include <QLocale>
 #include <QString>
 #include <QStringList>
 
@@ -54,10 +52,6 @@ namespace {
 /// Empty string for an unset (<= 0) integer field; otherwise the number.
 QString intOrEmpty(int v) {
     return v > 0 ? QString::number(v) : QString{};
-}
-
-QString dateText(const QDateTime& dt) {
-    return dt.isValid() ? QLocale().toString(dt, QLocale::ShortFormat) : QString{};
 }
 
 /// Resolve ONE %token% name to its value (see evaluatePattern's doc for the
@@ -112,8 +106,8 @@ QString renderFieldValue(const TrackData& t, ColumnField field) {
     case ColumnField::FolderName:   return t.folderName;
     case ColumnField::FilePath:     return t.filePath;
     case ColumnField::FileSize:     return formats::fileSizeText(t.fileSize);
-    case ColumnField::Modified:     return dateText(t.modified);
-    case ColumnField::Created:      return dateText(t.created);
+    case ColumnField::Modified:     return formats::dateTimeText(t.modified);
+    case ColumnField::Created:      return formats::dateTimeText(t.created);
     case ColumnField::SubsongIndex: return QString::number(t.subsongIndex);
 
     // --- Composite renderers -----------------------------------------------

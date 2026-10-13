@@ -44,9 +44,9 @@
 //
 // Lifetime of the captured world: _model and reloader belong to the owning tab,
 // which can close while this window is open (the window itself is parented to
-// the long-lived PlaylistView, so it survives). A QML var wrapping a destroyed
-// QObject is NOT dependably null/falsy, so every post-open touch guards through
-// _alive (a C++ probe via PlaylistTabs.objectAlive); a dead model or reloader
+// the long-lived PlaylistView, so it survives). Both are typed object
+// properties, which read back null once the object is destroyed, so every
+// post-open touch guards with a null test; a dead model or reloader
 // skips its phase, and a reload pass orphaned by a dying reloader is completed
 // by the reloader's destructor token flush. The file writes are path-based and
 // land regardless; when nothing is left to re-pull from, the panes adopt the
@@ -131,14 +131,15 @@ Window {
     // at createObject time. A VALUE capture on purpose, never a live binding:
     // the host's root.reloader tracks the ACTIVE tab, and a tab switch under
     // this non-modal window must not silently retarget the post-apply reload.
-    // Nulls out in QML if the tab (and with it the reloader) is destroyed.
-    property var reloader: null
+    // Typed, so it reads back null once the tab (and with it the reloader) is
+    // destroyed.
+    property MetadataReloader reloader: null
 
     property Item menuBlurSource: windowBody
     property int currentTab: 0   // Metadata is the default tab
 
-    // Apply state.
-    property var _model: null
+    // Apply state. Typed like `reloader`, for the same null-on-death read.
+    property PlaylistModel _model: null
     property var _rows: []
     // Durable { path, subsong } identity keys for the open-time selection (see
     // PlaylistModel::trackKeys). _rows is only a convenience mirror of their
@@ -228,20 +229,6 @@ Window {
     function _setStatus(msg, level) {
         propertiesWindow._statusMsg = msg
         propertiesWindow._statusLevel = level === undefined ? "info" : level
-    }
-
-    // Reliable liveness probe for the captured tab references (_model, reloader),
-    // whose owner can die while this non-modal window is open. A QML var holding
-    // a destroyed QObject is NOT dependably null/falsy in every JS context: the
-    // dangling wrapper can stay truthy and then throw on the method call, which
-    // would abort the apply sequencer mid-flight and strand the window in
-    // Applying. Marshaling the wrapper to a C++ QObject* parameter IS reliable
-    // (the engine passes nullptr for a dead object), so route the check through
-    // PlaylistTabs.objectAlive.
-    function _alive(obj) {
-        if (obj === null || obj === undefined)
-            return false
-        return PlaylistTabs.objectAlive(obj)
     }
 
     // Open the Edit Value dialog for a field row: any multi-track edit, the
@@ -500,10 +487,10 @@ Window {
         // token and signals pathsReloaded(token) when exactly that pass is done
         // (an empty resolution still runs as an empty pass), so the sequencer
         // can neither hang on a pass that never runs nor finish early on an
-        // unrelated pass's refreshed(). _alive, not a truthiness check: the
-        // owning tab (and its reloader) may have died since open, and calling
-        // into a dangling wrapper would throw and strand the sequencer.
-        if (propertiesWindow._anyWrote && propertiesWindow._alive(propertiesWindow.reloader))
+        // unrelated pass's refreshed(). The null test matters: the owning tab
+        // (and its reloader) may have died since open, and a call into a dead
+        // reloader would throw and strand the sequencer.
+        if (propertiesWindow._anyWrote && propertiesWindow.reloader !== null)
             propertiesWindow._reloadToken =
                 propertiesWindow.reloader.reloadPaths(propertiesWindow._touchedPaths)
         else
@@ -520,10 +507,9 @@ Window {
         if (propertiesWindow._anyWrote) {
             // Remap the open-time identity keys to CURRENT rows: positions may
             // have shifted since open, and the model itself may be dead (the
-            // owning tab closed; _alive, not truthiness, for the same dangling-
-            // wrapper reason as _reloadPhase). Tracks that left the playlist
-            // drop out of the mapping.
-            var modelAlive = propertiesWindow._alive(propertiesWindow._model)
+            // owning tab closed, which reads as null here). Tracks that left
+            // the playlist drop out of the mapping.
+            var modelAlive = propertiesWindow._model !== null
             var cur = modelAlive
                     ? propertiesWindow._model.rowsForKeys(propertiesWindow._keys)
                     : []
@@ -587,8 +573,7 @@ Window {
     function _reloadInfo() {
         if (propertiesWindow._applying || scanController.busy)
             return
-        if (!propertiesWindow._alive(propertiesWindow.reloader)
-                || !propertiesWindow._alive(propertiesWindow._model)) {
+        if (propertiesWindow.reloader === null || propertiesWindow._model === null) {
             propertiesWindow._setStatus("Owning playlist is gone; nothing to reload.",
                                         "warning")
             return
@@ -615,9 +600,8 @@ Window {
     function _finishReload() {
         propertiesWindow._infoReloadToken = -1
         // Same remap as _finishApply: positions may have shifted since open,
-        // and the model may have died while the pass ran (_alive, not
-        // truthiness, for the dangling-wrapper reason documented there).
-        var cur = propertiesWindow._alive(propertiesWindow._model)
+        // and the model may have died while the pass ran (null then).
+        var cur = propertiesWindow._model !== null
                 ? propertiesWindow._model.rowsForKeys(propertiesWindow._keys)
                 : []
         if (cur.length > 0) {
@@ -752,7 +736,7 @@ Window {
                     }
                     color: Theme.textPrimary
                     font.family: propertiesWindow.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
 
@@ -839,7 +823,7 @@ Window {
                                 verticalAlignment: Text.AlignVCenter
                                 color: tab.current ? Theme.textPrimary : Theme.textDim
                                 font.family: propertiesWindow.uiFont
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.fontSizeBody
                             }
                         }
                     }

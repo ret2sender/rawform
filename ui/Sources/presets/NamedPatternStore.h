@@ -122,6 +122,13 @@ signals:
     /// catalog().
     void patternsChanged();
 
+    /// A write to the preset file failed (@p message names the file). The
+    /// in-memory state stands and the dialog still reflects the edit, so the
+    /// dialog owning this store surfaces the message in its status line;
+    /// without that, "Save preset" looked successful while only the console
+    /// knew the file was not written.
+    void persistFailed(QString message);
+
 protected:
     /// @p fileName is the file under userConfigDir(); @p banner the comment
     /// block written above the emitted YAML (newline-terminated lines);
@@ -135,8 +142,9 @@ private:
     [[nodiscard]] int indexOf(const QString& name) const;
 
     /// Write the whole list to the file (atomic; a failed write logs a
-    /// warning and keeps the in-memory state). User order preserved.
-    void persist() const;
+    /// warning, emits persistFailed and keeps the in-memory state). User
+    /// order preserved.
+    void persist();
 
     QString       m_path;       ///< absolute; may not exist yet
     QByteArray    m_banner;

@@ -71,6 +71,9 @@ Window {
     // UI family for this window's own labels; defaults to the Theme singleton,
     // kept as a property purely as an override surface.
     property string uiFont: Theme.uiFont
+    /// The session log (assigned by PlaylistView): a registry write that
+    /// failed lands there as a warning, since this window has no status line.
+    property LogStore log
 
     title: "Custom Playlist Columns"
     // Size restores from window.yaml's keyed store, else the built-in
@@ -168,6 +171,16 @@ Window {
     onClosing: {
         customColumnsWindow._saveSize()
         HeapTrim.trimSoon()
+    }
+
+    // A registry write that failed: the record changes stay in memory and the
+    // table keeps showing them; the log carries the reason.
+    Connections {
+        target: CustomColumnRegistry
+        function onPersistFailed(message) {
+            if (customColumnsWindow.log)
+                customColumnsWindow.log.append("warning", message)
+        }
     }
 
     function refresh() {
@@ -279,7 +292,7 @@ Window {
             color: editableCell.value.length > 0 ? Theme.textPrimary : Theme.textDisabled
             elide: Text.ElideRight
             font.family: editableCell.fontFamily
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
             font.italic: editableCell.value.length === 0
             text: editableCell.value.length > 0 ? editableCell.value : editableCell.placeholder
             verticalAlignment: Text.AlignVCenter
@@ -302,7 +315,7 @@ Window {
             id: editor
             anchors.fill: parent
             font.family: editableCell.fontFamily
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontSizeBody
             visible: editableCell.editing
 
             onEditingFinished: {
@@ -356,7 +369,7 @@ Window {
                     text: "Custom Playlist Columns"
                     color: Theme.textPrimary
                     font.family: customColumnsWindow.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
 
@@ -461,7 +474,9 @@ Window {
                                 width: customColumnsWindow.nameW - 8
                                 height: parent.height
                                 text: "Name"; color: Theme.textPrimary
-                                font.family: Theme.uiFont; font.pixelSize: 12; font.weight: Font.Bold
+                                font.family: Theme.uiFont
+                                font.pixelSize: Theme.fontSizeBody
+                                font.weight: Font.Bold
                                 verticalAlignment: Text.AlignVCenter
                             }
                             Rectangle {
@@ -473,7 +488,9 @@ Window {
                                 width: customColumnsWindow.alignW - 8
                                 height: parent.height
                                 text: "Align"; color: Theme.textPrimary
-                                font.family: Theme.uiFont; font.pixelSize: 12; font.weight: Font.Bold
+                                font.family: Theme.uiFont
+                                font.pixelSize: Theme.fontSizeBody
+                                font.weight: Font.Bold
                                 verticalAlignment: Text.AlignVCenter
                             }
                             Rectangle {
@@ -485,7 +502,9 @@ Window {
                                 x: customColumnsWindow.nameW + customColumnsWindow.alignW + 8
                                 height: parent.height
                                 text: "Pattern"; color: Theme.textPrimary
-                                font.family: Theme.uiFont; font.pixelSize: 12; font.weight: Font.Bold
+                                font.family: Theme.uiFont
+                                font.pixelSize: Theme.fontSizeBody
+                                font.weight: Font.Bold
                                 verticalAlignment: Text.AlignVCenter
                             }
                         }
@@ -505,7 +524,7 @@ Window {
                                 text: "No custom columns yet. Click +"
                                 color: Theme.textFaint
                                 font.family: Theme.uiFont
-                                font.pixelSize: 12
+                                font.pixelSize: Theme.fontSizeBody
                             }
 
                             delegate: Rectangle {
@@ -559,43 +578,23 @@ Window {
                                     x: customColumnsWindow.nameW
                                     width: customColumnsWindow.alignW
                                     height: parent.height
-                                    ComboBox {
+                                    ThemedComboBox {
                                         id: alignCombo
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.left: parent.left
                                         anchors.leftMargin: 6
                                         width: parent.width - 12
-                                        // The Basic style's implicit height is taller
-                                        // than the 30 px row; pin an explicit height that
-                                        // fits and zero the insets so the background
-                                        // matches it. Centered, this leaves 3 px
-                                        // clearance top and bottom and no longer spills
-                                        // into the next row.
+                                        // The shared combo's 28 px frame is taller than
+                                        // fits the 30 px row; pinned to 24 so it sits
+                                        // with 3 px clearance top and bottom. The
+                                        // control's rightPadding already reserves the
+                                        // arrow, and the widest option, "Center", fits
+                                        // the box with room to spare.
                                         height: 24
-                                        topInset: 0
-                                        bottomInset: 0
-                                        model: ["Left", "Center", "Right"]
-                                        font.family: Theme.uiFont
-                                        font.pixelSize: 12
-
-                                        // Basic's default label contentItem is a
-                                        // TextField that reserves ~6 px of vertical
-                                        // padding; a 24 px control has no room for it and
-                                        // clips the glyphs. A plain Text with no vertical
-                                        // padding sits flush in the row. The control's
-                                        // own rightPadding already reserves the chevron,
-                                        // so no right inset is needed here (adding one
-                                        // shrank the box until even "Left" elided). With
-                                        // no elide set the label can never show an
-                                        // ellipsis, and the widest option, "Center", fits
-                                        // the ~49 px box with room to spare.
-                                        contentItem: Text {
-                                            leftPadding: 2
-                                            text: alignCombo.displayText
-                                            font: alignCombo.font
-                                            color: Theme.textPrimary
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
+                                        textRole: "name"
+                                        model: [{ name: "Left" }, { name: "Center" },
+                                                { name: "Right" }]
+                                        Accessible.name: "Align"
                                         Component.onCompleted:
                                             currentIndex = customColumnsWindow.alignIndex(rowDelegate.modelData.align)
                                         onActivated: {

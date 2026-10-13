@@ -48,9 +48,10 @@
 // which doubles as the visible receipt that the rename landed.
 //
 // The captured model belongs to the owning tab, which can close under this
-// non-modal window; every touch goes through _alive (PlaylistTabs.objectAlive,
-// the destroyed-object probe). A dead model degrades the dialog to a
-// static view whose Apply is disabled (jobs need a live preview).
+// non-modal window; it is a typed object property, which reads back null once
+// the model is destroyed, and every touch tests for that. A dead model
+// degrades the dialog to a static view whose Apply is disabled (jobs need a
+// live preview).
 
 pragma ComponentBehavior: Bound
 
@@ -104,7 +105,7 @@ Window {
     }
 
     // --- captured world (openFor) + live state -----------------------------
-    property var _model: null      // owning tab's PlaylistModel (guard via _alive)
+    property PlaylistModel _model: null  // owning tab's model; null once it dies
     property var _keys: []         // durable { path, subsong } snapshot
     property var _previewRows: []  // last RenamePreviewer result
     property bool _applying: false
@@ -135,12 +136,6 @@ Window {
         !_applying && !renamer.busy && _okCount > 0 && !_hasBlocking
         && patternField.text.length > 0
 
-    function _alive(obj) {
-        if (!obj)
-            return false
-        return PlaylistTabs.objectAlive(obj)
-    }
-
     function openFor(model, rows) {
         if (!model || !rows || rows.length === 0) {
             renameDialog.destroy() // never shown; do not leak the instance
@@ -169,7 +164,7 @@ Window {
     function _refreshPreview() {
         renameDialog._statusFlash = false
         statusClear.stop()
-        if (!renameDialog._alive(renameDialog._model)) {
+        if (renameDialog._model === null) {
             renameDialog._previewRows = []
             renameDialog._statusText = "playlist is gone; nothing to rename"
             return
@@ -312,7 +307,7 @@ Window {
                     text: "Rename Files"
                     color: Theme.textPrimary
                     font.family: renameDialog.uiFont
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontSizeTitle
                     font.weight: Font.Bold
                 }
 
@@ -340,13 +335,13 @@ Window {
                         text: "Pattern"
                         color: Theme.textPrimary
                         font.family: renameDialog.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                     }
                     TextField {
                         id: patternField
                         Layout.fillWidth: true
                         font.family: Theme.monoFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         placeholderText: "%track_no%-%artist%-%title%"
                         enabled: !renameDialog._applying
 
@@ -371,7 +366,7 @@ Window {
                         text: "Preset "
                         color: Theme.textPrimary
                         font.family: renameDialog.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                     }
                     PresetRow {
                         id: presetRow
@@ -417,7 +412,7 @@ Window {
                             text: "Current name"
                             color: Theme.textFaint
                             font.family: renameDialog.uiFont
-                            font.pixelSize: 11
+                            font.pixelSize: Theme.fontSizeSmall
                             elide: Text.ElideRight
                         }
                         Text {
@@ -427,7 +422,7 @@ Window {
                             text: "New name"
                             color: Theme.textFaint
                             font.family: renameDialog.uiFont
-                            font.pixelSize: 11
+                            font.pixelSize: Theme.fontSizeSmall
                             elide: Text.ElideRight
                         }
                         // The column divider + its drag handle. The visible
@@ -492,7 +487,7 @@ Window {
                                 color: previewRow.grayed ? Theme.textDisabled
                                                          : Theme.textPrimary
                                 font.family: Theme.monoFont
-                                font.pixelSize: 11
+                                font.pixelSize: Theme.fontSizeSmall
                                 elide: Text.ElideMiddle
                             }
                             Text {
@@ -513,7 +508,7 @@ Window {
                                      : previewRow.grayed ? Theme.textDisabled
                                                          : Theme.textPrimary
                                 font.family: Theme.monoFont
-                                font.pixelSize: 11
+                                font.pixelSize: Theme.fontSizeSmall
                                 font.italic: previewRow.modelData.status !== "ok"
                                 elide: Text.ElideMiddle
                             }
@@ -548,7 +543,7 @@ Window {
                     color: renameDialog._statusFlash ? Theme.textInactive
                          : renameDialog._hasBlocking ? Theme.danger : Theme.textFaint
                     font.family: renameDialog.uiFont
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontSizeSmall
                 }
                 RowLayout {
                     id: footerButtons

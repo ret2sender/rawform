@@ -38,8 +38,9 @@
 //  - Titles come straight from headerData and update live via headerDataChanged.
 //
 // Persistence surface (currentColumnOrder/currentColumnWidths on save,
-// applyColumnLayout on load) reads/writes the header; `columnWidths` is only the
-// default seed when nothing is saved.
+// applyWidths on a tab switch) reads/writes the header; `columnWidths` is only
+// the default seed when nothing is saved. A stored layout is restored by
+// PlaylistTabs on the model itself (the reset rebuilds the header's columns).
 
 pragma ComponentBehavior: Bound
 
@@ -148,17 +149,17 @@ Item {
     // (dropUrlsIntoActive with the drop-point row): .rwfpl files are
     // concatenated into THIS (active) playlist at that row, everything else
     // goes to the scanner. The split lives in C++ (see the note at the drop).
-    property var tabs
+    property PlaylistTabs tabs
 
     // The active tab's MetadataReloader (assigned from MainWindow as
     // PlaylistTabs.activeReloader). The row context menu's "Reload info" forces
     // a re-read of the current selection through it.
-    property var reloader
+    property MetadataReloader reloader
 
     // The session LogStore (assigned from MainWindow). The file DropArea logs
     // one line per drop (url count + handler time) to the status console; a
     // null log degrades to silent.
-    property var log
+    property LogStore log
 
     // Shift-range anchor: the row a range extends FROM. Mirrors FileQueue's
     // __lastClickedIndex. Updated on every click.
@@ -254,8 +255,9 @@ Item {
     // `column` index while the field shown there changes, so nothing the binding
     // watches updates and the alignment goes stale (some columns right, some
     // left). Referencing this revision inside those bindings gives them a
-    // dependency to re-evaluate on. (applyColumnLayout() resets the model, which
-    // rebuilds delegates, so it doesn't need this; only the in-place move does.)
+    // dependency to re-evaluate on. (A stored-layout restore resets the model,
+    // which rebuilds delegates, so it doesn't need this; only the in-place
+    // move does.)
     property int _layoutRevision: 0
 
     // Model-driven layout changes (a custom column's alignment edit, or an
@@ -988,8 +990,8 @@ Item {
     // Three functions, read and written by the hosts: PlaylistDialogs
     // snapshots currentColumnOrder() + currentColumnWidths() into a saved
     // .rwfpl / preset, the tab bar and this file stash currentColumnWidths()
-    // on a tab switch (PlaylistTabs.stashActiveWidths), and applyColumnLayout()
-    // restores a tab's stored layout on activation and load.
+    // on a tab switch (PlaylistTabs.stashActiveWidths), and applyWidths()
+    // seeds the header from a tab's parked widths on activation.
 
     // Read the current (possibly resized) widths, in VISUAL order, for saving
     // alongside the order below.
@@ -1012,26 +1014,6 @@ Item {
     // layout. Keyed by field id (not position) so it survives schema edits.
     function currentColumnOrder() {
         return root.model ? root.model.currentColumnOrder() : []
-    }
-
-    // Restore a saved layout on playlist load. Order and widths are reconciled
-    // TOGETHER by the model against the live schema (drop retired fields, append
-    // new ones at their defaults); the model hands back widths already
-    // re-sequenced to the resulting visual order, which we apply positionally,
-    // so order and width can never drift out of step.
-    function applyColumnLayout(fieldIds, widths) {
-        if (!root.model)
-            return
-        var aligned = root.model.applyColumnLayout(fieldIds, widths)
-        // The model reset above rebuilds the header's columns (it's bound to the
-        // model); seed each one's width onto the header, which is now the single
-        // owner. setColumnWidth records the width by index even before the cell
-        // re-realizes, so ordering vs. the reset is safe. The body re-reads these
-        // through its provider; forceLayout both so the change shows immediately.
-        for (var c = 0; c < aligned.length; ++c)
-            header.setColumnWidth(c, aligned[c])
-        header.forceLayout()
-        tableView.forceLayout()
     }
 
     // Width-only seed, for a TAB SWITCH. The model swap (model: activeModel) has
@@ -1300,7 +1282,7 @@ Item {
                     resizableColumns: true
 
                     // The header owns the column widths. Its provider returns the
-                    // explicit width once set (by a resize drag or applyColumnLayout),
+                    // explicit width once set (by a resize drag or applyWidths),
                     // else the schema default, so columns show sensible widths from
                     // the first frame with no seeding step.
                     columnWidthProvider: function (column) {
@@ -1749,7 +1731,7 @@ Item {
                     // The body does not own widths anymore, it reads the
                     // header's explicit widths (the single source). The
                     // follow-trigger Connections below relayouts the body whenever
-                    // the header's total width changes (a resize or applyColumnLayout),
+                    // the header's total width changes (a resize or applyWidths),
                     // so this provider is re-queried with the new values. Unset
                     // columns fall back to the schema default, matching the header's
                     // own provider so the two never disagree.
@@ -1837,7 +1819,7 @@ Item {
                                  : cell.selected ? Theme.accentHover
                                  : (cell.rowAvailable ? Theme.textPrimary : Theme.textFaint)
                             font.family: Theme.uiFont
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontSizeBody
                             elide: Text.ElideRight
                             verticalAlignment: Text.AlignVCenter
                             // Alignment driven by the column schema (via the
@@ -2481,7 +2463,7 @@ Item {
                 color: Qt.rgba(1, 1, 1, 0.12)
                 radius: 2
                 border.width: 1
-                border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, 0.7)
+                border.color: Qt.alpha(Theme.accentSoft, 0.7)
 
                 // Column title, kept within the header-height band at the top.
                 Text {
@@ -2494,7 +2476,7 @@ Item {
                     text: root._dragTitle
                     color: "#FFFFFF"
                     font.family: Theme.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     font.weight: Font.Bold
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
@@ -2585,14 +2567,14 @@ Item {
             Behavior on strokeOpacity {
                 NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
             }
-            border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, strokeOpacity)
+            border.color: Qt.alpha(Theme.accentSoft, strokeOpacity)
         }
     }
 
     // Follow-trigger. The header owns the column widths; the body reads them via
     // its columnWidthProvider, but TableView caches provider results and only
     // re-queries on a relayout. So whenever the header's total content width
-    // changes, a built-in resize drag, or applyColumnLayout, relayout the body
+    // changes, a built-in resize drag, or applyWidths, relayout the body
     // so it picks up the new widths. The spike showed this tracks live and
     // smoothly with no "ongoing layout" warning (header and body are separate
     // views, so the body isn't mid-layout when this fires).
@@ -2766,6 +2748,7 @@ Item {
     // CustomColumnsWindow.qml; opened via openManager(fieldId).
     CustomColumnsWindow {
         id: customColumnsWindow
+        log: root.log
     }
 
     // Right-click context menu for playlist rows. Themed (blurred translucent)
@@ -2886,8 +2869,8 @@ Item {
     // PropertiesWindow's lifetime verbatim: NON-MODAL, MULTI-INSTANCE, a fresh
     // window per invocation that snapshots the selection in openFor and
     // destroys itself on close; parented to this long-lived view so it
-    // survives tab switches (its captured model is guarded through
-    // PlaylistTabs.objectAlive inside the dialog). Shares the Properties
+    // survives tab switches (its captured model is a typed property the
+    // dialog null-tests). Shares the Properties
     // cascade counter so mixed stacks of both window kinds fan out together.
     Component {
         id: renameDialogComponent

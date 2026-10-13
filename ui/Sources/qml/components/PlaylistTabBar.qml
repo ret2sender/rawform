@@ -83,13 +83,13 @@ Rectangle {
     // Tabs are verticalCenter-anchored with a 12 px font, so 24 stays uncramped.
     implicitHeight: 24
 
-    property var tabs
-    property var view
+    property PlaylistTabs tabs
+    property PlaylistView view
 
     // The session LogStore (assigned from MainWindow). The strip DropArea logs
     // one line per drop (url count + handler time) to the status console; a
     // null log degrades to silent.
-    property var log
+    property LogStore log
 
     // Drag-reorder gesture state (model is reordered on release, not live).
     property int  _dragFrom: -1
@@ -472,7 +472,7 @@ Rectangle {
                         color: tabItem.index === strip.tabs.currentIndex ? Theme.textPrimary : Theme.textDim
                         elide: Text.ElideRight
                         font.family: Theme.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         font.weight: Font.Bold
                         text: tabItem.model.title
                         visible: !tabItem.editing
@@ -495,7 +495,7 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         color: Theme.textDim
                         font.family: Theme.monoFont
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontSizeSmall
                         text: shown ? String(tabItem.model.queueCount) : ""
                         visible: shown && !tabItem.editing
                     }
@@ -515,7 +515,7 @@ Rectangle {
                         selectionColor: Theme.selectionFill
                         selectedTextColor: Theme.textPrimary
                         font.family: Theme.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
 
                         function begin() {
                             text = tabItem.model.title
@@ -545,7 +545,7 @@ Rectangle {
                         text: "\u00D7" // multiplication sign
                         color: closeHover.hovered ? Theme.textPrimary : Theme.textFaint
                         font.family: Theme.uiFont
-                        font.pixelSize: 14
+                        font.pixelSize: Theme.fontSizeSubheading
                         // Passive hover (color only); clicks are resolved by the
                         // single MouseArea below via a hit-test, so there is no
                         // competing tap grabber.
@@ -731,7 +731,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: "\u2039" // single left angle quote
                 font.family: Theme.uiFont
-                font.pixelSize: 16
+                font.pixelSize: Theme.fontSizeHeading
                 color: !strip.canScrollLeft ? "#4A4A4A"
                      : (leftArrowMouse.containsMouse ? Theme.textPrimary : Theme.textInactive)
             }
@@ -758,7 +758,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: "\u203A" // single right angle quote
                 font.family: Theme.uiFont
-                font.pixelSize: 16
+                font.pixelSize: Theme.fontSizeHeading
                 color: !strip.canScrollRight ? "#4A4A4A"
                      : (rightArrowMouse.containsMouse ? Theme.textPrimary : Theme.textInactive)
             }

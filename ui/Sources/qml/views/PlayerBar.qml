@@ -85,7 +85,7 @@ Item {
     component FmtText: Text {
         color: Theme.success
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
         font.weight: Font.Bold
     }
 
@@ -251,14 +251,14 @@ Item {
                 TextMetrics {
                     id: kbpsRefMetrics
                     font.family: Theme.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     font.weight: Font.Bold
                     text: "8888"
                 }
                 TextMetrics {
                     id: kbpsNowMetrics
                     font.family: Theme.uiFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     font.weight: Font.Bold
                     text: "" + AudioController.displayBitrateKbps
                 }
@@ -275,7 +275,7 @@ Item {
                     opacity: AudioController.hasTrack ? 1 : 0
                     color: Theme.textPrimary
                     font.family: Theme.monoFont
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontSizeBody
                     font.weight: Font.Bold
                     text: Format.mmss(AudioController.positionSeconds)
                           + " / " + Format.mmss(AudioController.durationSeconds)
@@ -377,7 +377,7 @@ Item {
                         color: Theme.textPrimary
                         opacity: AudioController.muted ? 0.55 : 1.0
                         font.family: Theme.uiFont
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontSizeBody
                         font.weight: Font.Bold
                     }
 

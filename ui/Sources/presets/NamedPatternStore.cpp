@@ -175,7 +175,7 @@ int NamedPatternStore::indexOf(const QString& name) const {
     return -1;
 }
 
-void NamedPatternStore::persist() const {
+void NamedPatternStore::persist() {
     // A sequence under a top-level `patterns:` key, preserving user order.
     YAML::Emitter out;
     out << YAML::BeginMap;
@@ -196,7 +196,10 @@ void NamedPatternStore::persist() const {
     content += out.c_str();
     content += '\n';
 
-    yamlfile::writeAtomically(m_path, content);
+    if (!yamlfile::writeAtomically(m_path, content)) {
+        emit persistFailed(QStringLiteral("Could not save the %1 to %2")
+                               .arg(m_presetNoun, m_path));
+    }
 }
 
 } // namespace rawform

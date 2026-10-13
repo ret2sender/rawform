@@ -49,7 +49,7 @@ Rectangle {
     color: Theme.surfacePage
     radius: 4
     border.width: 2
-    border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, 0.10)
+    border.color: Qt.alpha(Theme.accentSoft, 0.10)
 
     // What to display. `level` selects the message color; `text` is the message.
     property string level: "info"          // info | warning | error
@@ -75,6 +75,6 @@ Rectangle {
         color: bar._levelColor(bar.level)
         elide: Text.ElideRight
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
     }
 }

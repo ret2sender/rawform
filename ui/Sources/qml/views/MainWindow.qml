@@ -61,28 +61,28 @@ ApplicationWindow {
     flags: Qt.platform.os === "osx" ? Qt.Window
                                     : (Qt.Window | Qt.FramelessWindowHint)
     // Startup geometry (window.yaml). Size restores from the last windowed quit,
-    // else the built-in default; position restores only when the store validated
-    // it against the connected screens (hasSavedPosition), else the window opens
-    // dead-center on the screen it launches on. Bound up front rather than
-    // nudged in Component.onCompleted so the window is placed from its very
-    // first frame, with no visible jump (the default Qt/AppKit placement lands
-    // at the left edge on macOS, which is exactly what this avoids).
-    // Screen.virtualX/virtualY anchor the centering to the correct screen in a
-    // multi-monitor virtual desktop.
+    // else the built-in default, clamped to the primary screen by the store;
+    // position restores when the store validated it against the connected
+    // screens, else the store centers the window on the primary screen's
+    // available area. Bound up front rather than nudged in Component.onCompleted
+    // so the window is placed from its very first frame, with no visible jump
+    // (the default Qt/AppKit placement lands at the left edge on macOS, which is
+    // exactly what this avoids). The four values are constants once the store
+    // has loaded: the bindings carry no dependency on the window's own size or
+    // on the Screen attached property, so a resize or a move to another monitor
+    // never re-evaluates them (on cocoa and xcb that re-centered the window
+    // under the user's hands; Wayland ignores setX/setY and never showed it).
     height: WindowGeometryStore.startupHeight
     width: WindowGeometryStore.startupWidth
     // Hard floor under the split constraints: playlistPane asks for half the
     // window and mediaDataSplit for 256 px, so below roughly 900 px the two
     // minimums cannot both hold and the SplitView starts inverting. The
-    // floor also clamps a hand-edited window.yaml.
+    // floor also clamps a hand-edited window.yaml, and wins over the store's
+    // screen clamp on a screen smaller than it.
     minimumWidth: 960
     minimumHeight: 600
-    x: WindowGeometryStore.hasSavedPosition
-         ? WindowGeometryStore.startupX
-         : Screen.virtualX + Math.round((Screen.width - width) / 2)
-    y: WindowGeometryStore.hasSavedPosition
-         ? WindowGeometryStore.startupY
-         : Screen.virtualY + Math.round((Screen.height - height) / 2)
+    x: WindowGeometryStore.startupX
+    y: WindowGeometryStore.startupY
     visible: true
 
     // Flush column widths (and any other debounced edit) on close. The per-tab
@@ -225,6 +225,13 @@ ApplicationWindow {
     // Retain playlist actions in the log, not just live on the bar: log the start
     // of each activity, plus a brief completion so the idle bar reads "done"
     // instead of freezing on the last "in progress" line.
+    // A playlist file the session could not read: the tab opens empty and
+    // the reason lands here, the one surface the user sees.
+    Connections {
+        target: PlaylistTabs
+        function onWarningOccurred(message) { logStore.append("warning", message) }
+    }
+
     Connections {
         target: TrackScanner
         function onScanningChanged() {
@@ -313,10 +320,6 @@ ApplicationWindow {
         }
     }
 
-    // SettingsDialog {
-    //     id: settingsDialog
-    // }
-
     Rectangle {
         id: windowBackground
         anchors.fill: parent
@@ -357,8 +360,8 @@ ApplicationWindow {
                 onMaximizeToggleRequested: applicationWindow._onTitleBarDoubleClicked()
             }
 
-            ThemedSplitView{
-                id:mainSplit
+            ThemedSplitView {
+                id: mainSplit
                 Layout.fillHeight: true
                 Layout.fillWidth: true
                 Layout.leftMargin: 12
@@ -400,6 +403,9 @@ ApplicationWindow {
                             // (closing the last one spawns a fresh empty one).
                             onClosePlaylistRequested:
                                 PlaylistTabs.closeTab(PlaylistTabs.currentIndex)
+                            // Through close(), so onClosing runs the same
+                            // flush and geometry save as the title-bar X.
+                            onQuitRequested: applicationWindow.close()
 
                             // With a selection: force-reload those files. With
                             // nothing selected: refresh the whole playlist
@@ -453,17 +459,25 @@ ApplicationWindow {
                             // the Playback Queue tab: as the queue's own preset,
                             // which is what seeds its layout at launch (the queue
                             // has no live file); the new-tab default is untouched.
+                            // Both branches report through the log: the store
+                            // says whether the preset file was written, and a
+                            // failed write is the one thing the user cannot
+                            // see otherwise (the live default still updates).
                             onSaveColumnLayoutRequested: {
                                 var order = playlistView.currentColumnOrder()
                                 var widths = playlistView.currentColumnWidths()
-                                if (PlaylistTabs.activeIsQueue) {
-                                    PlaylistStore.saveColumnPreset(order, widths, true)
-                                    logStore.append("info",
-                                                    "Playback queue column layout saved")
-                                } else {
-                                    PlaylistStore.saveColumnPreset(order, widths)
+                                var forQueue = PlaylistTabs.activeIsQueue
+                                var saved = PlaylistStore.saveColumnPreset(
+                                            order, widths, forQueue)
+                                if (!forQueue)
                                     PlaylistTabs.setDefaultLayout(order, widths)
-                                }
+                                var what = forQueue ? "Playback queue column layout"
+                                                    : "Column layout"
+                                if (saved)
+                                    logStore.append("info", what + " saved")
+                                else
+                                    logStore.append("warning", what
+                                        + " could not be saved (see the console)")
                             }
                         }
 

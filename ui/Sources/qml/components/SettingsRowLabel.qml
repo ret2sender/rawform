@@ -41,7 +41,7 @@ Row {
         text: root.text
         color: Theme.textSecondary
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
     }
     Rectangle {
         anchors.verticalCenter: parent.verticalCenter

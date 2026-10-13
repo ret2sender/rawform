@@ -66,7 +66,7 @@ Rectangle {
     Behavior on _strokeOpacity {
         NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
     }
-    border.color: Qt.rgba(0xBD / 255, 0xB2 / 255, 0xFF / 255, _strokeOpacity)
+    border.color: Qt.alpha(Theme.accentSoft, _strokeOpacity)
 
     // Severity -> message color. info reads cool/muted; warning amber; error
     // the warm salmon the log surfaces share (Theme.errorText; LogStore's HTML
@@ -87,7 +87,7 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         text: ">"
         font.family: Theme.uiFont
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontSizeTitle
         font.weight: Font.Bold
         rotation: bar.consoleOpen ? 90 : 0
         color: bar.consoleOpen ? Theme.accentSoft
@@ -118,6 +118,6 @@ Rectangle {
         color: bar._levelColor(bar.level)
         elide: Text.ElideRight
         font.family: Theme.uiFont
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSizeBody
     }
 }

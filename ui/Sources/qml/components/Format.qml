@@ -27,9 +27,10 @@
 // `Format.mmss(x)` resolves from any document in the module.
 //
 // Scope rule, mirroring the C++ side (utils/Formats.h): only formats used by
-// MORE THAN ONE document live here. The C++ singleton formats MILLISECONDS
-// for the playlist column; this one formats SECONDS, the unit the transport
-// bindings already carry. Keep the two shapes in step if either ever changes.
+// MORE THAN ONE document live here. The C++ formatter takes MILLISECONDS for
+// the playlist column; this one takes SECONDS, the unit the transport
+// bindings already carry. The two shapes are kept in step: m:ss, rolling into
+// h:mm:ss past an hour.
 
 pragma Singleton
 
@@ -38,15 +39,20 @@ pragma ComponentBehavior: Bound
 import QtQuick
 
 QtObject {
-    // m:ss from SECONDS (seconds zero-padded, minutes not); NaN and negative
-    // clamp to a clean "0:00" so a binding evaluating before the first
-    // position tick never renders garbage.
+    // m:ss from SECONDS (seconds zero-padded, minutes not), h:mm:ss past an
+    // hour (minutes then zero-padded); NaN and negative clamp to a clean
+    // "0:00" so a binding evaluating before the first position tick never
+    // renders garbage.
     function mmss(s) {
         if (!s || s < 0 || isNaN(s))
             s = 0
         var total = Math.floor(s)
-        var m = Math.floor(total / 60)
+        var h = Math.floor(total / 3600)
+        var m = Math.floor(total / 60) % 60
         var sec = total % 60
-        return m + ":" + (sec < 10 ? "0" + sec : sec)
+        var tail = (sec < 10 ? "0" + sec : sec)
+        if (h > 0)
+            return h + ":" + (m < 10 ? "0" + m : m) + ":" + tail
+        return m + ":" + tail
     }
 }

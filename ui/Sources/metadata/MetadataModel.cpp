@@ -255,19 +255,11 @@ MetadataModel::Agg MetadataModel::aggStrategy(FieldId id) {
 QString MetadataModel::formatDurationSamples(qint64 totalMs, qint64 totalSamples) {
     if (totalMs <= 0)
         return {};
-    const qint64 h  = totalMs / 3600000;
-    const qint64 m  = (totalMs / 60000) % 60;
-    const qint64 s  = (totalMs / 1000) % 60;
-    const qint64 ms = totalMs % 1000;
-    // H:MM:SS.mmm once an hour is reached, else M:SS.mmm (leading unit unpadded,
-    // e.g. "5:00.720" and "43:05.960").
-    QString clock = h > 0
-        ? QStringLiteral("%1:%2:%3").arg(h)
-              .arg(m, 2, 10, QLatin1Char('0'))
-              .arg(s, 2, 10, QLatin1Char('0'))
-        : QStringLiteral("%1:%2").arg(m)
-              .arg(s, 2, 10, QLatin1Char('0'));
-    clock += QStringLiteral(".%1").arg(ms, 3, 10, QLatin1Char('0'));
+    // The clock is the shared formatter (the same string as the playlist's
+    // Length column, hours included); this pane appends the milliseconds and
+    // the sample count, e.g. "5:00.720" and "1:15:03.960".
+    QString clock = formats::durationText(totalMs);
+    clock += QStringLiteral(".%1").arg(totalMs % 1000, 3, 10, QLatin1Char('0'));
     // Group the sample count the same way the byte counts are grouped (locale
     // thousands separator), so "13 261 752" lines up with the File size format.
     const QString samples = QLocale().toString(totalSamples);
@@ -292,7 +284,7 @@ QString MetadataModel::fieldValue(const TrackData& t, FieldId id) {
         return v > 0 ? QString::number(v) : QString{};
     };
     const auto dateOrEmpty = [](const QDateTime& dt) {
-        return dt.isValid() ? dt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString{};
+        return formats::dateTimeText(dt);
     };
 
     switch (id) {
@@ -444,8 +436,7 @@ QString MetadataModel::aggMaxModified() const {
         if (t.modified.isValid() && (!best.isValid() || t.modified > best))
             best = t.modified;
     }
-    return best.isValid()
-        ? best.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString{};
+    return formats::dateTimeText(best);
 }
 
 QString MetadataModel::aggWeightedShare(FieldId id) const {
