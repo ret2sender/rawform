@@ -257,6 +257,14 @@ void PlaylistTabs::setCurrentIndex(int index) {
     // while every binding still reads the OUTGOING tab, so the model swap's
     // internal selection clear hits nothing (see activeAboutToChange docs).
     emit activeAboutToChange();
+    // The outgoing tab's focus row, if it moved, becomes a real (debounced)
+    // write now: a switch is rare, and the view parks the scroll position
+    // into the same write through stashActiveScrollRow in that emission.
+    if (m_current >= 0 && m_current < m_tabs.size()) {
+        Tab* outgoing = m_tabs.at(m_current);
+        if (outgoing->focusDirty)
+            markDirty(outgoing);
+    }
     m_current = index;
     emit currentIndexChanged();
     // The bound model/selection/reloader pointers all change together; QML
@@ -447,12 +455,16 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     connect(model, &QAbstractItemModel::columnsRemoved, this, dirty);
     connect(model, &QAbstractItemModel::modelReset, this, dirty);
     connect(model, &QAbstractItemModel::dataChanged, this, dirty);
-    // The CURRENT (focus) row is persisted in the live file, so moving it
-    // dirties the tab. Click-frequency, but the autosave debounce coalesces a
-    // burst into one deferred QSaveFile write on the pool, and markDirty's
-    // suppressAutosave guard keeps the load-time restore from re-writing what
-    // was just read.
-    connect(selection, &QItemSelectionModel::currentChanged, this, dirty);
+    // The CURRENT (focus) row is persisted in the live file too, but it is
+    // click-frequency and the file is the whole playlist: every autosave
+    // serializes and fsyncs every track (15 MB and 80 ms per write at 15k
+    // rows), so arrowing through a big playlist must not arm it. The focus
+    // row only flags the tab (see Tab::focusDirty); it reaches disk with the
+    // next structural or tag write, at a switch-away, or at shutdown.
+    // markFocusDirty honors suppressAutosave like markDirty, so the load-time
+    // restore of the current row flags nothing.
+    connect(selection, &QItemSelectionModel::currentChanged, this,
+            [this, tab]() { markFocusDirty(tab); });
 
     // The current row across a bulk removal. The selection model relocates its
     // current index itself when the rows holding it go through rowsRemoved
@@ -945,6 +957,16 @@ void PlaylistTabs::markDirty(Tab* tab) {
         tab->autosave->start(); // (re)arm the debounce
 }
 
+void PlaylistTabs::markFocusDirty(Tab* tab) {
+    // Same gates as markDirty (no live file for the queue; a load restoring
+    // the current row flags nothing), but only the flag: no debounce, no
+    // DirtyRole. A tab that is already dirty has a write coming that carries
+    // the focus row, so the flag is redundant there and harmless.
+    if (!tab || tab->suppressAutosave || tab->isQueue)
+        return;
+    tab->focusDirty = true;
+}
+
 PlaylistDocument PlaylistTabs::snapshotTab(Tab* tab) const {
     // Snapshot on the GUI thread; the worker (or the calling thread, for the
     // sync path) only serializes. Order from the model, widths from the parked
@@ -975,6 +997,7 @@ PlaylistDocument PlaylistTabs::snapshotTab(Tab* tab) const {
 }
 
 void PlaylistTabs::clearDirtyFlag(Tab* tab) {
+    tab->focusDirty = false; // every write snapshots the live current row
     if (!tab->dirty)
         return;
     tab->dirty = false;
@@ -1022,13 +1045,15 @@ void PlaylistTabs::writeTabSync(Tab* tab) {
 void PlaylistTabs::flushPendingWrites() {
     // Drain every pending autosave synchronously. Stop each debounce first (so a
     // timer that was about to fire can't double-write or fire post-teardown),
-    // then write the tabs that actually have unsaved changes. suppressAutosave
-    // tabs are mid-load: their dirty flag was never set, so they are skipped and
-    // their on-disk source is left intact.
+    // then write the tabs that actually have unsaved changes, a moved focus
+    // row counting as one here (it armed no write of its own during the
+    // session; this is where it lands). suppressAutosave tabs are mid-load:
+    // neither flag was ever set, so they are skipped and their on-disk source
+    // is left intact.
     for (Tab* tab : m_tabs) {
         if (tab->autosave)
             tab->autosave->stop();
-        if (tab->dirty) {
+        if (tab->dirty || tab->focusDirty) {
             // An in-flight DEBOUNCED write must complete BEFORE the
             // sync write, so the sync snapshot is provably the FINAL atomic
             // commit; otherwise a worker still serializing an older snapshot

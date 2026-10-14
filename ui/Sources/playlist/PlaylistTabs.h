@@ -374,8 +374,9 @@ public:
 
     // --- Shutdown ----------------------------------------------------------
 
-    /// Synchronously write every dirty tab's live file, NOW, on the calling
-    /// thread. The shutdown flush.
+    /// Synchronously write every dirty tab's live file (focus-row-only dirt
+    /// included, see Tab::focusDirty), NOW, on the calling thread. The
+    /// shutdown flush.
     ///
     /// Autosave is a kAutosaveDebounceMs (1500 ms) single-shot debounce whose
     /// write is fire-and-forget on a worker (writeTabNow). Nothing else drains
@@ -481,6 +482,14 @@ private:
         /// default-constructed future waits as a no-op.
         QFuture<void>        lastWrite;
         bool                 dirty = false; ///< unsaved-vs-autosave; arms the debounce
+        /// The current (focus) row moved since the last write. Persisted in the
+        /// live file (the CURR chunk) but never worth a write of its own: a
+        /// click or an arrow key sets this flag and nothing else, and the row
+        /// rides the next write the tab makes anyway (snapshotTab reads the
+        /// live current index), or is promoted to a real write at the two
+        /// points scrollRow already has (switching away, shutdown). What a
+        /// crash loses is the focus row since that last write, never the file.
+        bool                 focusDirty = false;
         /// True during a load, so the apply never re-writes what was just read.
         bool                 suppressAutosave = false;
         /// The Playback Queue tab (see the file comment): no live file, no
@@ -514,6 +523,7 @@ private:
 
     // Autosave.
     void markDirty(Tab* tab);           ///< flag + (re)arm the debounce
+    void markFocusDirty(Tab* tab);      ///< focus row moved: flag only, no write armed
     void writeTabNow(Tab* tab);         ///< snapshot + off-thread atomic write
     void writeTabSync(Tab* tab);        ///< snapshot + SYNCHRONOUS write (shutdown flush)
 
@@ -522,8 +532,9 @@ private:
     /// synchronous write paths so the two can never drift in what they capture.
     [[nodiscard]] PlaylistDocument snapshotTab(Tab* tab) const;
 
-    /// Clear a tab's dirty flag and notify the tab strip. Shared by both write
-    /// paths (a successful write, by either route, settles the tab).
+    /// Clear a tab's dirty flags (focus included) and notify the tab strip.
+    /// Shared by both write paths (a successful write, by either route,
+    /// settles the tab).
     void clearDirtyFlag(Tab* tab);
 
     // Loading.
