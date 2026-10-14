@@ -197,20 +197,39 @@ public:
     void insertTracks(int at, QList<TrackData> tracks);
 
     /// Remove the tracks at the given row indices (any order; out-of-range and
-    /// duplicates ignored). Deletes in contiguous runs bottom-up via
-    /// begin/endRemoveRows, so the selection model remaps; a removal, never a
-    /// reset. The whole run sequence is bracketed by bulkRemovalStarted /
-    /// bulkRemovalFinished (see the signals).
+    /// duplicates ignored). Never a reset: up to kCompactRemovalRuns contiguous
+    /// runs are deleted bottom-up through begin/endRemoveRows (the selection
+    /// model remaps run by run); above that the list is compacted in one pass
+    /// under layoutAboutToBeChanged / layoutChanged, with every persistent
+    /// index moved to its new row or invalidated. Either way the call is
+    /// bracketed by bulkRemovalStarted / bulkRemovalFinished (see the signals)
+    /// and rowAfterRemoval() answers where a pre-removal row went.
     ///
     /// Not named removeRows(): clashes with QAbstractItemModel's invokable
     /// removeRows(int,int,QModelIndex) (same trap as moveVisualColumn).
     Q_INVOKABLE void removeTracks(const QVariantList& rows);
 
     /// Remove every row flagged unavailable (the "remove missing tracks"
-    /// cleanup). Deletes in contiguous runs like removeTracks(), with the same
-    /// bulkRemovalStarted / bulkRemovalFinished bracket. Returns the number
-    /// removed (0 if none).
+    /// cleanup). Same two paths, same bracket and same mapping as
+    /// removeTracks(). Returns the number removed (0 if none).
     Q_INVOKABLE int removeUnavailableTracks();
+
+    /// Where the pre-removal row @p row stands after the most recent removal:
+    /// its new index if it survived, or the index of the row that took its
+    /// place if it was removed (the row count when nothing follows). -1 for a
+    /// negative @p row. Lets a consumer that parked a row before the
+    /// bulkRemoval bracket (the view's top row, the tab's current row) find it
+    /// again without caring which path the removal took; it describes the
+    /// LAST removal only, so it is read inside or right after the bracket.
+    Q_INVOKABLE [[nodiscard]] int rowAfterRemoval(int row) const;
+
+    /// The run count above which a removal compacts in one pass instead of
+    /// deleting run by run. The per-run path costs one tail shift of the
+    /// whole list plus one proxy and selection remap per run (about 0.5 ms
+    /// per run at 15k rows), so 32 runs bounds that path near 15-20 ms; the
+    /// compaction is one O(rows) pass whatever the run count. Below a few
+    /// thousand rows either path is instant.
+    static constexpr int kCompactRemovalRuns = 32;
 
     /// Move the contiguous run of @p count tracks starting at @p first to the
     /// boundary @p dest (0..rowCount, current coordinates: the gap before row
@@ -407,13 +426,16 @@ signals:
     void columnLayoutChanged();
 
     /// Bracket around a bulk row removal (removeTracks, removeUnavailableTracks).
-    /// A removal is a sequence of begin/endRemoveRows runs, so per-run
-    /// rowsRemoved cannot tell a view where the batch ends; a view that has to
-    /// re-anchor its viewport once, synchronously, after the LAST run (before
-    /// TableView's deferred rebuild, which keeps the top row's pixel position
-    /// and only clamps its index when rows above the viewport vanish) listens
-    /// here. Emitted only when at least one run executes; finished is emitted
-    /// after the final endRemoveRows.
+    /// A removal is either a sequence of begin/endRemoveRows runs or one
+    /// layoutAboutToBeChanged / layoutChanged compaction, so neither per-run
+    /// rowsRemoved nor layoutChanged can tell a consumer where the batch ends
+    /// or what it was; a consumer that parks a row at the start and has to
+    /// re-place it once, synchronously, after the removal (the view's
+    /// viewport anchor, before TableView's deferred rebuild; the tab's current
+    /// row, which only the per-run path relocates by itself) listens here and
+    /// maps through rowAfterRemoval(). Emitted only when at least one row is
+    /// removed; finished is emitted after the final endRemoveRows or after
+    /// layoutChanged.
     void bulkRemovalStarted();
     void bulkRemovalFinished();
 
@@ -428,6 +450,12 @@ private:
     /// authority, shared by the selection resolver and albumArtSourceForRow so
     /// the two can never drift apart on encoding or the staleness tag.
     [[nodiscard]] QString artUrlForRow(int row) const;
+
+    /// The shared body of removeTracks and removeUnavailableTracks: @p rows
+    /// are in range, ascending and unique. Picks the per-run or the
+    /// compaction path (see kCompactRemovalRuns), emits the bracket, and
+    /// records @p rows for rowAfterRemoval().
+    void removeRowsAscending(const QList<int>& rows);
 
     ColumnSchema     m_schema;
     /// The injected custom-column registry (not owned). nullptr if none was set.
@@ -444,6 +472,9 @@ private:
     /// seedWidthForField(); fields absent here fall back to kDefaultColumnWidth.
     QHash<int, int>  m_seedWidths;
     QList<TrackData> m_tracks;
+    /// The rows (pre-removal numbering, ascending) of the most recent
+    /// removal; what rowAfterRemoval() counts against.
+    QList<int>       m_lastRemoval;
     int              m_dataRevision = 0;
     /// See bumpArtEpoch(). Folded into every art URL's "?v=" tag.
     int              m_artEpoch = 0;

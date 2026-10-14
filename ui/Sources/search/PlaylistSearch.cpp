@@ -33,6 +33,7 @@
 #include "columns/ColumnSchema.h" // fieldFromString, isCustomFieldId, customIdFromFieldId
 
 #include <QAbstractItemModel>
+#include <QPersistentModelIndex>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -138,6 +139,8 @@ void PlaylistSearch::setEnabled(bool enabled) {
     m_haystacks.clear();
     m_haystacksDirty = true;
     m_matches.clear();
+    m_parkedMatches.clear();
+    m_matchesParked = false;
     m_matchesValid = false;
     // `active` and `matchCount` notify through matchesChanged; it is emitted
     // only when the readings change, so hiding an idle dialog costs the proxy
@@ -195,6 +198,7 @@ bool PlaylistSearch::accepts(int row) const {
     if (!active() || row < 0) {
         return false;
     }
+    finishMatchRemap();
     return std::ranges::binary_search(m_matches, row);
 }
 
@@ -227,10 +231,22 @@ void PlaylistSearch::rebindModel(PlaylistModel* model) {
         m_haystacksDirty = true;
         armTimer();
     };
+    // A layout change is the model's one-pass compaction of a many-run
+    // removal: rows renumbered or gone with no rowsRemoved. The match set is
+    // carried across it on persistent indexes (see parkMatches) so the proxy
+    // keeps hiding the right rows until the rebuild below lands; the
+    // haystacks are simply stale and rebuild like after any row change.
+    const auto layoutChanged = [this, rowsChanged]() {
+        finishMatchRemap();
+        rowsChanged();
+    };
     using M = QAbstractItemModel;
     m_modelConnections << connect(model, &M::rowsInserted, this, rowsChanged);
     m_modelConnections << connect(model, &M::rowsRemoved, this, rowsChanged);
     m_modelConnections << connect(model, &M::rowsMoved, this, rowsChanged);
+    m_modelConnections << connect(model, &M::layoutAboutToBeChanged, this,
+                                  &PlaylistSearch::parkMatches);
+    m_modelConnections << connect(model, &M::layoutChanged, this, layoutChanged);
     m_modelConnections << connect(model, &M::modelReset, this, rowsChanged);
     m_modelConnections << connect(model, &M::dataChanged, this, rowsChanged);
     m_modelConnections << connect(model, &M::columnsInserted, this, columnsChanged);
@@ -238,6 +254,37 @@ void PlaylistSearch::rebindModel(PlaylistModel* model) {
     m_modelConnections << connect(model, &M::columnsMoved, this, columnsChanged);
     m_modelConnections << connect(model, &PlaylistModel::columnLayoutChanged, this,
                                   columnsChanged);
+}
+
+void PlaylistSearch::parkMatches() {
+    m_parkedMatches.clear();
+    m_matchesParked = false;
+    if (!m_model || !m_matchesValid || m_matches.isEmpty()) {
+        return;
+    }
+    m_parkedMatches.reserve(m_matches.size());
+    for (const int row : m_matches) {
+        m_parkedMatches.append(QPersistentModelIndex(m_model->index(row, 0)));
+    }
+    m_matchesParked = true;
+}
+
+void PlaylistSearch::finishMatchRemap() const {
+    if (!m_matchesParked) {
+        return;
+    }
+    m_matchesParked = false;
+    m_matches.clear();
+    for (const QPersistentModelIndex& idx : m_parkedMatches) {
+        if (idx.isValid()) {
+            m_matches.append(idx.row());
+        }
+    }
+    m_parkedMatches.clear();
+    // The compaction keeps row order, so this is already ascending; sorted
+    // anyway because binary_search in accepts() depends on it, whatever
+    // layout change the model announces.
+    std::ranges::sort(m_matches);
 }
 
 void PlaylistSearch::refreshExtraTagKeys() {
@@ -349,6 +396,8 @@ void PlaylistSearch::rebuildHaystacks() {
 
 void PlaylistSearch::rematch() {
     m_matches.clear();
+    m_parkedMatches.clear();
+    m_matchesParked = false; // a fresh pass supersedes a parked remap
     m_matchesValid = true;
     if (active()) {
         const qsizetype n = std::min<qsizetype>(m_haystacks.size(), m_model->rowCount());

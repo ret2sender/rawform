@@ -182,6 +182,17 @@ private:
     /// Drop the previous model's connections and wire the new one.
     void rebindModel(PlaylistModel* model);
 
+    /// The match set across the model's layoutAboutToBeChanged /
+    /// layoutChanged pair (PlaylistModel's one-pass compaction of a many-run
+    /// removal renumbers rows without a rowsRemoved): parkMatches turns each
+    /// matched row into a persistent index, and finishMatchRemap reads the
+    /// rows back once the model has moved them. The finish is lazy, from
+    /// accepts(): the filter proxy re-asks filterAcceptsRow INSIDE the source
+    /// model's layoutChanged emission, before this object's own slot runs,
+    /// so the remap has to be ready for the first query, not for the signal.
+    void parkMatches();
+    void finishMatchRemap() const;
+
     QPointer<PlaylistModel>        m_model;
     QPointer<CustomColumnRegistry> m_registry;
     QList<QMetaObject::Connection> m_modelConnections;
@@ -196,7 +207,11 @@ private:
     QSet<QString>                 m_extraTagKeys;
     QList<search::Searchable>     m_searchSet;
     QList<QString>                m_haystacks;  ///< one per model row, folded
-    QList<int>                    m_matches;    ///< ascending rows
+    /// Ascending rows. Mutable with the two parking members below: the remap
+    /// across a layout change completes inside the const accepts() query.
+    mutable QList<int>                   m_matches;
+    mutable QList<QPersistentModelIndex> m_parkedMatches;
+    mutable bool                         m_matchesParked = false;
     /// False from a model rebind until the next match pass: the rows in
     /// m_matches belong to the previous model until then.
     bool                          m_matchesValid = false;

@@ -507,6 +507,10 @@ void AudioController::setPlaybackQueue(PlaybackQueue* queue) {
                 &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
         connect(qm, &QAbstractItemModel::rowsRemoved,
                 &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
+        // A many-run Delete compacts the queue model under layoutChanged
+        // instead of rowsRemoved (PlaylistModel::removeTracks).
+        connect(qm, &QAbstractItemModel::layoutChanged,
+                &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
         connect(qm, &QAbstractItemModel::rowsMoved,
                 &m_lookaheadCoalesce, qOverload<>(&QTimer::start));
         connect(qm, &QAbstractItemModel::modelReset,
@@ -902,6 +906,11 @@ void AudioController::setPlayingModel(PlaylistModel* model) {
         m_playingConnections << connect(model, &QAbstractItemModel::rowsInserted,
                                         this, &AudioController::onPlayingRowsChanged);
         m_playingConnections << connect(model, &QAbstractItemModel::rowsRemoved,
+                                        this, &AudioController::onPlayingRowsChanged);
+        // The model's compaction of a many-run removal: rows renumbered or
+        // gone under layoutChanged, the cursor moved or invalidated with them
+        // through changePersistentIndexList, exactly as across rowsRemoved.
+        m_playingConnections << connect(model, &QAbstractItemModel::layoutChanged,
                                         this, &AudioController::onPlayingRowsChanged);
         m_playingConnections << connect(model, &QAbstractItemModel::rowsMoved,
                                         this, &AudioController::onPlayingRowsChanged);

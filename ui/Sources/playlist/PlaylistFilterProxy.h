@@ -179,6 +179,13 @@ public:
     /// file comment.
     Q_INVOKABLE bool moveTracks(int first, int count, int dest);
 
+    /// Where a SOURCE row parked before a bulk removal (mapRowToSource of the
+    /// view's top row at bulkRemovalStarted) shows after it, as a PROXY row:
+    /// PlaylistModel::rowAfterRemoval, then the first visible row at or after
+    /// it (the row that took its place can be hidden by a filter). -1 for a
+    /// negative row or when nothing is visible. Read at bulkRemovalFinished.
+    Q_INVOKABLE [[nodiscard]] int anchorRowAfterRemoval(int sourceRow) const;
+
     // --- Selection ops (the selection model is bound to THIS model) --------
     // The bodies and contracts are PlaylistModel's former ones, moved here
     // unchanged apart from the coordinate space; see each for the why.

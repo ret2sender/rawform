@@ -43,6 +43,8 @@
 //  4. REORDER. A moveTracks on the queue model permutes the sidecar exactly
 //     like the rows (downward and upward moves).
 //  5. CULL. takeFront drops the first n entries and their origins; clamped.
+//     A many-run Delete, which the model runs as one layout change instead of
+//     rowsRemoved, leaves every surviving entry with its own origin.
 //  6. FOREIGN INSERTS. An insertTracks that did not come through enqueue (a
 //     scanner batch into the queue tab) gets null origins and does not
 //     disturb its neighbors.
@@ -62,6 +64,7 @@
 #include "media/TrackData.h"
 #include "playlist/PlaylistModel.h"
 
+#include <QAbstractItemModel>
 #include <QList>
 #include <QString>
 #include <QVariantList>
@@ -236,6 +239,41 @@ void testTakeFront() {
     check(pq.originAt(0).model.isNull(), "takeFront: sidecar empty too");
 }
 
+void testCompactedRemovalFollowsRows() {
+    // A many-run Delete in the queue tab takes PlaylistModel's one-pass
+    // compaction (layoutAboutToBeChanged / layoutChanged, no rowsRemoved);
+    // the sidecar must follow the rows through it like through rowsRemoved.
+    constexpr int kRows = 2 * (PlaylistModel::kCompactRemovalRuns + 4);
+    auto a     = makeModel("a", kRows);
+    auto queue = makeModel("q", 0);
+    PlaybackQueue pq(queue.get());
+    QList<int> all;
+    for (int r = 0; r < kRows; ++r) {
+        all.append(r);
+    }
+    pq.enqueue(a.get(), all);
+    check(pq.count() == kRows, "compaction: whole playlist queued");
+
+    int layoutChanges = 0;
+    QObject::connect(queue.get(), &QAbstractItemModel::layoutChanged, queue.get(),
+                     [&layoutChanges]() { ++layoutChanges; });
+    QVariantList evens;
+    for (int r = 0; r < kRows; r += 2) {
+        evens.append(r);
+    }
+    queue->removeTracks(evens);
+    check(layoutChanges == 1, "compaction: the removal ran as one layout change");
+    check(pq.count() == kRows / 2, "compaction: count follows the rows");
+    bool aligned = true;
+    for (int i = 0; i < pq.count(); ++i) {
+        aligned = aligned && pq.pathAt(i) == pathOf("a", 2 * i + 1)
+                  && originIs(pq.originAt(i), a.get(), 2 * i + 1);
+    }
+    check(aligned, "compaction: every surviving entry keeps its own origin");
+    check(pq.originAt(pq.count()).model.isNull(),
+          "compaction: sidecar trimmed to the rows");
+}
+
 void testForeignInsertGetsNullOrigins() {
     auto a     = makeModel("a", 5);
     auto queue = makeModel("q", 0);
@@ -305,6 +343,7 @@ int main() {
     testOriginSelfHealing();
     testReorderPermutesSidecar();
     testTakeFront();
+    testCompactedRemovalFollowsRows();
     testForeignInsertGetsNullOrigins();
     testQueries();
     testClearAndReset();

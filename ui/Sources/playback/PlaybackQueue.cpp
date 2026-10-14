@@ -32,7 +32,7 @@
 #include <QAbstractItemModel>
 #include <QVariantList>
 
-#include <algorithm> // std::ranges::sort / unique
+#include <algorithm> // std::ranges::sort / unique, std::min
 #include <utility>   // std::move
 
 namespace rawform {
@@ -55,6 +55,10 @@ PlaybackQueue::PlaybackQueue(PlaylistModel* model, QObject* parent)
             this, &PlaybackQueue::onRowsRemoved);
     connect(m_model, &QAbstractItemModel::rowsMoved,
             this, &PlaybackQueue::onRowsMoved);
+    connect(m_model, &QAbstractItemModel::layoutAboutToBeChanged,
+            this, &PlaybackQueue::onLayoutAboutToBeChanged);
+    connect(m_model, &QAbstractItemModel::layoutChanged,
+            this, &PlaybackQueue::onLayoutChanged);
     connect(m_model, &QAbstractItemModel::modelReset,
             this, &PlaybackQueue::onModelReset);
     // A model handed over with rows already in it (none today; defensive).
@@ -256,6 +260,45 @@ void PlaybackQueue::onRowsMoved(const QModelIndex& parent, int start, int end,
     }
     // No countChanged: the count is unchanged, and the controller rebuilds
     // its lookahead from the model's own rowsMoved.
+}
+
+void PlaybackQueue::onLayoutAboutToBeChanged() {
+    // The model's compaction of a many-run removal (PlaylistModel::
+    // removeTracks) renumbers and drops rows in one step with no rowsRemoved
+    // to splice by. A persistent index per row is the mapping: the model
+    // moves each one to the row's new position or invalidates it before
+    // layoutChanged, so the origins can follow their rows afterwards.
+    m_layoutRows.clear();
+    if (m_model == nullptr) {
+        return;
+    }
+    const int n = m_model->rowCount();
+    m_layoutRows.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        m_layoutRows.append(QPersistentModelIndex(m_model->index(i, 0)));
+    }
+}
+
+void PlaybackQueue::onLayoutChanged() {
+    if (m_model == nullptr) {
+        return;
+    }
+    const int before = static_cast<int>(m_origins.size());
+    const int after  = m_model->rowCount();
+    QList<Origin> moved;
+    moved.resize(after); // null origins for any row the parking missed
+    const qsizetype parked = std::min(m_layoutRows.size(), m_origins.size());
+    for (qsizetype i = 0; i < parked; ++i) {
+        const QPersistentModelIndex& idx = m_layoutRows.at(i);
+        if (idx.isValid() && idx.row() < after) {
+            moved[idx.row()] = m_origins.at(i);
+        }
+    }
+    m_layoutRows.clear();
+    m_origins = std::move(moved);
+    if (before != after) {
+        emit countChanged();
+    }
 }
 
 void PlaybackQueue::onModelReset() {

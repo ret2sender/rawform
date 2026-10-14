@@ -302,59 +302,54 @@ Item {
     }
 
     // Viewport re-anchoring across a ROW REMOVAL batch. TableView's own
-    // rowsRemoved rebuild keeps the top row's pixel position and only clamps
-    // its index to the new count, so when rows ABOVE the viewport vanish the
-    // loaded rows stay drawn where the old rows were, with a phantom gap above
-    // them, and contentHeight (the bottom of the loaded table plus the rows
-    // still below it) stays at the old extent: the scrollbar keeps its 5k-row
-    // size after 4k deletions until a page-sized scroll makes the view
-    // recompute its top-left. positionViewAtRow is the one public call that
-    // forces that recomputation (row * rowHeight, exact for fixed-height
-    // rows), so the anchor is the top visible row carried through the batch:
-    //   - a run entirely above it shifts it up by the run length,
-    //   - a run covering it lands it on the row that took its place (first),
-    //   - a run below it leaves it alone.
-    // The runs arrive bottom-up in current coordinates, so the mapping
-    // composes run by run. Applied ONCE, synchronously, on the batch-end
-    // signal, before the deferred rebuild: per-run positioning would take
-    // the adjacent-row synchronous edge-load path for every one-row run
-    // (thousands of delegate loads on a sparse selection), and a Qt.callLater
-    // can land AFTER the rebuild, where the anchor may coincide with the
-    // clamped top row and positionViewAtRow becomes a no-op on the stale
-    // geometry. The sub-row pixel offset makes the reposition exact rather
-    // than row-snapped. An unmoved anchor (all runs at or below the viewport)
-    // is left to Qt: that rebuild is correct, and Flickable clamps contentY
-    // when the content shrinks under the viewport.
-    property int _removalAnchorRow: -1
+    // rebuild (after rowsRemoved or layoutChanged alike) keeps the top row's
+    // pixel position and only clamps its index to the new count, so when rows
+    // ABOVE the viewport vanish the loaded rows stay drawn where the old rows
+    // were, with a phantom gap above them, and contentHeight (the bottom of
+    // the loaded table plus the rows still below it) stays at the old extent:
+    // the scrollbar keeps its 5k-row size after 4k deletions until a
+    // page-sized scroll makes the view recompute its top-left.
+    // positionViewAtRow is the one public call that forces that recomputation
+    // (row * rowHeight, exact for fixed-height rows), so the anchor is the top
+    // visible row carried through the batch: parked as a SOURCE row when the
+    // batch starts (a filter can renumber proxy rows underneath), and asked
+    // back from the model at the end (rowAfterRemoval: shifted up by the rows
+    // removed above it, or landed on the row that took its place), so the
+    // view does not care whether the removal ran as per-run signals or as one
+    // compaction. Applied ONCE, synchronously, on the batch-end signal, before
+    // the deferred rebuild: per-run positioning would take the adjacent-row
+    // synchronous edge-load path for every one-row run (thousands of delegate
+    // loads on a sparse selection), and a Qt.callLater can land AFTER the
+    // rebuild, where the anchor may coincide with the clamped top row and
+    // positionViewAtRow becomes a no-op on the stale geometry. The sub-row
+    // pixel offset makes the reposition exact rather than row-snapped. An
+    // unmoved anchor (all runs at or below the viewport) is left to Qt: that
+    // rebuild is correct, and Flickable clamps contentY when the content
+    // shrinks under the viewport.
+    property int _removalAnchorSourceRow: -1
     property real _removalAnchorOffset: 0
     Connections {
         target: root.model
         function onBulkRemovalStarted() {
             var top = tableView.topRow
-            if (top < 0) {
-                root._removalAnchorRow = -1
+            if (top < 0 || !root.model) {
+                root._removalAnchorSourceRow = -1
                 return
             }
-            root._removalAnchorRow = top
+            root._removalAnchorSourceRow = root.model.mapRowToSource(top)
             root._removalAnchorOffset =
                 tableView.contentY - top * root._rowHeight
         }
-        function onRowsRemoved(parent, first, last) {
-            var a = root._removalAnchorRow
-            if (a < 0)
-                return
-            if (last < a)
-                root._removalAnchorRow = a - (last - first + 1)
-            else if (first <= a)
-                root._removalAnchorRow = first
-        }
         function onBulkRemovalFinished() {
-            var a = root._removalAnchorRow
-            root._removalAnchorRow = -1
-            if (a < 0 || !root.model)
+            var src = root._removalAnchorSourceRow
+            root._removalAnchorSourceRow = -1
+            if (src < 0 || !root.model)
                 return
             var n = root.model.rowCount()
-            if (n <= 0 || a === tableView.topRow)
+            if (n <= 0)
+                return
+            var a = root.model.anchorRowAfterRemoval(src)
+            if (a < 0 || a === tableView.topRow)
                 return
             centerAnim.stop()
             tableView.positionViewAtRow(Math.min(a, n - 1), TableView.AlignTop,
@@ -423,8 +418,8 @@ Item {
     // row (Rows flag), so dedup to row numbers first. Afterwards, land the
     // selection on the row that took the first deleted row's place (or the new
     // last row if the tail was removed); clear if the playlist is now empty.
-    // The removal itself remaps the selection model, we only set the new
-    // current row, which also refreshes the metadata pane via selectionChanged.
+    // We only set the new current row, which also refreshes the metadata pane
+    // via selectionChanged.
     function _deleteSelected() {
         // Same C++ range walk as _selectedRows (and the same reason): a
         // selectedIndexes dedupe is one JS wrapper per selected CELL.
@@ -433,6 +428,15 @@ Item {
             return
         var firstDeleted = rows[0]
 
+        // The selection IS the set being removed, so drop it before the
+        // removal rather than letting the model carry it through: across a
+        // compaction (a scattered selection of many runs) the selection model
+        // would otherwise park one persistent index per selected CELL, tens
+        // of thousands of them at 15k rows, only to find every one
+        // invalidated. Observers of the empty state never see it: the pane and
+        // art re-aggregation are coalesced to the next event-loop turn, and
+        // _selectExclusive below runs in this one.
+        selectionModel.clearSelection()
         model.removeTracks(rows)
 
         var n = model.rowCount()

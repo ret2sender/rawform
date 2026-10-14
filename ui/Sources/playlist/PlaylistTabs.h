@@ -466,6 +466,9 @@ private:
         /// Never persisted.
         bool                 scanning = false;
         double               scanProgress = 0.0;
+        /// The current SOURCE row parked at bulkRemovalStarted, -1 for none;
+        /// consumed at bulkRemovalFinished (see makeTab's bracket hook).
+        int                  removalCurrentRow = -1;
         /// The tab's most recent DEBOUNCED write, so the shutdown
         /// flush can drain it before its own synchronous write. The debounced
         /// write is fire-and-forget on a worker with an atomic

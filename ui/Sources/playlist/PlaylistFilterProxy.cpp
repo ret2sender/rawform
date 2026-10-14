@@ -269,6 +269,17 @@ bool PlaylistFilterProxy::moveTracks(int first, int count, int dest) {
     return m_source->moveTracks(first, count, dest);
 }
 
+int PlaylistFilterProxy::anchorRowAfterRemoval(int sourceRow) const {
+    if (sourceRow < 0) {
+        return -1;
+    }
+    const int landed = m_source->rowAfterRemoval(sourceRow);
+    if (landed >= m_source->rowCount()) {
+        return rowCount() - 1; // the parked row and everything below it went
+    }
+    return firstVisibleRowFromSource(landed);
+}
+
 // ---------------------------------------------------------------------------
 // Selection ops
 // ---------------------------------------------------------------------------

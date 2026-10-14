@@ -136,6 +136,7 @@ void PlaylistTabs::createQueueTab(const QStringList& fieldIds,
     };
     connect(tab->model, &QAbstractItemModel::rowsInserted, this, refreshCount);
     connect(tab->model, &QAbstractItemModel::rowsRemoved, this, refreshCount);
+    connect(tab->model, &QAbstractItemModel::layoutChanged, this, refreshCount);
     connect(tab->model, &QAbstractItemModel::modelReset, this, refreshCount);
 }
 
@@ -429,9 +430,12 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
 
     // Any structural change (rows in/out/moved, a column toggle reset, a column
     // move) or an in-place tag refresh marks the tab dirty and (re)arms autosave.
+    // layoutChanged is the model's own compaction of a many-run removal (see
+    // PlaylistModel::removeTracks): rows left without a rowsRemoved.
     const auto dirty = [this, tab]() { markDirty(tab); };
     connect(model, &QAbstractItemModel::rowsInserted, this, dirty);
     connect(model, &QAbstractItemModel::rowsRemoved, this, dirty);
+    connect(model, &QAbstractItemModel::layoutChanged, this, dirty);
     connect(model, &QAbstractItemModel::rowsMoved, this, dirty);
     connect(model, &QAbstractItemModel::columnsMoved, this, dirty);
     // Granular column toggles (showColumn/hideColumn) and the registry-driven
@@ -449,6 +453,46 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     // suppressAutosave guard keeps the load-time restore from re-writing what
     // was just read.
     connect(selection, &QItemSelectionModel::currentChanged, this, dirty);
+
+    // The current row across a bulk removal. The selection model relocates its
+    // current index itself when the rows holding it go through rowsRemoved
+    // (to the nearest surviving row above, else the first row) and announces
+    // the deselected rows; across the model's compaction path neither
+    // happens: the current index is simply invalidated and the selection
+    // shrinks in silence. This pair restores both: the current row is parked
+    // as a SOURCE row before the removal and, if the removal left the current
+    // index invalid, re-placed by the same rule afterwards (mapped through the
+    // proxy; a row a filter hides falls to the first visible one below), and
+    // the pane re-aggregates once (coalesced) as it does from the per-run
+    // emissions. The Delete key's own re-selection runs after this and wins.
+    connect(model, &PlaylistModel::bulkRemovalStarted, this, [this, tab]() {
+        if (!ownsTab(tab))
+            return; // ownsTab, not m_tabs: the hidden queue removes too
+        const QModelIndex cur = tab->selection->currentIndex();
+        tab->removalCurrentRow =
+            cur.isValid() ? tab->proxy->mapRowToSource(cur.row()) : -1;
+    });
+    connect(model, &PlaylistModel::bulkRemovalFinished, this, [this, tab]() {
+        if (!ownsTab(tab))
+            return;
+        const int parked = tab->removalCurrentRow;
+        tab->removalCurrentRow = -1;
+        if (parked >= 0 && !tab->selection->currentIndex().isValid()
+            && tab->model->rowCount() > 0) {
+            const int landed = tab->model->rowAfterRemoval(parked);
+            const int target = landed > 0 ? landed - 1 : 0;
+            QModelIndex idx = tab->proxy->mapFromSource(tab->model->index(target, 0));
+            if (!idx.isValid()) {
+                const int visible = tab->proxy->firstVisibleRowFromSource(target);
+                if (visible >= 0)
+                    idx = tab->proxy->index(visible, 0);
+            }
+            if (idx.isValid())
+                tab->selection->setCurrentIndex(idx, QItemSelectionModel::NoUpdate);
+        }
+        if (activeModel() == tab->model)
+            notifyActiveSelection();
+    });
 
     // Debounced write of this tab's live file. Guard against the tab having been
     // closed before the timer fires.

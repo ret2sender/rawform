@@ -40,8 +40,10 @@
 // origins staged by enqueue (null origins for an insert that did not come
 // through enqueue, such as a file drop into the queue tab), rowsRemoved
 // erases, rowsMoved permutes exactly as the model's moveTracks permutes its
-// rows, and a reset degrades every origin to null. A null origin plays fine;
-// it only has no continuation (the controller tries a path lookup first).
+// rows, a layout change (the model's one-pass compaction of a many-run
+// removal) is followed through one persistent index per row, and a reset
+// degrades every origin to null. A null origin plays fine; it only has no
+// continuation (the controller tries a path lookup first).
 //
 // CULL ON START. An entry leaves the queue the moment it becomes the current
 // track (the controller calls takeFront), never on finish. So nothing in the
@@ -161,6 +163,8 @@ private:
     void onRowsRemoved(const QModelIndex& parent, int first, int last);
     void onRowsMoved(const QModelIndex& parent, int start, int end,
                      const QModelIndex& destination, int row);
+    void onLayoutAboutToBeChanged();
+    void onLayoutChanged();
     void onModelReset();
 
     PlaylistModel* m_model = nullptr; ///< non-owning; see the ctor
@@ -169,6 +173,9 @@ private:
     /// before the model insert, consumed by onRowsInserted (synchronous, so
     /// the two can never interleave with another insert).
     QList<Origin>  m_staged;
+    /// One persistent index per queue row, taken at layoutAboutToBeChanged so
+    /// onLayoutChanged can read where each row (and its origin) went.
+    QList<QPersistentModelIndex> m_layoutRows;
 };
 
 /// The PlaybackQueue QML singleton: the one instance main.cpp builds, handed to the

@@ -30,16 +30,20 @@
 #include "columns/CustomColumnRegistry.h" // registry lookup + signals
 #include "columns/PatternEvaluator.h"     // renderFieldValue + evaluatePattern
 #include "media/ReplayGainTags.h"         // shared REPLAYGAIN_* parse + format
+#include "utils/PerfLog.h"                // lcPerf: removal and move timings
 
+#include <QElapsedTimer>
 #include <QLatin1Char>
+#include <QModelIndexList> // persistentIndexList / changePersistentIndexList
 #include <QPair> // (path, subsong) identity key in rowsForKeys
 #include <QSet>
 #include <QUrl>                // percent-encode the art path for the provider URL
 #include <QVariantMap>
 #include <QtGlobal> // qWarning
 
-#include <algorithm> // std::ranges::sort / unique / rotate, std::max
+#include <algorithm> // std::ranges::sort / unique / rotate / lower_bound, std::max
 #include <utility> // std::move
+#include <vector>  // the compaction's row map
 
 namespace rawform {
 
@@ -538,24 +542,7 @@ void PlaylistModel::removeTracks(const QVariantList& rows) {
     const auto dup = std::ranges::unique(idx);
     idx.erase(dup.begin(), dup.end());
 
-    // Delete contiguous runs from the bottom up so lower indices (including
-    // those still queued in idx) stay valid as we go. The bracket lets the
-    // view re-anchor once for the whole batch (see the signal's note).
-    emit bulkRemovalStarted();
-    int i = static_cast<int>(idx.size()) - 1;
-    while (i >= 0) {
-        const int last = idx.at(i);
-        int first = last;
-        while (i > 0 && idx.at(i - 1) == first - 1) {
-            --i;
-            first = idx.at(i);
-        }
-        beginRemoveRows(QModelIndex(), first, last);
-        m_tracks.remove(first, last - first + 1);
-        endRemoveRows();
-        --i;
-    }
-    emit bulkRemovalFinished();
+    removeRowsAscending(idx);
 }
 
 int PlaylistModel::removeUnavailableTracks() {
@@ -570,25 +557,107 @@ int PlaylistModel::removeUnavailableTracks() {
     if (idx.isEmpty())
         return 0;
 
-    const int removed = static_cast<int>(idx.size());
-    // Same bottom-up contiguous-run deletion (and bracket) as removeTracks(),
-    // so the bound selection model remaps rather than resets.
-    emit bulkRemovalStarted();
-    int i = removed - 1;
-    while (i >= 0) {
-        const int last = idx.at(i);
-        int first = last;
-        while (i > 0 && idx.at(i - 1) == first - 1) {
-            --i;
-            first = idx.at(i);
-        }
-        beginRemoveRows(QModelIndex(), first, last);
-        m_tracks.remove(first, last - first + 1);
-        endRemoveRows();
-        --i;
+    removeRowsAscending(idx);
+    return static_cast<int>(idx.size());
+}
+
+void PlaylistModel::removeRowsAscending(const QList<int>& rows) {
+    if (rows.isEmpty())
+        return;
+    const int n = static_cast<int>(m_tracks.size());
+
+    int runs = 1;
+    for (qsizetype i = 1; i < rows.size(); ++i) {
+        if (rows.at(i) != rows.at(i - 1) + 1)
+            ++runs;
     }
+
+    QElapsedTimer clock;
+    clock.start();
+    m_lastRemoval = rows;
+    // The bracket lets a consumer park a row before the rows move and re-place
+    // it once after, whichever path runs (see the signal's note).
+    emit bulkRemovalStarted();
+
+    if (runs <= kCompactRemovalRuns) {
+        // Few runs: delete each from the bottom up so lower indices (including
+        // those still queued in rows) stay valid as we go. One
+        // begin/endRemoveRows per run is what lets the bound selection model
+        // and the view remap instead of reset.
+        int i = static_cast<int>(rows.size()) - 1;
+        while (i >= 0) {
+            const int last = rows.at(i);
+            int first = last;
+            while (i > 0 && rows.at(i - 1) == first - 1) {
+                --i;
+                first = rows.at(i);
+            }
+            beginRemoveRows(QModelIndex(), first, last);
+            m_tracks.remove(first, last - first + 1);
+            endRemoveRows();
+            --i;
+        }
+    } else {
+        // Many runs: one compaction pass. Each per-run removal shifts the whole
+        // tail of 480-byte values and costs the proxy and the selection model a
+        // remap of their own, so a scattered selection of thousands of rows is
+        // quadratic that way (seconds at 15k rows). A layout change is the
+        // structural signal that describes "rows renumbered, some gone" in one
+        // step: QSortFilterProxyModel rebuilds its mapping once, and every
+        // persistent index (the selection's ranges and current index through
+        // the proxy, the playback cursor, the queue origins) is moved to its
+        // new row or invalidated by changePersistentIndexList. The hint is
+        // honest (rows only move vertically; no index changes column or
+        // parent) and lets direct listeners save per-row state.
+        emit layoutAboutToBeChanged({}, QAbstractItemModel::VerticalSortHint);
+
+        // Taken AFTER the emission: the proxy mirrors its persistent indexes
+        // onto this model inside its layoutAboutToBeChanged handler, and those
+        // must be in the list that gets remapped.
+        const QModelIndexList from = persistentIndexList();
+
+        std::vector<int> newRow(static_cast<size_t>(n), -1);
+        qsizetype nextRemoved = 0;
+        int write = 0;
+        for (int read = 0; read < n; ++read) {
+            if (nextRemoved < rows.size() && rows.at(nextRemoved) == read) {
+                ++nextRemoved;
+                continue;
+            }
+            if (write != read)
+                m_tracks[write] = std::move(m_tracks[read]);
+            newRow[static_cast<size_t>(read)] = write;
+            ++write;
+        }
+        m_tracks.resize(write);
+
+        QModelIndexList to;
+        to.reserve(from.size());
+        for (const QModelIndex& old : from) {
+            const int r = newRow[static_cast<size_t>(old.row())];
+            to.append(r >= 0 ? index(r, old.column()) : QModelIndex());
+        }
+        changePersistentIndexList(from, to);
+
+        emit layoutChanged({}, QAbstractItemModel::VerticalSortHint);
+    }
+
     emit bulkRemovalFinished();
-    return removed;
+    qCDebug(lcPerf, "removeRows: %lld rows in %d runs of %d, %s path, %lld ms",
+            static_cast<long long>(rows.size()), runs, n,
+            runs <= kCompactRemovalRuns ? "per-run" : "compaction",
+            static_cast<long long>(clock.elapsed()));
+}
+
+int PlaylistModel::rowAfterRemoval(int row) const {
+    if (row < 0)
+        return -1;
+    // Survivors below the row keep their relative order, so a row's new index
+    // is its old one minus the removed rows below it; the same arithmetic
+    // gives the index of the row that took a removed row's place.
+    const auto it = std::ranges::lower_bound(m_lastRemoval, row);
+    const int removedBelow = static_cast<int>(it - m_lastRemoval.cbegin());
+    return row - removedBelow;
 }
 
 bool PlaylistModel::moveTracks(int first, int count, int dest) {
@@ -605,14 +674,23 @@ bool PlaylistModel::moveTracks(int first, int count, int dest) {
     // destination inside [first, last+1], already excluded above.
     if (!beginMoveRows(QModelIndex(), first, last, QModelIndex(), dest))
         return false;
-    const QList<TrackData> block = m_tracks.mid(first, count);
-    m_tracks.remove(first, count);
-    // After removing the block, a downward move's insertion index shifts left
-    // by count; an upward move inserts at dest unchanged.
-    const int insertAt = (dest <= first) ? dest : dest - count;
-    for (int k = 0; k < count; ++k)
-        m_tracks.insert(insertAt + k, block.at(k));
+    QElapsedTimer clock;
+    clock.start();
+    // One rotation over the span the move disturbs: moving down, the rows
+    // between the block and the destination gap slide up past the block;
+    // moving up, the block slides past the rows between the gap and itself.
+    // The same O(span) pass insertTracks uses (a lift and per-element
+    // re-insert shifts the tail once per moved row, quadratic for a large
+    // block dragged into a large playlist).
+    const auto begin = m_tracks.begin();
+    if (dest > last) {
+        std::ranges::rotate(begin + first, begin + last + 1, begin + dest);
+    } else {
+        std::ranges::rotate(begin + dest, begin + first, begin + last + 1);
+    }
     endMoveRows();
+    qCDebug(lcPerf, "moveTracks: %d rows of %d to %d, %lld ms", count, n, dest,
+            static_cast<long long>(clock.elapsed()));
     return true;
 }
 

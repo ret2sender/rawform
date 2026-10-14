@@ -188,6 +188,10 @@ set(APP_SOURCES
         # columns and the metadata pane alike.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+        # The "rawform.perf" logging category: timing lines around the
+        # playlist-scaled operations, off unless a logging rule enables them.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
         # Baked-in sanitizer default suppressions (TSan races, LSan leaks);
         # empty TU in non-sanitizer builds.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp
@@ -512,7 +516,7 @@ qt_add_qml_module(rawform
 # and must only ever reach the Apple toolchain: MSVC cannot compile .mm at all,
 # and there is no AppKit off macOS. We therefore add the implementation to the
 # target only on APPLE and link the AppKit/Foundation frameworks there. main.cpp
-# guards the single call site with Q_OS_MACOS, so a non-Apple build never
+# guards the single call site with Q_OS_MAC, so a non-Apple build never
 # references the symbol and links fine without this translation unit.
 if(APPLE)
     target_sources(rawform PRIVATE
@@ -752,6 +756,7 @@ if(RAWFORM_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
     )
     target_include_directories(rawform_queue_test PRIVATE
@@ -792,6 +797,7 @@ if(RAWFORM_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
     )
     target_include_directories(rawform_apply_test PRIVATE
@@ -805,6 +811,44 @@ if(RAWFORM_BUILD_TESTS)
             yaml-cpp::yaml-cpp
     )
     rawform_add_ui_test(properties_apply rawform_apply_test)
+
+    # ------------------------------------------------------------------
+    # The playlist-model test: row removals (the per-run and the one-pass
+    # compaction paths) and block moves as the view sees them, through the
+    # tab's filter proxy with a selection model bound and with a search in
+    # force, plus a 15k-row timing section. The queue test's spine plus the
+    # proxy and the search; a QCoreApplication for the search's timer.
+    # Qt-Quick-free, filesystem-free.
+    # ------------------------------------------------------------------
+    add_executable(rawform_model_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaylistModelTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFilterProxy.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFilterProxy.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearch.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearch.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/PlaylistSearchFilter.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/CustomColumnRegistry.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/PatternEvaluator.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns/ColumnSchema.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/Formats.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
+    )
+    target_include_directories(rawform_model_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/columns
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media
+    )
+    target_link_libraries(rawform_model_test PRIVATE
+            Qt6::Core
+            Qt6::Qml
+            yaml-cpp::yaml-cpp
+    )
+    rawform_add_ui_test(playlist_model rawform_model_test)
 endif()
 
 # ---------------------------------------------------------------------------
