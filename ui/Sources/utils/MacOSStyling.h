@@ -55,7 +55,7 @@ class QQuickWindow;
 ///
 /// This function is a no-op on non-macOS platforms. In practice the build only
 /// compiles the implementation translation unit on macOS (see CMakeLists.txt),
-/// and main.cpp only calls it under `Q_OS_MAC`, so the no-op branch is a
+/// and main.cpp only calls it under `Q_OS_MACOS`, so the no-op branch is a
 /// belt-and-suspenders guard rather than a path the app relies on.
 ///
 /// window: The application's root window (MainWindow.qml's

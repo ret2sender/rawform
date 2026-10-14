@@ -295,8 +295,8 @@ void applyMacOSStyling(QQuickWindow* window) {
 /// No-op fallback for non-macOS platforms.
 ///
 /// The build normally excludes this translation unit off macOS (see
-/// CMakeLists.txt), and main.cpp only calls applyMacOSStyling under Q_OS_MAC, so
-/// this branch is a safety net rather than a code path the app depends on.
+/// CMakeLists.txt), and main.cpp only calls applyMacOSStyling under Q_OS_MACOS,
+/// so this branch is a safety net rather than a code path the app depends on.
 void applyMacOSStyling(QQuickWindow* /*window*/) {}
 
 #endif

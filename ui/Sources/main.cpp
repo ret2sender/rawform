@@ -99,7 +99,7 @@
 #include "utils/QmlSingletonInstance.h"
 #include "window/WindowGeometryStore.h"
 
-#if defined(Q_OS_MAC)
+#if defined(Q_OS_MACOS)
 #include <QQuickWindow>  // the root window handed to applyMacOSStyling
 #endif
 
@@ -180,7 +180,7 @@ int main(int argc, char* argv[]) {
     // Excluded on macOS on purpose: there setWindowIcon overrides the Dock
     // icon at runtime, and the bundle's rawform.icns (declared in
     // CMakeLists.txt) must stay authoritative.
-    #if !defined(Q_OS_MAC)
+    #if !defined(Q_OS_MACOS)
     QGuiApplication::setWindowIcon(QIcon::fromTheme(
         QStringLiteral("com.rawform.app"),
         QIcon(QStringLiteral(
@@ -434,7 +434,7 @@ int main(int argc, char* argv[]) {
     // Linux/Windows the window stays frameless with internal, themed QML
     // TitleBarControls, so there is nothing to do here.
     // -----------------------------------------------------------------------
-    #if defined(Q_OS_MAC)
+    #if defined(Q_OS_MACOS)
     applyMacOSStyling(qobject_cast<QQuickWindow*>(rootWindow.get()));
     #endif
 
