@@ -47,7 +47,10 @@
 //  4. REMOVE UNAVAILABLE. Shares the paths and the bracket.
 //  5. BLOCK MOVE. moveTracks down and up: one rowsMoved, the rotated order,
 //     the selection carried with the block.
-//  6. SCALE. 15k rows: every other row removed through the proxy with the rows
+//  6. ROW UPDATES. applyRowUpdates applies a mixed batch (replacements, flag
+//     flips, both, out-of-range and empty entries) with one dataChanged span
+//     and one revision bump; refreshTrack keeps its one-row contract.
+//  7. SCALE. 15k rows: every other row removed through the proxy with the rows
 //     selected and with the selection cleared first (the Delete key's order),
 //     and a 5000-row block moved to the middle. The numbers are printed; the
 //     only assertion is a loose tripwire (one second) that the old per-run and
@@ -71,12 +74,14 @@
 #include <QItemSelection>
 #include <QItemSelectionModel>
 #include <QList>
+#include <QModelIndex>
 #include <QPersistentModelIndex>
 #include <QString>
 #include <QTimer>
 #include <QVariantList>
 
 #include <cstdio>
+#include <optional>
 #include <memory>
 
 using namespace rawform;
@@ -397,6 +402,68 @@ void testBlockMove() {
           "move: and back to the top");
 }
 
+void testApplyRowUpdates() {
+    auto model = makeModel(50);
+    int dataChanges = 0;
+    int revisions   = 0;
+    int spanTop     = -1;
+    int spanBottom  = -1;
+    int spanRight   = -1;
+    QObject::connect(model.get(), &QAbstractItemModel::dataChanged, model.get(),
+                     [&](const QModelIndex& tl, const QModelIndex& br) {
+                         ++dataChanges;
+                         spanTop    = tl.row();
+                         spanBottom = br.row();
+                         spanRight  = br.column();
+                     });
+    QObject::connect(model.get(), &PlaylistModel::dataRevisionChanged, model.get(),
+                     [&]() { ++revisions; });
+    const int revisionBefore = model->dataRevision();
+
+    TrackData fresh = track(5);
+    fresh.title     = QStringLiteral("fresh 5");
+    TrackData both  = track(30);
+    both.title      = QStringLiteral("fresh 30");
+    QList<PlaylistModel::RowUpdate> updates;
+    updates.append({ .row = 5, .track = fresh, .available = std::nullopt });
+    updates.append({ .row = 20, .track = std::nullopt, .available = false });
+    updates.append({ .row = 30, .track = both, .available = false });
+    updates.append(
+        { .row = 99, .track = std::nullopt, .available = false }); // out of range
+    updates.append(
+        { .row = 7, .track = std::nullopt, .available = std::nullopt }); // nothing to do
+    model->applyRowUpdates(updates);
+
+    check(dataChanges == 1, "applyRowUpdates: one dataChanged for the batch");
+    check(spanTop == 5 && spanBottom == 30 && spanRight == model->columnCount() - 1,
+          "applyRowUpdates: the span is lowest to highest updated row, every column");
+    check(revisions == 1 && model->dataRevision() == revisionBefore + 1,
+          "applyRowUpdates: one revision bump");
+    check(model->trackAt(5)->title == QStringLiteral("fresh 5") &&
+              model->trackAt(5)->available,
+          "applyRowUpdates: a replacement lands, availability as the replacement says");
+    check(!model->trackAt(20)->available && model->trackAt(20)->title == track(20).title,
+          "applyRowUpdates: a flag flip touches only the flag");
+    check(model->trackAt(30)->title == QStringLiteral("fresh 30") &&
+              !model->trackAt(30)->available,
+          "applyRowUpdates: replacement then flag, in that order");
+    check(model->trackAt(7)->available && model->trackAt(7)->title == track(7).title,
+          "applyRowUpdates: an empty update is skipped");
+
+    model->applyRowUpdates({});
+    model->applyRowUpdates(
+        { { .row = 99, .track = std::nullopt, .available = true },
+         { .row = 3, .track = std::nullopt, .available = std::nullopt } });
+    check(dataChanges == 1 && revisions == 1,
+          "applyRowUpdates: nothing applied, nothing emitted");
+
+    // refreshTrack keeps its per-row contract.
+    model->refreshTrack(20, track(20));
+    check(dataChanges == 2 && spanTop == 20 && spanBottom == 20 &&
+              model->trackAt(20)->available,
+          "refreshTrack: one row, one dataChanged, available restored by the fresh data");
+}
+
 void testScale() {
     constexpr int kRows = 15000;
     auto model = makeModel(kRows);
@@ -477,6 +544,7 @@ int main(int argc, char** argv) {
     testCompactionUnderFilter();
     testRemoveUnavailable();
     testBlockMove();
+    testApplyRowUpdates();
     testScale();
 
     std::printf("PlaylistModelTest: %d checks, %d failures\n", g_checks, g_failures);

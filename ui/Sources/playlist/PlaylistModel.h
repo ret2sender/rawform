@@ -64,6 +64,8 @@
 #include <QStringList>
 #include <QVariantList>
 
+#include <optional> // RowUpdate's two optional parts
+
 namespace rawform {
 
 class CustomColumnRegistry; // owns the user-defined custom columns (injected, read-only here)
@@ -73,7 +75,8 @@ class PlaylistModel : public QAbstractTableModel {
     QML_ELEMENT
     QML_UNCREATABLE("PlaylistModel instances are created by PlaylistTabs")
 
-    /// Bumped on every in-place row refresh (refreshTrack), so a QML binding can
+    /// Bumped on every in-place row refresh (refreshTrack, once per
+    /// applyRowUpdates batch), so a QML binding can
     /// depend on it to re-evaluate when row data changes underneath it. Used by
     /// the album-art source: dataChanged alone won't re-run a binding whose
     /// value comes from an invokable (albumArtSourceForRows /
@@ -243,9 +246,32 @@ public:
 
     /// Replace the TrackData at @p row in place and emit dataChanged for the
     /// whole row (no reset, no move); bumps dataRevision so the album-art binding
-    /// re-evaluates. Out-of-range is a no-op. The freshness path: MetadataReloader
-    /// re-reads a changed file and pushes it here.
+    /// re-evaluates. Out-of-range is a no-op. The single-row freshness path
+    /// (a rename, a Properties write); the reloader's batches go through
+    /// applyRowUpdates.
     void refreshTrack(int row, TrackData track);
+
+    /// One in-place update of a row for applyRowUpdates: a replacement
+    /// TrackData, a new availability flag, or both (the flag is applied after
+    /// the replacement). A row with neither set is skipped.
+    struct RowUpdate {
+        int                      row = -1;
+        std::optional<TrackData> track;
+        std::optional<bool>      available;
+    };
+
+    /// Apply several in-place row updates with ONE notification: one
+    /// dataChanged spanning the lowest to the highest updated row (every
+    /// column, every role) and one dataRevisionChanged. Rows inside the span
+    /// that did not change are over-notified, which is far cheaper than what
+    /// this replaces: the reloader applying a 15k-row validation pass as 15k
+    /// refreshTrack calls, each fanned out to the proxy, the view, the
+    /// autosave hook, the search and every revision binding (758 ms with no
+    /// frame rendered). Out-of-range rows are skipped; an empty or all-skipped
+    /// list emits nothing. Rows are matched by position only: the caller
+    /// guards against drift (the reloader compares the path) before building
+    /// the list.
+    void applyRowUpdates(QList<RowUpdate> updates);
 
     [[nodiscard]] int dataRevision() const { return m_dataRevision; }
 

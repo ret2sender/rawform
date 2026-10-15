@@ -30,8 +30,11 @@
 
 #include "playlist/PlaylistModel.h"
 #include "media/TrackReader.h"
+#include "utils/PerfLog.h" // lcPerf: drain slice and pass timings
 
 #include <QAbstractProxyModel>
+#include <QDeadlineTimer>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QModelIndex>
 #include <QModelIndexList>
@@ -39,6 +42,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace rawform {
@@ -220,65 +224,114 @@ void MetadataReloader::dispatch(QList<ReloadItem> items, bool force) {
 void MetadataReloader::start(QList<ReloadItem> items) {
     m_changed = 0;
     m_nextApply = 0;
+    m_finishPending = false;
     setBusy(true);
     // Move the sequence into the future so it owns the work for the whole run.
     m_watcher.setFuture(QtConcurrent::mapped(std::move(items), reloadOne));
 }
 
 void MetadataReloader::onResultsReady(int /*begin*/, int /*end*/) {
-    drainReady();
+    if (!m_drainQueued)
+        drainReady(); // a queued slice will pick these up otherwise
 }
 
 void MetadataReloader::drainReady() {
-    if (!m_model)
-        return;
+    m_drainQueued = false;
     const QFuture<ReloadResult> future = m_watcher.future();
+    if (!m_model) {
+        // Nothing to apply to; still run the pass to its end so the token
+        // and busy bookkeeping settle.
+        m_nextApply = future.resultCount();
+        if (m_finishPending)
+            finishPass();
+        return;
+    }
+
+    QElapsedTimer clock;
+    clock.start();
+    const QDeadlineTimer slice(kDrainSliceMs);
+    QList<PlaylistModel::RowUpdate> updates;
+    int seen = 0;
     while (future.isResultReadyAt(m_nextApply)) {
-        const ReloadResult r = future.resultAt(m_nextApply);
+        ReloadResult r = future.resultAt(m_nextApply);
         ++m_nextApply;
+        ++seen;
 
         // Drift guard: only touch the row if it still holds this exact file, so a
         // concurrent insert/remove/move can never write onto the wrong row.
-        if (r.row < 0 || m_model->trackFilePath(r.row) != r.path)
-            continue;
+        if (r.row >= 0 && m_model->trackFilePath(r.row) == r.path) {
+            switch (r.verdict) {
+            case ReloadVerdict::Changed:
+                // Fresh data carries available = true by construction, so this
+                // also clears a stale missing flag when a changed file reappears.
+                if (r.data)
+                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
+                                                             .track     = std::move(r.data),
+                                                             .available = std::nullopt });
+                break;
 
-        switch (r.verdict) {
-        case ReloadVerdict::Changed:
-            // Fresh data carries available = true by construction, so this also
-            // clears a stale missing flag when a changed file reappears.
-            m_model->refreshTrack(r.row, r.data);
-            ++m_changed;
-            break;
-
-        case ReloadVerdict::Missing: {
-            const TrackData* cur = m_model->trackAt(r.row);
-            if (cur && cur->available) {
-                TrackData flagged = *cur;
-                flagged.available = false;
-                m_model->refreshTrack(r.row, flagged);
-                ++m_changed;
+            case ReloadVerdict::Missing: {
+                const TrackData* cur = m_model->trackAt(r.row);
+                if (cur && cur->available)
+                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
+                                                             .track     = std::nullopt,
+                                                             .available = false });
+                break;
             }
-            break;
+
+            case ReloadVerdict::UnchangedPresent: {
+                // Nothing to re-read, but if the row was grayed and the file is
+                // back, clear the flag so it un-grays (and its art can load again).
+                const TrackData* cur = m_model->trackAt(r.row);
+                if (cur && !cur->available)
+                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
+                                                             .track     = std::nullopt,
+                                                             .available = true });
+                break;
+            }
+            }
         }
 
-        case ReloadVerdict::UnchangedPresent: {
-            // Nothing to re-read, but if the row was grayed and the file is back,
-            // clear the flag so it un-grays (and its art can load again).
-            const TrackData* cur = m_model->trackAt(r.row);
-            if (cur && !cur->available) {
-                TrackData restored = *cur;
-                restored.available = true;
-                m_model->refreshTrack(r.row, restored);
-                ++m_changed;
-            }
+        // At least one result per slice, so a slow result cannot stall the
+        // drain; after that the slice yields as soon as its budget is spent.
+        if (slice.hasExpired())
             break;
-        }
-        }
     }
+
+    // One batch per slice: a single dataChanged span and revision bump for
+    // everything this slice applied, however many rows that is.
+    const int applied = static_cast<int>(updates.size());
+    if (applied > 0) {
+        m_changed += applied;
+        m_model->applyRowUpdates(std::move(updates));
+    }
+    qCDebug(lcPerf, "reloader drain: %d results, %d applied, %lld ms", seen, applied,
+            static_cast<long long>(clock.elapsed()));
+
+    if (future.isResultReadyAt(m_nextApply)) {
+        // More is ready and the slice is spent: continue from the event loop so
+        // a frame can render in between.
+        m_drainQueued = true;
+        QMetaObject::invokeMethod(this, &MetadataReloader::drainReady,
+                                  Qt::QueuedConnection);
+        return;
+    }
+    if (m_finishPending)
+        finishPass();
 }
 
 void MetadataReloader::onFinished() {
-    drainReady(); // defensive: pick up any results not yet seen via resultsReadyAt
+    // The pool is done; the pass closes when the drain has applied the last
+    // result. A queued slice reaches finishPass by itself, otherwise drain now
+    // (the finished signal follows every resultsReadyAt, so this also covers
+    // results that arrived with it).
+    m_finishPending = true;
+    if (!m_drainQueued)
+        drainReady();
+}
+
+void MetadataReloader::finishPass() {
+    m_finishPending = false;
     const int finishedToken = m_activeToken;
     m_activeToken = -1;
     if (m_changed > 0)

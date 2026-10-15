@@ -31,9 +31,12 @@
 //
 // All disk work runs on the global thread pool (QtConcurrent::mapped over
 // readTrack, the scanner's parser), so no pass blocks the UI. The GUI thread
-// only snapshots the work (rows + cached keys) and applies results via
-// PlaylistModel::refreshTrack (a dataChanged emit, never a reset, so selection,
-// columns, metadata pane and art all refresh in place).
+// only snapshots the work (rows + cached keys) and applies results in batches
+// via PlaylistModel::applyRowUpdates (one dataChanged span per batch, never a
+// reset, so selection, columns, metadata pane and art all refresh in place).
+// A batch is bounded in time, not in size: the drain applies what is ready for
+// a few milliseconds and yields to the event loop for the rest, so a frame
+// renders between batches of a long pass instead of after it.
 //
 // Each row is classified into one of three verdicts and availability reconciled:
 // a present+unchanged row clears any stale "missing" flag, a changed row gets
@@ -75,6 +78,8 @@
 #include <QStringList>
 #include <QTimer>
 
+#include <optional>
+
 namespace rawform {
 
 class PlaylistModel;
@@ -92,7 +97,9 @@ struct ReloadItem {
 
 /// A worker's verdict for one row. Exactly one state per row. `path` is the
 /// file the verdict is about (used to guard against row drift before applying).
-/// `data` carries fresh tags only for the Changed verdict.
+/// `data` carries fresh tags only for the Changed verdict, and is absent
+/// otherwise: a result store holds one of these per row for the whole pass, and
+/// the common UnchangedPresent verdict should not cost a TrackData each.
 enum class ReloadVerdict {
     UnchangedPresent, ///< present, mtime+size match: re-reads nothing, clears any stale "missing" flag
     Changed,          ///< re-read produced fresh, valid data
@@ -100,10 +107,10 @@ enum class ReloadVerdict {
 };
 
 struct ReloadResult {
-    int           row = -1;
-    ReloadVerdict verdict = ReloadVerdict::UnchangedPresent;
-    QString       path;
-    TrackData     data;
+    int                      row = -1;
+    ReloadVerdict            verdict = ReloadVerdict::UnchangedPresent;
+    QString                  path;
+    std::optional<TrackData> data;
 };
 
 /// Also the ReloadPort the Properties apply sequencer drives: the port
@@ -191,8 +198,13 @@ private:
     void dispatch(QList<ReloadItem> items, bool force);
     /// Begin mapping @p items on the pool (caller guarantees not busy).
     void start(QList<ReloadItem> items);
-    /// Drain ready results in order, applying changed/missing rows that still match.
+    /// Drain ready results in order for at most one time slice, applying the
+    /// changed/missing rows that still match as one batch; re-queues itself
+    /// while more results are ready, and closes the pass (finishPass) once the
+    /// pool has finished and every result has been applied.
     void drainReady();
+    /// The end of a pass: refreshed, busy, the token, the next pass.
+    void finishPass();
     void setBusy(bool on);
 
     PlaylistModel*               m_model;
@@ -203,6 +215,15 @@ private:
     int  m_nextApply = 0;   ///< next result index to apply (in-order)
     int  m_changed = 0;     ///< rows actually updated this pass
     bool m_busy = false;
+    /// The pool reported finished; the pass closes when the drain catches up.
+    bool m_finishPending = false;
+    /// A deferred drain slice is queued on the event loop (never two).
+    bool m_drainQueued = false;
+
+    /// How long one drain slice may hold the GUI thread before yielding so a
+    /// frame can render: half a 60 Hz frame, so a pass of any length shows as
+    /// steady progress rather than a stall.
+    static constexpr int kDrainSliceMs = 8;
 
     bool             m_hasPending = false;
     bool             m_pendingForce = false;

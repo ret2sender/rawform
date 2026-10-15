@@ -523,6 +523,31 @@ void PlaylistModel::refreshTrack(int row, TrackData track) {
     emit dataChanged(index(row, 0), index(row, lastCol)); // all roles
 }
 
+void PlaylistModel::applyRowUpdates(QList<RowUpdate> updates) {
+    int lo = -1;
+    int hi = -1;
+    for (RowUpdate& u : updates) {
+        if (u.row < 0 || u.row >= m_tracks.size())
+            continue;
+        if (!u.track && !u.available)
+            continue;
+        if (u.track)
+            m_tracks[u.row] = std::move(*u.track);
+        if (u.available)
+            m_tracks[u.row].available = *u.available;
+        lo = lo < 0 ? u.row : std::min(lo, u.row);
+        hi = std::max(hi, u.row);
+    }
+    if (lo < 0)
+        return;
+
+    ++m_dataRevision;
+    emit dataRevisionChanged();
+
+    const int lastCol = columnCount() > 0 ? columnCount() - 1 : 0;
+    emit dataChanged(index(lo, 0), index(hi, lastCol)); // all roles
+}
+
 void PlaylistModel::removeTracks(const QVariantList& rows) {
     if (rows.isEmpty() || m_tracks.isEmpty())
         return;
