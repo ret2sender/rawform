@@ -27,6 +27,7 @@
 #include "media/TrackScanner.h"
 
 #include "media/TrackReader.h"
+#include "utils/FutureRelease.h" // releaseFuture: drop the result stores after a request
 
 #include <QChar>
 #include <QCollator>
@@ -243,6 +244,7 @@ void TrackScanner::startRequest(QStringList inputs, int at) {
 
 void TrackScanner::onEnumerated() {
     QStringList files = m_enumWatcher.result();
+    releaseFuture(m_enumWatcher); // the path list lives on in `files` alone
     if (files.isEmpty()) {
         onScanFinished(); // nothing to scan; close the request out cleanly
         return;
@@ -258,16 +260,20 @@ void TrackScanner::onEnumerated() {
 }
 
 void TrackScanner::onResultsReady(int /*begin*/, int /*end*/) {
+    drainResults();
+}
+
+void TrackScanner::drainResults() {
     // Drain strictly in input order, never blocking on a result that is not
     // ready yet, so batches stay contiguous and ordered even though workers
     // finish out of order. Invalid (unreadable) files are counted, not emitted.
     const QFuture<TrackData> future = m_scanWatcher.future();
     const int before = m_nextEmit;
     while (future.isResultReadyAt(m_nextEmit)) {
-        const TrackData t = future.resultAt(m_nextEmit);
+        TrackData t = future.resultAt(m_nextEmit); // one copy out of the store, moved on
         ++m_nextEmit;
         if (t.valid)
-            m_buffer.push_back(t);
+            m_buffer.push_back(std::move(t));
         else
             ++m_skipped;
     }
@@ -289,6 +295,13 @@ void TrackScanner::flush() {
 }
 
 void TrackScanner::onScanFinished() {
+    // The finished signal follows every resultsReadyAt, so the drain below
+    // normally finds nothing; it is the guarantee that the store is empty
+    // before it is released (one TrackData per scanned file, resident until
+    // the next scan otherwise). A request that enumerated nothing arrives
+    // here with no scan future at all, and both steps are no-ops.
+    drainResults();
+    releaseFuture(m_scanWatcher);
     m_flushTimer.stop();
     flush(); // emit the tail
     // Finalize the bar before the finish notification, so a consumer

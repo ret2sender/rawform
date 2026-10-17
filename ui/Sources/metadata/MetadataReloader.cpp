@@ -30,7 +30,8 @@
 
 #include "playlist/PlaylistModel.h"
 #include "media/TrackReader.h"
-#include "utils/PerfLog.h" // lcPerf: drain slice and pass timings
+#include "utils/FutureRelease.h" // releaseFuture: drop the result store after a pass
+#include "utils/PerfLog.h"       // lcPerf: drain slice and pass timings
 
 #include <QAbstractProxyModel>
 #include <QDeadlineTimer>
@@ -264,18 +265,19 @@ void MetadataReloader::drainReady() {
             case ReloadVerdict::Changed:
                 // Fresh data carries available = true by construction, so this
                 // also clears a stale missing flag when a changed file reappears.
-                if (r.data)
-                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
-                                                             .track     = std::move(r.data),
-                                                             .available = std::nullopt });
+                if (r.data) {
+                    PlaylistModel::RowUpdate u{ .row       = r.row,
+                                                .track     = std::move(r.data),
+                                                .available = std::nullopt };
+                    updates.append(std::move(u));
+                }
                 break;
 
             case ReloadVerdict::Missing: {
                 const TrackData* cur = m_model->trackAt(r.row);
                 if (cur && cur->available)
-                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
-                                                             .track     = std::nullopt,
-                                                             .available = false });
+                    updates.append(PlaylistModel::RowUpdate{
+                        .row = r.row, .track = std::nullopt, .available = false });
                 break;
             }
 
@@ -284,9 +286,8 @@ void MetadataReloader::drainReady() {
                 // back, clear the flag so it un-grays (and its art can load again).
                 const TrackData* cur = m_model->trackAt(r.row);
                 if (cur && !cur->available)
-                    updates.append(PlaylistModel::RowUpdate{ .row       = r.row,
-                                                             .track     = std::nullopt,
-                                                             .available = true });
+                    updates.append(PlaylistModel::RowUpdate{
+                        .row = r.row, .track = std::nullopt, .available = true });
                 break;
             }
             }
@@ -305,8 +306,10 @@ void MetadataReloader::drainReady() {
         m_changed += applied;
         m_model->applyRowUpdates(std::move(updates));
     }
-    qCDebug(lcPerf, "reloader drain: %d results, %d applied, %lld ms", seen, applied,
-            static_cast<long long>(clock.elapsed()));
+    if (seen > 0) {
+        qCDebug(lcPerf, "reloader drain: %d results, %d applied, %lld ms", seen, applied,
+                static_cast<long long>(clock.elapsed()));
+    }
 
     if (future.isResultReadyAt(m_nextApply)) {
         // More is ready and the slice is spent: continue from the event loop so
@@ -332,6 +335,10 @@ void MetadataReloader::onFinished() {
 
 void MetadataReloader::finishPass() {
     m_finishPending = false;
+    // Every result has been applied; the store (one ReloadResult per row of
+    // the pass, a TrackData inside each Changed one) has nothing left to say,
+    // and would otherwise sit resident until the next pass replaces it.
+    releaseFuture(m_watcher);
     const int finishedToken = m_activeToken;
     m_activeToken = -1;
     if (m_changed > 0)

@@ -119,6 +119,10 @@ private slots:
 
 private:
     void startRequest(QStringList inputs, int at);
+    /// Move every ready result, in input order, from the scan future into
+    /// m_buffer (valid) or the skipped count; shared by the ready and finished
+    /// paths.
+    void drainResults();
     void setScanning(bool on);
 
     struct PendingRequest {

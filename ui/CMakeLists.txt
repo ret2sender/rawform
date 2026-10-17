@@ -192,6 +192,9 @@ set(APP_SOURCES
         # playlist-scaled operations, off unless a logging rule enables them.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
+        # Drops a finished QFutureWatcher's result store without re-entering
+        # its finished handler; header-only template.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FutureRelease.h
         # Baked-in sanitizer default suppressions (TSan races, LSan leaks);
         # empty TU in non-sanitizer builds.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp
@@ -849,6 +852,27 @@ if(RAWFORM_BUILD_TESTS)
             yaml-cpp::yaml-cpp
     )
     rawform_add_ui_test(playlist_model rawform_model_test)
+
+    # ------------------------------------------------------------------
+    # The future-release test: utils/FutureRelease.h must drop a watcher's
+    # finished future from inside its own finished handler without the
+    # watcher ever reporting on the empty future it then holds (the
+    # replayed finished() re-entered the scanner's handler and read a result
+    # that did not exist). Qt6::Concurrent for the mapped pass it drives;
+    # Qt-Quick-free, filesystem-free.
+    # ------------------------------------------------------------------
+    add_executable(rawform_future_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/FutureReleaseTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FutureRelease.h
+    )
+    target_include_directories(rawform_future_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    target_link_libraries(rawform_future_test PRIVATE
+            Qt6::Core
+            Qt6::Concurrent
+    )
+    rawform_add_ui_test(future_release rawform_future_test)
 endif()
 
 # ---------------------------------------------------------------------------
