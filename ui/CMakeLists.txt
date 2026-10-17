@@ -820,8 +820,9 @@ if(RAWFORM_BUILD_TESTS)
     # compaction paths) and block moves as the view sees them, through the
     # tab's filter proxy with a selection model bound and with a search in
     # force, plus a 15k-row timing section. The queue test's spine plus the
-    # proxy and the search; a QCoreApplication for the search's timer.
-    # Qt-Quick-free, filesystem-free.
+    # proxy and the search (Qt6::Concurrent for its off-thread haystack
+    # build); a QCoreApplication for the search's timer. Qt-Quick-free,
+    # filesystem-free.
     # ------------------------------------------------------------------
     add_executable(rawform_model_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaylistModelTest.cpp
@@ -848,6 +849,7 @@ if(RAWFORM_BUILD_TESTS)
     )
     target_link_libraries(rawform_model_test PRIVATE
             Qt6::Core
+            Qt6::Concurrent
             Qt6::Qml
             yaml-cpp::yaml-cpp
     )

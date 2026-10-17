@@ -52,7 +52,8 @@
 //     and one revision bump; refreshTrack keeps its one-row contract.
 //  7. SCALE. 15k rows: every other row removed through the proxy with the rows
 //     selected and with the selection cleared first (the Delete key's order),
-//     and a 5000-row block moved to the middle. The numbers are printed; the
+//     a 5000-row block moved to the middle, and a search over the 15k rows
+//     (the off-thread haystack build). The numbers are printed; the
 //     only assertion is a loose tripwire (one second) that the old per-run and
 //     per-element paths exceed by an order of magnitude at this size.
 //
@@ -525,6 +526,27 @@ void testScale() {
           "scale: 5000-row block moved to the middle");
     std::printf("scale: 5000 rows of 15k moved to the middle: %lld ms\n",
                 static_cast<long long>(moveMs));
+
+    // A search over the 15k rows: the haystack build runs on the pool, so the
+    // wall time from the first term to the filtered view includes the 120 ms
+    // coalesce window; the perf log line carries the build's own time.
+    PlaylistSearch search;
+    search.setCustomColumns(nullptr);
+    search.setModel(model3.get());
+    proxy3.setSearch(&search);
+    clock.restart();
+    search.setQueryText(QStringLiteral("odd"));
+    int waited = 0;
+    while (!search.active() && waited < 5000) {
+        spin(10);
+        waited += 10;
+    }
+    const qint64 searchMs = clock.elapsed();
+    check(search.active() && proxy3.rowCount() == kRows / 2,
+          "scale: a search over 15k rows filters to the 7500 matches");
+    std::printf("scale: first term to filtered view over 15k rows: %lld ms "
+                "(120 ms of it is the coalesce window)\n",
+                static_cast<long long>(searchMs));
 
     // Tripwires, an order of magnitude above the compaction and rotate costs
     // on a slow Debug runner and an order of magnitude below the old paths.

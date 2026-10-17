@@ -31,13 +31,18 @@
 #include "search/PlaylistSearch.h"
 
 #include "columns/ColumnSchema.h" // fieldFromString, isCustomFieldId, customIdFromFieldId
+#include "utils/FutureRelease.h"  // releaseFuture: drop the build's result once adopted
+#include "utils/PerfLog.h"        // lcPerf: the build's wall time
 
 #include <QAbstractItemModel>
+#include <QElapsedTimer>
 #include <QPersistentModelIndex>
 #include <QVariantMap>
+#include <QtConcurrent>
 
 #include <algorithm>
 #include <optional>
+#include <utility>
 
 namespace rawform {
 
@@ -54,6 +59,8 @@ PlaylistSearch::PlaylistSearch(QObject* parent) : QObject(parent) {
     m_coalesce.setSingleShot(true);
     m_coalesce.setInterval(kCoalesceMs);
     m_coalesce.callOnTimeout(this, &PlaylistSearch::onCoalesceTimeout);
+    connect(&m_haystackBuild, &QFutureWatcher<QList<QString>>::finished, this,
+            &PlaylistSearch::onHaystacksBuilt);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,10 +114,10 @@ void PlaylistSearch::setModel(PlaylistModel* model) {
     // context at once and the rows follow on the timer; hidden, every tab
     // switch would otherwise pay the O(rows) key pass for an underline nobody
     // sees, so the work is only flagged and the next enable runs it.
+    invalidateHaystacks(); // a build in flight describes the old model
     if (!m_enabled) {
-        m_tagKeysDirty   = true;
-        m_reparseDirty   = true;
-        m_haystacksDirty = true;
+        m_tagKeysDirty = true;
+        m_reparseDirty = true;
         return;
     }
     refreshExtraTagKeys();
@@ -137,7 +144,7 @@ void PlaylistSearch::setEnabled(bool enabled) {
     // exists. The flags stay as they are, pointing at the resume work.
     m_coalesce.stop();
     m_haystacks.clear();
-    m_haystacksDirty = true;
+    invalidateHaystacks(); // a build in flight lands into a suspended search: dropped
     m_matches.clear();
     m_parkedMatches.clear();
     m_matchesParked = false;
@@ -221,14 +228,14 @@ void PlaylistSearch::rebindModel(PlaylistModel* model) {
     // the tag-key refresh rides the same timeout so a scan's batch inserts
     // cost one pass per window, not one per batch.
     const auto rowsChanged = [this]() {
-        m_tagKeysDirty   = true;
-        m_reparseDirty   = true;
-        m_haystacksDirty = true;
+        m_tagKeysDirty = true;
+        m_reparseDirty = true;
+        invalidateHaystacks();
         armTimer();
     };
     const auto columnsChanged = [this]() {
-        m_reparseDirty   = true;
-        m_haystacksDirty = true;
+        m_reparseDirty = true;
+        invalidateHaystacks();
         armTimer();
     };
     // A layout change is the model's one-pass compaction of a many-run
@@ -343,8 +350,13 @@ void PlaylistSearch::reparse() {
 }
 
 void PlaylistSearch::scheduleRebuild() {
-    m_haystacksDirty = true;
+    invalidateHaystacks();
     armTimer();
+}
+
+void PlaylistSearch::invalidateHaystacks() {
+    m_haystacksDirty = true;
+    ++m_haystackGeneration;
 }
 
 void PlaylistSearch::scheduleRematch() {
@@ -372,26 +384,70 @@ void PlaylistSearch::onCoalesceTimeout() {
     // With no term to match, the haystacks stay dirty rather than built: a
     // scan into a watched-but-unsearched playlist would otherwise rebuild
     // them every window for a match pass that has nothing to do. The first
-    // term arms the timer (setQueryText) and finds the flag still set.
+    // term arms the timer (setQueryText) and finds the flag still set. Stale
+    // haystacks with a term to match start a build and leave the match set in
+    // force as it is; the match pass runs when the build lands. Current
+    // haystacks (or nothing to match) rematch now.
     if (m_haystacksDirty && !m_terms.isEmpty()) {
-        rebuildHaystacks();
+        startHaystackBuild();
+    } else {
+        rematch();
     }
-    rematch();
     m_coalesce.stop();
 }
 
-void PlaylistSearch::rebuildHaystacks() {
-    m_haystacksDirty = false;
-    m_haystacks.clear();
+void PlaylistSearch::startHaystackBuild() {
+    if (m_buildGeneration >= 0) {
+        return; // one at a time; the landing re-arms if the flags still ask
+    }
     if (!m_model || m_searchSet.isEmpty()) {
+        // Nothing to build against: the empty cache IS current (active() is
+        // false with an empty search set, so no row is hidden by it).
+        m_haystacks.clear();
+        m_haystacksDirty = false;
+        rematch();
         return;
     }
-    const int n = m_model->rowCount();
-    m_haystacks.reserve(n);
-    for (int r = 0; r < n; ++r) {
-        const TrackData* t = m_model->trackAt(r);
-        m_haystacks.append(t ? search::buildHaystack(*t, m_searchSet) : QString());
+    m_buildGeneration = m_haystackGeneration;
+    // The snapshot is an implicitly shared copy of the model's list: free
+    // until the GUI thread mutates the model, at which point the model
+    // detaches and the worker keeps reading the rows it was given. The
+    // search set is copied the same way. buildHaystack has no shared state.
+    const QList<TrackData>           tracks = m_model->snapshotTracks();
+    const QList<search::Searchable> set    = m_searchSet;
+    m_haystackBuild.setFuture(QtConcurrent::run([tracks, set]() {
+        QElapsedTimer clock;
+        clock.start();
+        QList<QString> haystacks;
+        haystacks.reserve(tracks.size());
+        for (const TrackData& t : tracks) {
+            haystacks.append(search::buildHaystack(t, set));
+        }
+        qCDebug(lcPerf, "search haystacks: %lld rows built off-thread in %lld ms",
+                static_cast<long long>(tracks.size()),
+                static_cast<long long>(clock.elapsed()));
+        return haystacks;
+    }));
+}
+
+void PlaylistSearch::onHaystacksBuilt() {
+    const bool current = m_buildGeneration == m_haystackGeneration;
+    m_buildGeneration  = -1;
+    QList<QString> built = m_haystackBuild.future().takeResult();
+    releaseFuture(m_haystackBuild);
+    if (!m_enabled) {
+        return; // suspended meanwhile; the flags stand for the next enable
     }
+    if (!current) {
+        // Rows, columns, filter or model moved under the build. The
+        // invalidation that bumped the generation armed the timer, unless the
+        // search was disabled and re-enabled in between, so make sure.
+        armTimer();
+        return;
+    }
+    m_haystacks      = std::move(built);
+    m_haystacksDirty = false;
+    rematch();
 }
 
 void PlaylistSearch::rematch() {

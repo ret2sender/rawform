@@ -35,6 +35,17 @@
 // pass over the cached haystacks; a filter, column, registry or row change
 // rebuilds the haystacks first.
 //
+// The haystack build itself runs on the thread pool, over a snapshot of the
+// tracks and the search set (buildHaystack is pure; the snapshot is an
+// implicitly shared copy, so it costs nothing until the model mutates). At 15k
+// rows the build is tens of milliseconds, which on the GUI thread was a stall
+// on the first typed letter and on every rebuild a reload pass caused while a
+// search was open. A generation counter ties a build to the state it was
+// started from: every invalidation bumps it, and a result that lands with a
+// stale generation is dropped (the invalidation already armed the timer that
+// starts the next build). The match set in force stays as it is until the new
+// haystacks land, then the match pass runs over them.
+//
 // Idle discipline. The dialog exists from launch and is bound to the active
 // tab, so without a gate every scan batch would cost a haystack rebuild over
 // a playlist nobody is searching. Two rules keep the idle cost at zero:
@@ -61,6 +72,7 @@
 #include "playlist/PlaylistModel.h"
 #include "search/PlaylistSearchFilter.h"
 
+#include <QFutureWatcher>
 #include <QList>
 #include <QObject>
 #include <QPointer>
@@ -165,8 +177,18 @@ private:
     /// match), then rematch, each only when flagged.
     void onCoalesceTimeout();
 
-    /// One folded haystack per row over m_searchSet.
-    void rebuildHaystacks();
+    /// Start a haystack build on the pool over a snapshot of the model and
+    /// m_searchSet; onHaystacksBuilt lands it. No-op while one is in flight
+    /// (the landing re-arms the timer if the flags still ask for a build).
+    void startHaystackBuild();
+
+    /// The build landed: adopt it when it still describes the current state
+    /// (generation unchanged, search enabled) and run the match pass; drop it
+    /// otherwise.
+    void onHaystacksBuilt();
+
+    /// Mark the haystacks stale and retire any build in flight.
+    void invalidateHaystacks();
 
     /// The match pass over the cached haystacks; emits matchesChanged.
     void rematch();
@@ -222,6 +244,13 @@ private:
     bool   m_tagKeysDirty   = true;
     bool   m_reparseDirty   = true;
     bool   m_haystacksDirty = true;
+
+    /// The off-thread build: its watcher, the generation the running build was
+    /// started from, and the current generation (bumped by every
+    /// invalidation; a landing build whose generation differs is stale).
+    QFutureWatcher<QList<QString>> m_haystackBuild;
+    int                            m_buildGeneration    = -1; ///< -1: none in flight
+    int                            m_haystackGeneration = 0;
 };
 
 } // namespace rawform
