@@ -98,10 +98,13 @@ struct PipeWireSinkImpl;
 
 class PipeWireSink final : public IAudioSink {
 public:
-    /// Connects to the PipeWire daemon and begins tracking the graph's clock
+    /// Connects to the PipeWire daemon and subscribes to the graph's clock
     /// settings, the default output device, and the live inventory of sink
-    /// nodes (persistent, cheap registry/metadata subscriptions), so
-    /// capabilities() has real hardware facts before any open(). A machine
+    /// nodes (persistent, cheap registry/metadata subscriptions, filled in on
+    /// the loop thread as the globals arrive). The constructor waits on
+    /// nothing: the facts are flushed by the first call that reads them
+    /// (capabilities() before the first open, enumerateDevices(),
+    /// selectDevice()), each of which syncs on the engine thread. A machine
     /// with no reachable daemon degrades gracefully: construction succeeds,
     /// capabilities() reports an unusable device, and open() fails with a
     /// logged message, mirroring CoreAudioSink's no-default-device behavior.

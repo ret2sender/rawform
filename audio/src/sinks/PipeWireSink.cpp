@@ -38,9 +38,10 @@
 //     held for the sink's whole life.
 //   - pw_registry + settings metadata: the graph publishes its clock settings
 //     (clock.rate, clock.force-rate, clock.allowed-rates) as properties of a
-//     metadata object named "settings". This sink binds it at construction and
-//     keeps a listener on it, so the graph's effective rate is a live atomic
-//     read by capabilities() and the seed for the measurement at open. The same
+//     metadata object named "settings". This sink binds it as the registry
+//     globals arrive on the loop thread and keeps a listener on it, so the
+//     graph's effective rate is a live atomic read by capabilities() and the
+//     seed for the measurement at open. The same
 //     registry walk maintains the Audio/Sink node inventory behind
 //     enumerateDevices() and resolves the default sink through the "default"
 //     metadata; these are the plumbing that rate switching, device selection,
@@ -194,6 +195,8 @@ struct PipeWireSinkImpl {
     struct spa_hook        metadataListener{};
     bool                   connected     = false;  // daemon connection established
     bool                   metadataBound = false;
+    bool                   metadataWarned = false; // the missing-settings line, once
+    bool                   sessionFlushed = false; // the one-time second sync happened
     int                    syncSeq       = 0;      // last pw_core_sync sequence issued
     int                    doneSeq       = -1;     // last done sequence observed
 
@@ -1369,6 +1372,22 @@ bool syncWait(PipeWireSinkImpl* impl, int timeoutSec) {
     return true;
 }
 
+// The session rendezvous every reader uses: one round trip so any in-flight
+// registry or metadata change has landed, plus, the first time only, a
+// second one. The constructor waits on nothing, so the first reader's sync is
+// what flushes the registry globals, and the metadata objects are bound
+// inside those globals' callbacks; their property replay (the clock settings,
+// the default sink name) is only guaranteed by a round trip issued after the
+// binds, which is the second one here. Every later call finds the session
+// flushed and pays one. Call with the loop LOCKED.
+void syncSession(PipeWireSinkImpl* impl) {
+    syncWait(impl, kSyncTimeoutSec);
+    if (!impl->sessionFlushed) {
+        syncWait(impl, kSyncTimeoutSec);
+        impl->sessionFlushed = true;
+    }
+}
+
 // The graph's effective clock rate: a forced rate pins the graph outright, so
 // it wins over the settings default when present.
 std::uint32_t effectiveGraphRate(const PipeWireSinkImpl* impl) {
@@ -1486,13 +1505,19 @@ void reconcileDriverFormat(PipeWireSinkImpl* impl, std::uint32_t graphRate) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Construction: stand the daemon session up (loop, context, core, registry,
-// settings metadata) and hold it for the sink's life. Two sync round trips
-// bound the wait: the first flushes the registry globals (which binds the
-// settings metadata inside its callback), the second flushes that metadata's
-// property replay, so capabilities() has a real rate before the first open. A
-// failed connect degrades to a permanently unusable sink with everything torn
-// back down; open() then fails with a logged message, the same graceful path
+// Construction: stand the daemon session up (loop, context, core, registry)
+// and hold it for the sink's life. Nothing here waits on the daemon: the
+// connect is a local socket connect plus the hello, and the registry globals
+// (which bind the settings and default metadata inside their callbacks) and
+// the metadata property replay arrive on the loop thread afterwards. The
+// first consumer that needs them syncs for itself, on the engine thread:
+// capabilities() at the first open, enumerateDevices() when the device list
+// is read, selectDevice() when a saved pin is applied. The constructor runs
+// on the GUI thread before the first frame, which is why it must not pay a
+// round trip; a daemon that accepts the connection but is wedged costs the
+// first play() its sync timeouts, not the window its first frame. A failed
+// connect degrades to a permanently unusable sink with everything torn back
+// down; open() then fails with a logged message, the same graceful path
 // CoreAudioSink takes when there is no default output device.
 PipeWireSink::PipeWireSink()
     : m_impl(std::make_unique<PipeWireSinkImpl>()) {
@@ -1540,19 +1565,9 @@ PipeWireSink::PipeWireSink()
     if (m_impl->registry != nullptr) {
         pw_registry_add_listener(m_impl->registry, &m_impl->registryListener,
                                  &kRegistryEvents, m_impl.get());
-        syncWait(m_impl.get(), kSyncTimeoutSec);  // globals flushed; metadata bound
-        syncWait(m_impl.get(), kSyncTimeoutSec);  // metadata property replay flushed
     }
-    pw_thread_loop_unlock(m_impl->loop);
-
     m_impl->connected = true;
-    if (!m_impl->metadataBound) {
-        // Not fatal: the graph rate then reads unknown (0) and the decision
-        // machinery already treats that coherently; the measurement at first
-        // process corrects the reporting regardless.
-        sinkLog(nullptr,
-                "PipeWireSink: settings metadata not found; graph rate unknown");
-    }
+    pw_thread_loop_unlock(m_impl->loop);
 }
 
 PipeWireSink::~PipeWireSink() {
@@ -1588,9 +1603,9 @@ PipeWireSink::~PipeWireSink() {
 }
 
 // ---------------------------------------------------------------------------
-// Read the graph's capabilities, fresh: one sync round trip so any in-flight
-// settings or default-device change has landed, then resolve the TARGET SINK
-// NODE (the pinned node when one is set, else the one the "default" metadata
+// Read the graph's capabilities, fresh: the session rendezvous (syncSession)
+// so any in-flight settings or default-device change has landed, then resolve
+// the TARGET SINK NODE (the pinned node when one is set, else the one the "default" metadata
 // names; the registry inventory locates it) and query its EnumFormat params
 // for the rate spans the hardware genuinely advertises. canSwitchRate is true
 // once a target node resolved, because node.force-rate can clock the graph to
@@ -1616,7 +1631,17 @@ SinkCapabilities PipeWireSink::capabilities() const {
     std::vector<RateRange> deviceRates;
 
     pw_thread_loop_lock(m_impl->loop);
-    syncWait(m_impl.get(), kSyncTimeoutSec);
+    syncSession(m_impl.get());
+    if (!m_impl->metadataBound && !m_impl->metadataWarned) {
+        // The registry has been flushed by now, so a settings metadata that
+        // is still unbound is absent, not late. Not fatal: the
+        // graph rate then reads unknown (0) and the decision machinery
+        // already treats that coherently; the measurement at first process
+        // corrects the reporting regardless. Said once per sink.
+        m_impl->metadataWarned = true;
+        sinkLog(m_impl->logOut,
+                "PipeWireSink: settings metadata not found; graph rate unknown");
+    }
 
     // Resolve the target node through the shared resolver (the
     // driver-format watch resolves through the SAME function, so what the
@@ -1706,7 +1731,7 @@ SinkCapabilities PipeWireSink::capabilities() const {
 
 // ---------------------------------------------------------------------------
 // The device list, straight from the live registry inventory, fresh
-// after one sync round trip. id is the persistent node.name; the entry whose
+// after the session rendezvous. id is the persistent node.name; the entry whose
 // name the "default" metadata currently names is marked default.
 std::vector<AudioDeviceInfo> PipeWireSink::enumerateDevices() const {
     std::vector<AudioDeviceInfo> out;
@@ -1714,7 +1739,7 @@ std::vector<AudioDeviceInfo> PipeWireSink::enumerateDevices() const {
         return out;
     }
     pw_thread_loop_lock(m_impl->loop);
-    syncWait(m_impl.get(), kSyncTimeoutSec);
+    syncSession(m_impl.get());
     for (const auto& entry : m_impl->sinkNodes) {
         if (entry.name.empty()) {
             continue;  // unaddressable without a persistent name
@@ -1744,7 +1769,7 @@ bool PipeWireSink::selectDevice(const std::string& deviceId) {
     }
     bool found = false;
     pw_thread_loop_lock(m_impl->loop);
-    syncWait(m_impl.get(), kSyncTimeoutSec);
+    syncSession(m_impl.get());
     for (const auto& entry : m_impl->sinkNodes) {
         if (entry.name == deviceId) {
             found = true;

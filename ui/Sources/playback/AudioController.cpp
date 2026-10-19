@@ -37,6 +37,7 @@
 #include "playlist/PlaylistModel.h"
 #include "playlist/PlaylistTabs.h"
 #include "paths/Paths.h"  // userConfigDir() for playback.yaml
+#include "utils/PerfLog.h"  // the sink construction timing line
 
 #include "rawform/audio/Types.h"
 
@@ -59,6 +60,7 @@
 #include <QAbstractProxyModel>
 #include <QByteArray>
 #include <QCoreApplication>  // postEvent, the bridge's carrier
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -374,20 +376,32 @@ private:
 
 AudioController::AudioController(QObject* parent) : QObject(parent) {
     // Build the output device and hand ownership to the engine. open() is
-    // deferred to the first play(), so constructing the sink here is cheap and
-    // touches no hardware. The rate policy is a Settings > Playback
+    // deferred to the first play(). Constructing the sink touches no
+    // hardware, but it is not free either: PipeWireSink connects to the
+    // daemon (a local socket, no round trip; the graph facts arrive on its
+    // loop thread afterwards and are flushed by the first call that reads
+    // them), CoreAudioSink registers two system property listeners. This
+    // runs on the GUI thread before the first frame, so the rawform.perf line
+    // below keeps that cost visible. The rate policy is a Settings > Playback
     // boolean: bit-perfect when the device can clock the track (with
     // the nearest-best fallback when it cannot) by default, or never-touch-the-
     // device resampling when unchecked; loadPlaybackSettings() below restores
     // the saved choice and pushes it to the engine before the first play().
     // Device selection rides the same engine command path.
+    QElapsedTimer sinkClock;
+    sinkClock.start();
 #if RAWFORM_HAVE_COREAUDIO
     auto platformSink = std::make_unique<rawform::audio::CoreAudioSink>();
+    const char* const sinkName = "CoreAudioSink";
 #elif RAWFORM_HAVE_PIPEWIRE
     auto platformSink = std::make_unique<rawform::audio::PipeWireSink>();
+    const char* const sinkName = "PipeWireSink";
 #else
     auto platformSink = std::make_unique<rawform::audio::NullSink>();
+    const char* const sinkName = "NullSink";
 #endif
+    qCDebug(lcPerf, "audio sink: %s constructed in %lld us", sinkName,
+            static_cast<long long>(sinkClock.nsecsElapsed() / 1000));
 
     // Crash recovery, BEFORE the sink is injected and before any open.
     // A rate_ledger.yaml on disk means a previous session died holding a rate
