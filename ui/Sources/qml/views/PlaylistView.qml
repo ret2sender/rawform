@@ -2629,7 +2629,7 @@ Item {
             collapsed: !headerMenu.targetIsCustom
 
             onTriggered: {
-                customColumnsWindow.openManager(headerMenu.targetFieldId)
+                root._openCustomColumns(headerMenu.targetFieldId)
             }
         }
         MenuSeparator {
@@ -2739,20 +2739,32 @@ Item {
         ThemedMenuItem {
             text: "Manage custom columns\u2026"
 
-            onTriggered: customColumnsWindow.openManager("")
+            onTriggered: root._openCustomColumns("")
         }
     }
 
     // The custom-columns manager window ("Manage custom columns..."). A
     // frameless, NON-MODAL tool Window hosted here because this view owns the
     // header menu that opens it and the `CustomColumnRegistry` registry it edits; its
-    // transient parent resolves to the main window automatically (this is a
-    // child of the view), so it floats and competes for focus alongside the
-    // Properties and Settings windows. Single reused instance (show/hide). See
-    // CustomColumnsWindow.qml; opened via openManager(fieldId).
-    CustomColumnsWindow {
-        id: customColumnsWindow
-        log: root.log
+    // transient parent resolves to the main window automatically (the Loader
+    // is a child of the view), so it floats and competes for focus alongside
+    // the Properties and Settings windows. Single reused instance (show/hide),
+    // created on the first open and kept from then on: it is not on screen
+    // at startup, so it is not built at startup. See CustomColumnsWindow.qml;
+    // opened via _openCustomColumns(fieldId).
+    Loader {
+        id: customColumnsLoader
+        active: false
+        sourceComponent: CustomColumnsWindow {
+            log: root.log
+        }
+    }
+    readonly property CustomColumnsWindow _customColumnsWindow:
+        customColumnsLoader.item as CustomColumnsWindow
+
+    function _openCustomColumns(fieldId) {
+        customColumnsLoader.active = true
+        root._customColumnsWindow.openManager(fieldId)
     }
 
     // Right-click context menu for playlist rows. Themed (blurred translucent)

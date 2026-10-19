@@ -38,9 +38,11 @@
 // reach no singleton themselves. It forwards ThemedMenuBar's request signals to
 // PlaylistDialogs and the tool windows, feeds the status line (live activity
 // while busy, otherwise the latest LogStore entry), logs activity edges and
-// playback errors, and persists the windowed geometry on quit. Settings and About are
-// declared here so they share this window's lifetime; Properties, Custom
-// Columns and Rename Files are created by PlaylistView.
+// playback errors, and persists the windowed geometry on quit. Settings, Find,
+// About and the file dialogs are created here on their first use and then
+// share this window's lifetime (a Loader each, so none of them exists before
+// the first frame); Properties, Custom Columns and Rename Files are created by
+// PlaylistView.
 
 pragma ComponentBehavior: Bound
 
@@ -95,8 +97,10 @@ ApplicationWindow {
         // Lift any Find filter FIRST (dismiss hides the dialog, which clears
         // PlaylistTabs.activeSearch and re-filters synchronously), so the
         // scroll row stashed below and the current row the flush persists are
-        // unfiltered playlist positions.
-        findDialog.dismiss()
+        // unfiltered playlist positions. A Find that was never opened does not
+        // exist and has no filter to lift.
+        if (applicationWindow._findDialog)
+            applicationWindow._findDialog.dismiss()
         PlaylistTabs.stashActiveWidths(playlistView.currentColumnWidths())
         // The scroll twin of the widths line above: push the ACTIVE
         // tab's live position (QML-owned, C++ can't read it) into its parking
@@ -176,32 +180,70 @@ ApplicationWindow {
     readonly property string _statusLevel:
         _activityText !== "" ? "info" : logStore.latestLevel
 
-    // The non-modal Settings window (Edit > Settings). Declared here so the menu
-    // action can reach it by id and so it shares this window's lifetime; it renders
-    // as its own top-level window, not inline. Fonts come from the Theme
-    // singleton, which resolves in any window, so nothing is passed in.
-    SettingsWindow {
-        id: settingsWindow
+    // The three tool windows (Settings, Find, About) and the file dialogs are
+    // created on their first use, not with this window: each sits behind a
+    // Loader that is inactive until its open function flips it, and never
+    // goes inactive again, so from the first open on the instance is the
+    // hide()-reused one it always was (the Find texts survive a close, the
+    // Settings size restores from window.yaml, the Escape shortcuts stay
+    // gated on their own window). What this buys is the first frame: a
+    // Settings window alone is several hundred QML objects, and none of the
+    // four is on screen at startup. A Window loaded this way has the Loader
+    // as its object parent and resolves its transient parent through the
+    // Loader's window, the same path a Window declared inside a view takes.
+    // The typed accessors below are what the rest of this file reaches the
+    // instances through (a Loader's item is an untyped object).
+
+    // The non-modal Settings window (Edit > Settings). Renders as its own
+    // top-level window, not inline. Fonts come from the Theme singleton, which
+    // resolves in any window, so nothing is passed in.
+    Loader {
+        id: settingsLoader
+        active: false
+        sourceComponent: SettingsWindow {}
+    }
+    readonly property SettingsWindow _settingsWindow:
+        settingsLoader.item as SettingsWindow
+
+    function _openSettings() {
+        settingsLoader.active = true
+        applicationWindow._settingsWindow.openSettings()
     }
 
-    // The non-modal Find dialog (Edit > Find). Same lifetime rationale as
-    // SettingsWindow: one hide()-reused instance, so the session's last
-    // search text survives a close. It follows the ACTIVE tab through the
+    // The non-modal Find dialog (Edit > Find). One instance, so the session's
+    // last search text survives a close. It follows the ACTIVE tab through the
     // two bindings, and reveals rows through the playlist view.
-    FindDialog {
-        id: findDialog
-        model: PlaylistTabs.activeModel
-        view: PlaylistTabs.activeView
-        selection: PlaylistTabs.activeSelection
-        onRevealRow: function (row) { playlistView.revealRow(row) }
+    Loader {
+        id: findLoader
+        active: false
+        sourceComponent: FindDialog {
+            model: PlaylistTabs.activeModel
+            view: PlaylistTabs.activeView
+            selection: PlaylistTabs.activeSelection
+            onRevealRow: function (row) { playlistView.revealRow(row) }
+        }
+    }
+    readonly property FindDialog _findDialog: findLoader.item as FindDialog
+
+    function _openFind() {
+        findLoader.active = true
+        applicationWindow._findDialog.open()
     }
 
-    // The non-modal About window (Help > About rawform). Same lifetime
-    // rationale as SettingsWindow above; hostWindow lets openAbout()
-    // center it over this window at open.
-    AboutWindow {
-        id: aboutWindow
-        hostWindow: applicationWindow
+    // The non-modal About window (Help > About rawform). hostWindow lets
+    // openAbout() center it over this window at open.
+    Loader {
+        id: aboutLoader
+        active: false
+        sourceComponent: AboutWindow {
+            hostWindow: applicationWindow
+        }
+    }
+    readonly property AboutWindow _aboutWindow: aboutLoader.item as AboutWindow
+
+    function _openAbout() {
+        aboutLoader.active = true
+        applicationWindow._aboutWindow.openAbout()
     }
 
     // Session log feeding the StatusLogBar (and the pop-up LogConsole).
@@ -301,12 +343,24 @@ ApplicationWindow {
 
     // The four native file dialogs (Add files/folder, Save/Open playlist) and
     // their accept-time consequences live behind PlaylistDialogs; MainWindow
-    // only supplies the dependencies and forwards the menu's requests.
-    PlaylistDialogs {
-        id: playlistDialogs
-        tabs: PlaylistTabs
-        store: PlaylistStore
-        columnSource: playlistView
+    // only supplies the dependencies and forwards the menu's requests. Loaded
+    // on the first request, like the tool windows above; the host Item keeps
+    // its Item ancestry (the Loader) for the dialogs' transient parent.
+    Loader {
+        id: dialogsLoader
+        active: false
+        sourceComponent: PlaylistDialogs {
+            tabs: PlaylistTabs
+            store: PlaylistStore
+            columnSource: playlistView
+        }
+    }
+    readonly property PlaylistDialogs _playlistDialogs:
+        dialogsLoader.item as PlaylistDialogs
+
+    function _dialogs() : PlaylistDialogs {
+        dialogsLoader.active = true
+        return applicationWindow._playlistDialogs
     }
 
     // Re-seed the playlist header widths when an async .rwfpl load applies its
@@ -394,11 +448,11 @@ ApplicationWindow {
                             queueVisible: PlaylistTabs.queueVisible
                             queueTabActive: PlaylistTabs.activeIsQueue
 
-                            onAddFilesRequested: playlistDialogs.openAddFiles()
-                            onAddFolderRequested: playlistDialogs.openAddFolder()
+                            onAddFilesRequested: applicationWindow._dialogs().openAddFiles()
+                            onAddFolderRequested: applicationWindow._dialogs().openAddFolder()
                             onNewPlaylistRequested: PlaylistTabs.newPlaylist("")
-                            onOpenPlaylistRequested: playlistDialogs.openOpenPlaylist()
-                            onSavePlaylistRequested: playlistDialogs.openSavePlaylist()
+                            onOpenPlaylistRequested: applicationWindow._dialogs().openOpenPlaylist()
+                            onSavePlaylistRequested: applicationWindow._dialogs().openSavePlaylist()
                             // The active tab; closeTab never leaves zero tabs
                             // (closing the last one spawns a fresh empty one).
                             onClosePlaylistRequested:
@@ -423,8 +477,8 @@ ApplicationWindow {
                                     PlaylistTabs.activeModel.removeUnavailableTracks()
                             }
 
-                            onFindRequested: findDialog.open()
-                            onSettingsRequested: settingsWindow.openSettings()
+                            onFindRequested: applicationWindow._openFind()
+                            onSettingsRequested: applicationWindow._openSettings()
 
                             // Transport, the same controller calls the
                             // PlayerBar buttons make, so the menu, its
@@ -449,7 +503,7 @@ ApplicationWindow {
                             }
                             onToggleQueueRequested: PlaylistTabs.toggleQueueTab()
 
-                            onAboutRequested: aboutWindow.openAbout()
+                            onAboutRequested: applicationWindow._openAbout()
 
                             // Persist the full arrangement (which columns, order,
                             // widths). For a playlist tab: as the startup default,
