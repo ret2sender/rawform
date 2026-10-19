@@ -78,6 +78,7 @@
 #include <QQmlError>
 #include <QQuickStyle>
 #include <QVariantMap>
+#include <QWindow>  // the root window handed to the spectrum provider's expose gate
 
 #include <memory>  // std::unique_ptr, the root window's owner
 
@@ -313,13 +314,16 @@ int main(int argc, char* argv[]) {
 
     // -----------------------------------------------------------------------
     // Spectrum viewer. A focused QObject that drives the PlayerBar's spectrum: a
-    // ~60 Hz timer drains the engine's lock-free output tap (through the controller),
-    // runs the zero-Qt SpectrumAnalyzer, applies attack/decay smoothing, and
-    // publishes the bar values QML draws. It also owns the one spectrum preference,
-    // the analyzer source (Settings > Spectrum view), persisted in spectrum.yaml and
-    // pushed to the engine tap. Constructed AFTER the controller (which it
-    // references) and before the QML engine, so it outlives the QML that binds to it
-    // and is destroyed before the controller it points at.
+    // 60 or 30 Hz timer drains the engine's lock-free output tap (through the
+    // controller), runs the zero-Qt SpectrumAnalyzer, applies attack/decay
+    // smoothing, and publishes the bar values QML draws. It also owns the two
+    // spectrum preferences, the analyzer source and the refresh rate (Settings >
+    // Spectrum view), persisted in spectrum.yaml; the source is pushed to the
+    // engine tap. Constructed AFTER the controller (which it references) and
+    // before the QML engine, so it outlives the QML that binds to it and is
+    // destroyed before the controller it points at. The root window is handed
+    // to it once that exists (below), so the tick can park while the window is
+    // not exposed.
     rawform::SpectrumProvider spectrumProvider(&audioController);
 
     // Window geometry persistence (window.yaml). Constructed AFTER the
@@ -424,6 +428,11 @@ int main(int argc, char* argv[]) {
             qWarning().noquote() << e.toString();
         return -1;
     }
+
+    // The spectrum tick parks while this window is not exposed (minimized,
+    // hidden, covered on a compositor that stops frame callbacks); the
+    // provider watches the expose state from here on.
+    spectrumProvider.setDisplayWindow(qobject_cast<QWindow*>(rootWindow.get()));
 
     // -----------------------------------------------------------------------
     // Native macOS window styling. rawform draws its own QML title bar; on macOS

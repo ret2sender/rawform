@@ -521,7 +521,7 @@ qt_add_qml_module(rawform
 # and must only ever reach the Apple toolchain: MSVC cannot compile .mm at all,
 # and there is no AppKit off macOS. We therefore add the implementation to the
 # target only on APPLE and link the AppKit/Foundation frameworks there. main.cpp
-# guards the single call site with Q_OS_MAC, so a non-Apple build never
+# guards the single call site with Q_OS_MACOS, so a non-Apple build never
 # references the symbol and links fine without this translation unit.
 if(APPLE)
     target_sources(rawform PRIVATE

@@ -28,7 +28,7 @@
 // its temporal smoothing, and its one persisted preference (the analyzer source),
 // and it exposes the bar values QML draws.
 //
-// WHAT IT DOES, on each timer tick (about 60 Hz):
+// WHAT IT DOES, on each timer tick (60 or 30 Hz, the refresh-rate preference):
 //   - While playing: pull the most recent mono window from the engine tap through
 //     AudioController::copyScopeMono, run it through the SpectrumAnalyzer, and fold
 //     the instantaneous bars into the published bars with an attack/decay envelope
@@ -36,21 +36,28 @@
 //   - While not playing: feed nothing and let the same decay walk every bar down to
 //     flat, then PARK the timer once the display has settled, so a stopped or
 //     paused player spends no cycles on a frozen or idle spectrum.
+// The timer also parks while the display window is not exposed (minimized,
+// fully covered on a compositor that stops frame callbacks, hidden): every tick
+// is an FFT and a binding cascade that ends in a frame, and the platform draws
+// none of those frames for an unexposed window, so the work would be for
+// nobody. The window is handed in through setDisplayWindow; an expose restarts
+// the tick at once while playing, or lets the bars finish settling otherwise.
 // The analyzer is reconfigured whenever the playing track's sample rate changes
 // (the band-to-bin mapping depends on it), which AudioController surfaces through
 // its sampleRateHz / trackChanged.
 //
-// WHY THE PROVIDER OWNS THE SOURCE PREFERENCE. The pre/post-gain choice is a
-// spectrum-view preference, so it lives here with the rest of the spectrum state
-// rather than smeared into the playback settings: the Settings window's "Spectrum
-// view" section binds to this object, any spectrum-view knob belongs beside it
-// here, and it persists in its own small spectrum.yaml beside the other rawform
-// config. The provider is only the POLICY and the
+// WHY THE PROVIDER OWNS THE PREFERENCES. The pre/post-gain choice and the
+// refresh rate are spectrum-view preferences, so they live here with the rest of
+// the spectrum state rather than smeared into the playback settings: the Settings
+// window's "Spectrum view" section binds to this object, any spectrum-view knob
+// belongs beside it here, and both persist in the small spectrum.yaml beside the
+// other rawform config. For the source the provider is only the POLICY and the
 // persistence; the actual tap-position switch is an engine mechanism, so on a
 // change the provider pushes the choice to the engine through
-// AudioController::setScopeSource. The applied value is this object's `source`
-// property; the Settings window stages edits and calls setSource only on Apply/OK,
-// exactly as the ReplayGain page stages against the controller.
+// AudioController::setScopeSource. The applied values are this object's `source`
+// and `refreshHz` properties; the Settings window stages edits and calls the
+// setters only on Apply/OK, exactly as the ReplayGain page stages against the
+// controller.
 //
 // THREADING. Pure GUI thread. The timer slot, the analyzer, the smoothing, and the
 // property emits all run on the thread QML lives on. The only cross-thread contact
@@ -66,10 +73,13 @@
 #include <QObject>
 #include <QPointer>
 #include <QTimer>
+#include <QWindow>
 
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
+class QEvent;
 
 namespace rawform {
 
@@ -106,6 +116,17 @@ class SpectrumProvider : public QObject {
     /// the ReplayGain *Default reads.
     Q_PROPERTY(int sourceDefault READ sourceDefault CONSTANT)
 
+    /// The display refresh rate in Hz: 60 (the default) or 30. Every tick is one
+    /// FFT, one bars publication and, through the bindings, one rendered frame, so
+    /// 30 halves all three for a display that still reads as live. The WRITE is the
+    /// commit (retimes the clock, rescales the decay, persists); the Settings page
+    /// stages locally and calls it only on Apply/OK.
+    Q_PROPERTY(int refreshHz READ refreshHz WRITE setRefreshHz NOTIFY refreshHzChanged)
+
+    /// The factory default refresh rate (60), for the Settings page's modified
+    /// dot and reset, as sourceDefault is for the source.
+    Q_PROPERTY(int refreshHzDefault READ refreshHzDefault CONSTANT)
+
 public:
     /// The analyzer source, mirroring rawform::audio::ScopeSource value-for-value so
     /// the int that crosses to the engine needs no remap. Kept as a Q_ENUM for C++
@@ -128,6 +149,14 @@ public:
     [[nodiscard]] int          barCount() const { return static_cast<int>(m_bars.size()); }
     [[nodiscard]] int          source() const { return m_source; }
     [[nodiscard]] int          sourceDefault() const;
+    [[nodiscard]] int          refreshHz() const { return m_refreshHz; }
+    [[nodiscard]] int          refreshHzDefault() const;
+
+    /// The window the spectrum is drawn in. The provider watches its expose state
+    /// and parks the tick while the window is not exposed (see the file comment).
+    /// Called once by main.cpp after the root window exists; non-owning, and a
+    /// window that goes away simply ends the gating.
+    void setDisplayWindow(QWindow* window);
 
 public slots:
     /// Commit the analyzer source (0 Output / 1 Source). Clamps to the valid pair,
@@ -136,17 +165,31 @@ public slots:
     /// Apply/OK; safe to call from QML.
     void setSource(int source);
 
+    /// Commit the refresh rate (60 or 30; anything else falls back to 60). On an
+    /// actual change retimes the clock, rescales the decay so the settle time is
+    /// unchanged, persists, and emits refreshHzChanged. Same calling contract as
+    /// setSource.
+    void setRefreshHz(int hz);
+
 signals:
     void barsChanged();
     void barCountChanged();
     void sourceChanged();
+    void refreshHzChanged();
+
+protected:
+    /// The display window's expose events (installed by setDisplayWindow).
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     // --- the per-frame pipeline --------------------------------------------
     void onTick();              ///< the timer slot: sample -> analyze -> smooth, or decay
-    void onStateChanged();      ///< start the timer when playback begins
+    void onStateChanged();      ///< playback state moved: re-decide the clock
     void onTrackChanged();      ///< reconfigure the analyzer on a sample-rate change
     void reconfigureFor(std::uint32_t sampleRate);  ///< (re)size analyzer + scratch
+    void updateTimer();         ///< run iff (playing or settling) and the window is exposed
+    void applyRefreshHz();      ///< the clock interval and the per-tick decay for m_refreshHz
+    [[nodiscard]] bool anyBarAlive() const;  ///< a bar is still above flat
 
     // --- persistence -------------------------------------------------------
     void loadSettings();        ///< read spectrum.yaml (absent == defaults)
@@ -154,13 +197,18 @@ private:
 
     QPointer<AudioController> m_controller;  ///< non-owning bridge to the engine tap
 
-    QTimer                    m_timer;       ///< ~60 Hz visualizer clock
+    QTimer                    m_timer;       ///< the visualizer clock (refreshHz)
     audio::SpectrumAnalyzer   m_analyzer;    ///< the DSP transform (GUI-thread only)
     std::vector<float>        m_scratch;     ///< mono window copied from the tap, fftSize long
     std::uint32_t             m_configuredRate = 0;  ///< the rate the analyzer is built for
 
     QList<qreal>              m_bars;        ///< the published, smoothed bar values
     int                       m_source = Output;  ///< applied analyzer source (default Output)
+    int                       m_refreshHz = 60;   ///< applied refresh rate (default 60)
+    float                     m_decay = 0.0f;     ///< per-tick fall multiplier for m_refreshHz
+
+    QPointer<QWindow>         m_window;           ///< the display window, once handed in
+    bool                      m_exposed = true;   ///< its expose state (true with no window)
 };
 
 /// The SpectrumProvider QML singleton: the one instance main.cpp builds, handed to the

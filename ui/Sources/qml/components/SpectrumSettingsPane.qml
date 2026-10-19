@@ -23,17 +23,19 @@
 // The "Spectrum view" page inside the Settings window, the sibling of
 // ReplayGainSettingsPane and built to the same rules: it reads and writes the
 // window's staged object (passed in as `settings`), never the provider directly, so
-// nothing applies until Apply/OK. The one setting is the ANALYZER SOURCE: does
-// the spectrum follow the volume fader (Output, the signal as heard, the default) or
-// ignore it (Source, the decoded signal at full scale). The factory default comes
-// from the bound provider (one source of truth, see `provider` below) and
-// drives both the modified-from-default accent dot and the right-click reset,
-// exactly as the ReplayGain rows do.
+// nothing applies until Apply/OK. Two settings. The ANALYZER SOURCE: does the
+// spectrum follow the volume fader (Output, the signal as heard, the default) or
+// ignore it (Source, the decoded signal at full scale). The REFRESH RATE: 60 Hz
+// (the default) or 30, which halves the analysis ticks and the frames the bars
+// cost while a track plays. The factory defaults come from the bound provider
+// (one source of truth, see `provider` below) and drive both the
+// modified-from-default accent dot and the right-click reset, exactly as the
+// ReplayGain rows do.
 //
-// The row is a SettingsRow with its own SettingsResetMenu, as on the sibling
-// panes; with a single row there is no label column to align. The selector is
-// the shared SegmentSelect; values 0 (Output) and 1 (Source) match
-// SpectrumProvider's source ints, so the picked value maps straight through.
+// Each row is a SettingsRow with the shared SettingsResetMenu, as on the sibling
+// panes. The selectors are the shared SegmentSelect; the source values 0 (Output)
+// and 1 (Source) match SpectrumProvider's source ints and map straight through,
+// the rate segments map index 0 to 60 Hz and 1 to 30 Hz.
 
 pragma ComponentBehavior: Bound
 
@@ -44,14 +46,19 @@ import com.rawform.app
 Item {
     id: pane
 
-    // The window's staged edit object; this page uses settings.spectrumSource.
+    // The window's staged edit object; this page uses settings.spectrumSource
+    // and settings.spectrumRefreshHz.
     property StagedSettings settings: null
 
-    // The SpectrumProvider whose sourceDefault is the reset target and the
-    // modified-from-default reference. Declared and bound by the host rather
-    // than read as an ambient global.
+    // The SpectrumProvider whose sourceDefault and refreshHzDefault are the
+    // reset targets and the modified-from-default references. Declared and
+    // bound by the host rather than read as an ambient global.
     property SpectrumProvider provider: null
     property string uiFont: Theme.uiFont
+
+    // Shared label column so both selectors start at the same x.
+    readonly property real labelColumnWidth: Math.max(sourceRow.labelImplicitWidth,
+                                                      refreshRow.labelImplicitWidth)
 
     SettingsResetMenu { id: resetMenu }
 
@@ -77,9 +84,11 @@ Item {
 
         // ----- Analyzer source ---------------------------------------------
         SettingsRow {
+            id: sourceRow
             Layout.fillWidth: true
             text: "Analyzer source"
             modified: pane.settings && pane.settings.spectrumSource !== pane.provider.sourceDefault
+            labelWidth: pane.labelColumnWidth
             resetMenu: resetMenu
             onReset: if (pane.settings) pane.settings.spectrumSource = pane.provider.sourceDefault
 
@@ -105,6 +114,42 @@ Item {
             text: (pane.settings && pane.settings.spectrumSource === 1)
                   ? "Source: the decoded signal at full scale, unaffected by the volume."
                   : "Output: the signal as heard, so the bars follow the volume fader."
+        }
+
+        // ----- Refresh rate ------------------------------------------------
+        SettingsRow {
+            id: refreshRow
+            Layout.fillWidth: true
+            Layout.topMargin: 10
+            text: "Refresh rate"
+            modified: pane.settings
+                      && pane.settings.spectrumRefreshHz !== pane.provider.refreshHzDefault
+            labelWidth: pane.labelColumnWidth
+            resetMenu: resetMenu
+            onReset: {
+                if (pane.settings)
+                    pane.settings.spectrumRefreshHz = pane.provider.refreshHzDefault
+            }
+
+            SegmentSelect {
+                labels: ["60 Hz", "30 Hz"]
+                segWidth: 72
+                value: (pane.settings && pane.settings.spectrumRefreshHz === 30) ? 1 : 0
+                onPicked: function (v) {
+                    if (pane.settings) pane.settings.spectrumRefreshHz = (v === 1) ? 30 : 60
+                }
+            }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.family: pane.uiFont
+            font.pixelSize: Theme.fontSizeSmall
+            text: "How often the bars update while a track plays. 30 Hz halves the "
+                  + "work the display costs; the bars settle at the same speed."
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top

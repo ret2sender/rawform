@@ -56,8 +56,10 @@ QtObject {
     property bool clip: true
     property bool skipExisting: false
 
-    // Spectrum view page: the analyzer source (0 Output / 1 Source).
+    // Spectrum view page: the analyzer source (0 Output / 1 Source) and the
+    // display refresh rate in Hz (60 or 30).
     property int  spectrumSource: 0
+    property int  spectrumRefreshHz: 60
 
     // Tagging > MP3 page: the MP3/ID3 write preferences (SettingsStore
     // enum ints).

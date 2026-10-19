@@ -160,6 +160,7 @@ Window {
         || staged.clip !== AudioController.replayGainClipPrevention
         || staged.skipExisting !== AudioController.replayGainScanSkipExisting
         || staged.spectrumSource !== SpectrumProvider.source
+        || staged.spectrumRefreshHz !== SpectrumProvider.refreshHz
         || staged.id3v2Version !== SettingsStore.id3v2Version
         || staged.id3v1Mode !== SettingsStore.id3v1Mode
         || staged.apeMode !== SettingsStore.apeMode
@@ -179,6 +180,7 @@ Window {
         staged.clip             = AudioController.replayGainClipPrevention
         staged.skipExisting     = AudioController.replayGainScanSkipExisting
         staged.spectrumSource   = SpectrumProvider.source
+        staged.spectrumRefreshHz = SpectrumProvider.refreshHz
         staged.id3v2Version     = SettingsStore.id3v2Version
         staged.id3v1Mode        = SettingsStore.id3v1Mode
         staged.apeMode          = SettingsStore.apeMode
@@ -188,10 +190,11 @@ Window {
     // Copy staged -> applied (Apply and OK). The controller's setters skip no-ops,
     // recompute the playing track's RG factor, and persist; the rate-policy
     // setter additionally pushes the engine's RateMode, which takes effect at
-    // the next track start. The spectrum source commits
-    // through the provider, which pushes the tap choice to the engine and
-    // persists it. The tagging setters skip no-ops too and coalesce into a single
-    // settings.yaml write per event-loop turn, so pushing all four is one write.
+    // the next track start. The spectrum source and refresh rate commit
+    // through the provider, which pushes the tap choice to the engine, retimes
+    // its clock, and persists both. The tagging setters skip no-ops too and
+    // coalesce into a single settings.yaml write per event-loop turn, so pushing
+    // all four is one write.
     function applyStaged() {
         AudioController.setBitPerfect(staged.bitPerfect)
         AudioController.setOutputDeviceId(staged.outputDeviceId)
@@ -201,6 +204,7 @@ Window {
         AudioController.setReplayGainClipPrevention(staged.clip)
         AudioController.setReplayGainScanSkipExisting(staged.skipExisting)
         SpectrumProvider.setSource(staged.spectrumSource)
+        SpectrumProvider.setRefreshHz(staged.spectrumRefreshHz)
         SettingsStore.id3v2Version  = staged.id3v2Version
         SettingsStore.id3v1Mode     = staged.id3v1Mode
         SettingsStore.apeMode       = staged.apeMode
