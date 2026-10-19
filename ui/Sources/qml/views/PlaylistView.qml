@@ -1432,40 +1432,10 @@ Item {
                             anchors.fill: parent
                             acceptedButtons: Qt.RightButton
                             onPressed: {
-                                // Clear-then-assign forces a full Instantiator
-                                // teardown/rebuild cycle for the submenu items,
-                                // so no delegate instance survives a reopen --
-                                // including one whose `checked` binding a
-                                // previous interactive toggle broke (a click
-                                // WRITES checked, severing the declarative
-                                // binding on that instance for good).
-                                headerMenu.colsPlain = []
-                                headerMenu.colsComposite = []
-                                headerMenu.customCols = []
-                                var catalog = root.model
-                                    ? root.model.availableColumns() : []
-                                headerMenu.colsPlain = catalog.filter(
-                                    function (e) { return !e.composite })
-                                headerMenu.colsComposite = catalog.filter(
-                                    function (e) { return e.composite })
-                                headerMenu.customCols = root.model
-                                    ? root.model.customColumnCatalog() : []
-                                // Kick the live-query check-mark bindings (see
-                                // catalogRevision on the menu).
-                                headerMenu.catalogRevision++
-                                if (root.model) {
-                                    headerMenu.targetFieldId =
-                                        root.model.columnFieldId(headerCell.column)
-                                    headerMenu.targetTitle = headerCell.display !== undefined
-                                        ? String(headerCell.display) : ""
-                                    headerMenu.targetIsCustom =
-                                        headerMenu.targetFieldId.indexOf("custom:") === 0
-                                } else {
-                                    headerMenu.targetFieldId = ""
-                                    headerMenu.targetTitle = ""
-                                    headerMenu.targetIsCustom = false
-                                }
-                                headerMenu.popup()
+                                root._popupHeaderMenu(
+                                    headerCell.column,
+                                    headerCell.display !== undefined
+                                        ? String(headerCell.display) : "")
                             }
                         }
                     }
@@ -2068,7 +2038,7 @@ Item {
                             if (!root.selectionModel.isSelected(root._rowIndex(rr)))
                                 root._selectExclusive(rr)
                             root._contextRow = rr
-                            rowContextMenu.popup()
+                            root._popupRowMenu()
                         }
                         return
                     }
@@ -2595,152 +2565,30 @@ Item {
         }
     }
 
-    // Right-click column menu on the header. For a custom column, an "Edit custom
-    // column..." entry jumps to the manager; a "Columns" submenu is the checkable
-    // catalog of every field (checked = shown) for add/remove. `cols` + the
-    // target* props are refreshed from the model each time the menu opens (see the
-    // header MouseArea).
-    ThemedMenu {
-        id: headerMenu
-        // The native catalog, split on the composite flag (see
-        // availableColumns: pre-sorted plain-alpha then composite-alpha; the
-        // split decides which side of the submenu separator an entry lands on).
-        property var colsPlain: []
-        property var colsComposite: []
-        property var customCols: []
-        // Bumped on every open; the check-mark bindings read it so they
-        // re-query isColumnShown() fresh per popup (they are invokable calls,
-        // not tracked properties).
-        property int catalogRevision: 0
-        property string targetFieldId: ""
-        property string targetTitle: ""
-        // The right-clicked column is a custom one ("custom:<id>"). Native
-        // columns have no per-column context action (their header label is
-        // code-only; build a custom column to show a field under another name).
-        property bool targetIsCustom: false
-
-        // Custom columns only: jump to the manager, scrolled to this record.
-        // ThemedMenuItem rather than a bare MenuItem: direct children bypass
-        // the delegate, so the bare form rendered unthemed AND had no
-        // fitWidth, meaning the (arbitrarily long) title never drove the
-        // popup width.
-        ThemedMenuItem {
-            text: "Edit custom column \u201C" + headerMenu.targetTitle + "\u201D\u2026"
-            collapsed: !headerMenu.targetIsCustom
-
-            onTriggered: {
-                root._openCustomColumns(headerMenu.targetFieldId)
+    // Right-click column menu on the header (PlaylistHeaderMenu: the Columns
+    // and Custom columns catalogs, the edit and manage entries). Created on
+    // the first right-click and kept; a menu nobody has opened costs nothing
+    // at startup. The host wiring reads in one place: the model goes down,
+    // the two requests come back up.
+    Loader {
+        id: headerMenuLoader
+        active: false
+        sourceComponent: PlaylistHeaderMenu {
+            model: root.model
+            onToggleColumn: function (fieldId, width, shown) {
+                root._toggleColumn(fieldId, width, shown)
+            }
+            onManageCustomColumns: function (fieldId) {
+                root._openCustomColumns(fieldId)
             }
         }
-        MenuSeparator {
-            visible: headerMenu.targetIsCustom
-            height: visible ? implicitHeight : 0
-        }
-        ThemedMenu {
-            id: columnsSubmenu
-            title: "Columns"
+    }
+    readonly property PlaylistHeaderMenu _headerMenu:
+        headerMenuLoader.item as PlaylistHeaderMenu
 
-            // Two Instantiators, one per catalog group, around a static
-            // separator. availableColumns() delivers the sort (plain fields
-            // alphabetically, then the composite presentation fields
-            // alphabetically); the split here only decides which side of the
-            // separator an entry lands on. Insert mechanics: the separator is
-            // a declared child (item 0 at creation); the plain group inserts
-            // at 0..n-1, pushing the separator to position n; the composite
-            // group APPENDS, landing after it. The per-popup clear-then-assign
-            // rebuild replays that same sequence, so the layout is stable
-            // across reopens.
-            Instantiator {
-                model: headerMenu.colsPlain
-                delegate: ThemedMenuItem {
-                    // Injected by the Instantiator's delegate model; under Bound
-                    // it must be declared or creation fails with a loud
-                    // "required property not set" (never a silent undefined).
-                    required property var modelData
-                    checkable: true
-                    // Live query against the CURRENT model, kicked per popup;
-                    // never the catalog snapshot's `visible`, so the mark can't
-                    // show another tab's or an earlier open's state.
-                    checked: {
-                        headerMenu.catalogRevision
-                        root.model ? root.model.isColumnShown(modelData.fieldId)
-                                   : false
-                    }
-                    text: modelData.title
-
-                    // `checked` is the NEW state after the click toggled it, so it
-                    // is exactly the desired visibility to apply.
-                    onTriggered: root._toggleColumn(modelData.fieldId, modelData.width, checked)
-                }
-                onObjectAdded: function (index, object) { columnsSubmenu.insertItem(index, object) }
-                onObjectRemoved: function (index, object) { columnsSubmenu.removeItem(object) }
-            }
-            MenuSeparator {
-                visible: headerMenu.colsPlain.length > 0
-                         && headerMenu.colsComposite.length > 0
-            }
-            Instantiator {
-                model: headerMenu.colsComposite
-                delegate: ThemedMenuItem {
-                    required property var modelData
-                    checkable: true
-                    // Same live query as the plain group above.
-                    checked: {
-                        headerMenu.catalogRevision
-                        root.model ? root.model.isColumnShown(modelData.fieldId)
-                                   : false
-                    }
-                    text: modelData.title
-
-                    onTriggered: root._toggleColumn(modelData.fieldId, modelData.width, checked)
-                }
-                onObjectAdded: function (index, object) { columnsSubmenu.addItem(object) }
-                onObjectRemoved: function (index, object) { columnsSubmenu.removeItem(object) }
-            }
-        }
-
-        // Defined custom columns, toggled exactly like the built-in catalog
-        // (same _toggleColumn path; the field ids are "custom:<id>", which
-        // applyColumnLayout resolves against the registry). Definitions are
-        // created/edited in the "Manage custom columns..." window below.
-        ThemedMenu {
-            id: customColumnsSubmenu
-            title: "Custom columns"
-
-            // A bare disabled hint when none are defined yet, so the submenu is
-            // never confusingly empty.
-            ThemedMenuItem {
-                collapsed: headerMenu.customCols.length !== 0
-                enabled: false
-                text: "Nothing to see here!"
-                textItalic: true
-            }
-            Instantiator {
-                delegate: ThemedMenuItem {
-                    required property var modelData
-                    checkable: true
-                    // Same live query as the native catalog above.
-                    checked: {
-                        headerMenu.catalogRevision
-                        root.model ? root.model.isColumnShown(modelData.fieldId)
-                                   : false
-                    }
-                    text: modelData.title.length > 0 ? modelData.title : "(unnamed)"
-
-                    onTriggered: root._toggleColumn(modelData.fieldId, modelData.width, checked)
-                }
-                model: headerMenu.customCols
-
-                onObjectAdded: function (index, object) { customColumnsSubmenu.insertItem(1 + index, object) }
-                onObjectRemoved: function (index, object) { customColumnsSubmenu.removeItem(object) }
-            }
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Manage custom columns\u2026"
-
-            onTriggered: root._openCustomColumns("")
-        }
+    function _popupHeaderMenu(column, title) {
+        headerMenuLoader.active = true
+        root._headerMenu.popupForColumn(column, title)
     }
 
     // The custom-columns manager window ("Manage custom columns..."). A
@@ -2767,69 +2615,28 @@ Item {
         root._customColumnsWindow.openManager(fieldId)
     }
 
-    // Right-click context menu for playlist rows. Themed (blurred translucent)
-    // to match the menu bar and header menus.
-    ThemedMenu {
-        id: rowContextMenu
-        // The queue verbs lead: the most frequent action on a row. In a
-        // playlist: append the selection, or put it next in line. In the
-        // queue view those two collapse and "Remove from Playback Queue"
-        // takes their place (the Delete key's twin). The keys are OWNED
-        // elsewhere (Q / Shift+Q by the Playback menu's items, Delete and
-        // Alt+Enter by the table's key handler), so every hint here is
-        // shortcutHint: drawn in the menu's hint column, never registered,
-        // or Q would fire twice.
-        ThemedMenuItem {
-            text: "Add to Playback Queue"
-            shortcutHint: "Q"
-            collapsed: root.isQueueView
-            onTriggered: root.enqueueSelection(false)
+    // Right-click context menu for playlist rows (PlaylistRowMenu). Created
+    // on the first right-click and kept, like the header menu; the queue
+    // state goes down, every entry's request comes back up to the handler
+    // that owns it here.
+    Loader {
+        id: rowMenuLoader
+        active: false
+        sourceComponent: PlaylistRowMenu {
+            isQueueView: root.isQueueView
+            onEnqueueRequested: function (next) { root.enqueueSelection(next) }
+            onRemoveFromQueueRequested: root._deleteSelected()
+            onReloadRequested: if (root.reloader) root.reloader.reloadSelected()
+            onRemoveMissingRequested: if (root.model) root.model.removeUnavailableTracks()
+            onRenameRequested: root._openRenameDialog()
+            onPropertiesRequested: root._openPropertiesWindow()
         }
-        ThemedMenuItem {
-            text: "Play Next"
-            shortcutHint: "Shift+Q"
-            collapsed: root.isQueueView
-            onTriggered: root.enqueueSelection(true)
-        }
-        ThemedMenuItem {
-            text: "Remove from Playback Queue"
-            shortcutHint: "Del"
-            collapsed: !root.isQueueView
-            onTriggered: root._deleteSelected()
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            // Right-click already selected the row, so this force-reloads the
-            // current selection's tags from disk (mtime/size be damned).
-            text: "Reload info from file(s)"
-            onTriggered: if (root.reloader) root.reloader.reloadSelected()
-        }
-        ThemedMenuItem {
-            // Whole-playlist cleanup: drop every grayed (missing/unreadable) row.
-            text: "Remove missing tracks"
-            onTriggered: if (root.model) root.model.removeUnavailableTracks()
-        }
-        MenuSeparator {}
-        // A submenu, not a flat item, so sibling file operations have a home.
-        // The submenu's TITLE item is generated by the parent menu's delegate;
-        // ThemedMenuItem there keeps it themed and (via fitWidth) inside the
-        // fit-to-content width machinery, per the Qt-Menu-sizing lessons.
-        delegate: ThemedMenuItem {}
-        ThemedMenu {
-            title: "File Operations"
-            ThemedMenuItem {
-                text: "Rename to..."
-                onTriggered: root._openRenameDialog()
-            }
-        }
-        MenuSeparator {}
-        ThemedMenuItem {
-            text: "Properties"
-            // "Return" is the main Enter key in Qt's naming (and the glyph
-            // macOS shows for it); "Enter" alone would be the keypad key.
-            shortcutHint: "Alt+Return"
-            onTriggered: root._openPropertiesWindow()
-        }
+    }
+    readonly property PlaylistRowMenu _rowMenu: rowMenuLoader.item as PlaylistRowMenu
+
+    function _popupRowMenu() {
+        rowMenuLoader.active = true
+        root._rowMenu.popup()
     }
 
     // The track Properties window factory (right-click "Properties"). Hosted here

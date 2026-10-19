@@ -410,6 +410,8 @@ set(RAWFORM_QML_FILES
         Sources/qml/components/Mp3TaggingSettingsPane.qml
         Sources/qml/components/PlaybackSettingsPane.qml
         Sources/qml/components/PlaylistDialogs.qml
+        Sources/qml/components/PlaylistHeaderMenu.qml
+        Sources/qml/components/PlaylistRowMenu.qml
         Sources/qml/components/PlaylistTabBar.qml
         Sources/qml/components/PresetRow.qml
         Sources/qml/components/PropertiesLogBar.qml

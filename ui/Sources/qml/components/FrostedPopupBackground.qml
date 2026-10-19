@@ -30,6 +30,20 @@
 // popup, whose opened/x/y signals drive the grab region. Width comes from the
 // popup as for any background; a caller that needs a fit-to-content width sets
 // implicitWidth on its instance (ThemedMenu does).
+//
+// The effect chain (the grab, the blur, the mask layer) exists only while
+// the popup is shown: it sits behind a Loader gated on this item's own
+// effective visibility, which a popup propagates to its background for
+// exactly the span it is on screen, exit transition included. Every popup in
+// the app is closed at startup, so none of them builds a blur chain before
+// the first frame, and a menu that is never opened never builds one.
+//
+// The grab is a still, not a live feed: the slice is rendered once when the
+// popup appears and again only when the region moves or resizes. Anything
+// animating behind an open menu (the spectrum, the seek bar) would otherwise
+// re-render the whole source subtree into the grab texture and re-run the
+// blur every frame for as long as the menu stays open; a frozen backdrop is
+// what desktop popups show anyway.
 
 pragma ComponentBehavior: Bound
 
@@ -58,44 +72,89 @@ Item {
         return w ? w.menuBlurSource : null  // qmllint disable missing-property
     }
 
-    // Grab only the slice of blurSource sitting behind the popup.
-    ShaderEffectSource {
-        id: behind
-        anchors.fill: parent
-        live: true          // the slice tracks whatever moves behind the popup
-        recursive: false    // source is a sibling subtree, so no recursion
-        // The source is attached only while this item itself is in a window.
-        // ShaderEffectSource holds a window reference on its sourceItem, and
-        // that accounting is one-sided when the source is assigned while the
-        // effect has no window of its own yet: it then references the SOURCE's
-        // window, references it again when the effect joins a scene, and
-        // releases only one of the two. The surplus reference is permanent and
-        // keeps the source's window pointer alive past that window's teardown,
-        // which QQuickItemPrivate::derefWindow then dereferences on exit. Gating
-        // on behind.Window.window makes every reference the effect takes one it
-        // also releases (a popup background is built while its blur target is
-        // already on screen, so the ungated binding hits exactly that case).
-        sourceItem: behind.Window.window ? frost.blurSource : null
-        visible: false      // used only as MultiEffect.source
+    // The slice of blurSource sitting behind the popup, in blurSource
+    // coordinates. Kept on this item rather than on the grab so it survives
+    // the chain being built and torn down with each open.
+    property rect grabRect: Qt.rect(0, 0, 0, 0)
 
-        function refresh() {
-            if (!frost.blurSource)
-                return
-            const p = frost.blurSource.mapFromItem(frost, 0, 0)
-            sourceRect = Qt.rect(p.x, p.y, frost.width, frost.height)
-        }
+    function refresh() {
+        if (!frost.blurSource)
+            return
+        const p = frost.blurSource.mapFromItem(frost, 0, 0)
+        frost.grabRect = Qt.rect(p.x, p.y, frost.width, frost.height)
     }
 
-    // Blur the grabbed slice and clip it to the rounded rect.
-    MultiEffect {
+    // The grab, the blur and the mask: built when the popup shows, released
+    // when it has gone (see the file comment).
+    Loader {
+        id: chain
         anchors.fill: parent
-        autoPaddingEnabled: false
-        blur: 1.0
-        blurEnabled: true
-        blurMax: 32
-        maskEnabled: true
-        maskSource: maskSrc
-        source: behind
+        active: frost.visible
+
+        sourceComponent: Item {
+            // Grab only the slice of blurSource sitting behind the popup.
+            ShaderEffectSource {
+                id: behind
+                anchors.fill: parent
+                live: false         // a still of the moment the popup appeared
+                recursive: false    // source is a sibling subtree, so no recursion
+                // The source is attached only while this item itself is in a
+                // window. ShaderEffectSource holds a window reference on its
+                // sourceItem, and that accounting is one-sided when the source
+                // is assigned while the effect has no window of its own yet:
+                // it then references the SOURCE's window, references it again
+                // when the effect joins a scene, and releases only one of the
+                // two. The surplus reference is permanent and keeps the
+                // source's window pointer alive past that window's teardown,
+                // which QQuickItemPrivate::derefWindow then dereferences on
+                // exit. Gating on behind.Window.window makes every reference
+                // the effect takes one it also releases (the chain is built
+                // while its blur target is already on screen, so the ungated
+                // binding hits exactly that case).
+                sourceItem: behind.Window.window ? frost.blurSource : null
+                sourceRect: frost.grabRect
+                visible: false      // used only as MultiEffect.source
+
+                // A still needs an explicit render request at every point
+                // the slice can change: the first attach, and each move or
+                // resize of the region. scheduleUpdate before the item has a
+                // window is remembered and honored at the first sync.
+                onSourceItemChanged: scheduleUpdate()
+                onSourceRectChanged: scheduleUpdate()
+                Component.onCompleted: {
+                    frost.refresh()
+                    scheduleUpdate()
+                }
+            }
+
+            // Blur the grabbed slice and clip it to the rounded rect.
+            MultiEffect {
+                anchors.fill: parent
+                autoPaddingEnabled: false
+                blur: 1.0
+                blurEnabled: true
+                blurMax: 32
+                maskEnabled: true
+                maskSource: maskSrc
+                source: behind
+            }
+
+            // Rounded-rect mask. layer.enabled + visible:false is the standard
+            // texture-provider pattern; the layer FBO still updates because
+            // MultiEffect references it.
+            Item {
+                id: maskSrc
+                anchors.fill: parent
+                layer.enabled: true
+                visible: false
+
+                Rectangle {
+                    anchors.fill: parent
+                    antialiasing: true
+                    radius: frost.radius
+                }
+            }
+        }
     }
 
     // Translucent tint + border, drawn sharp on top of the blur.
@@ -109,32 +168,16 @@ Item {
         radius: frost.radius
     }
 
-    // Rounded-rect mask. layer.enabled + visible:false is the standard
-    // texture-provider pattern; the layer FBO still updates because
-    // MultiEffect references it.
-    Item {
-        id: maskSrc
-        anchors.fill: parent
-        layer.enabled: true
-        visible: false
-
-        Rectangle {
-            anchors.fill: parent
-            antialiasing: true
-            radius: frost.radius
-        }
-    }
-
     // Recompute the grab region whenever the popup appears, moves, or resizes.
     Connections {
         target: frost.popup
-        function onOpened() { behind.refresh() }
-        function onXChanged() { behind.refresh() }
-        function onYChanged() { behind.refresh() }
+        function onOpened() { frost.refresh() }
+        function onXChanged() { frost.refresh() }
+        function onYChanged() { frost.refresh() }
     }
 
-    onWidthChanged: behind.refresh()
-    onHeightChanged: behind.refresh()
+    onWidthChanged: refresh()
+    onHeightChanged: refresh()
 
-    Component.onCompleted: behind.refresh()
+    Component.onCompleted: refresh()
 }
