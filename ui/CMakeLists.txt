@@ -310,6 +310,9 @@ set(APP_SOURCES
         # playback/: spectrum viewer provider (timer + FFT drive + smoothing)
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumProvider.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumProvider.h
+        # playback/: the spectrum bars as one scene graph item (QML_ELEMENT)
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumBars.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumBars.h
 
         # settings/: general application settings store (settings.yaml)
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/settings/SettingsStore.cpp

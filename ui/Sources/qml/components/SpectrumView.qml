@@ -28,12 +28,13 @@
 // to the current look, so it can be retuned without touching any host wiring,
 // and it reaches for no ancestor id.
 //
-// WHY count IS SEPARATE FROM values. The values array is republished about sixty
-// times a second. If the Repeater keyed off the array, every tick would rebuild the
-// whole delegate set; keying off the stable `count` instead means the delegates are
-// created once and only their height bindings re-evaluate per tick, which is what
-// keeps a live 60 Hz display cheap. The host binds count to SpectrumProvider.bar
-// Count (effectively constant) and values to SpectrumProvider.bars (per tick).
+// The bars themselves are one SpectrumBars item (C++, playback/SpectrumBars.h):
+// every bar is a quad in a single geometry node, so a tick costs the host one
+// `values` write and the renderer one vertex upload, with no per-bar binding,
+// item or rounded-corner texture in between. `count` is separate from `values`
+// because the values list is republished on every tick while the count is
+// effectively constant; the host binds count to SpectrumProvider.barCount and
+// values to SpectrumProvider.bars.
 //
 // The provider already applies the attack/decay envelope, so the bars are smooth at
 // the source; this file adds no animation of its own (a Behavior here would fight
@@ -42,6 +43,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import com.rawform.app
 
 Item {
     id: root
@@ -57,12 +59,14 @@ Item {
     // -----------------------------------------------------------------------
 
     // The bar magnitudes, each 0..1, low frequency first. Length is expected to
-    // equal `count`; a shorter array simply leaves the trailing bars at zero, and a
+    // equal `count`; a shorter list simply leaves the trailing bars at zero, and a
     // longer one is truncated by `count`, so a transient mismatch never overruns.
-    property var values: []
+    // A typed list, so the provider's QList<qreal> passes through to the item
+    // as one value and never becomes a JavaScript array on the way.
+    property list<real> values: []
 
-    // The number of bars to draw. Stable for a given configuration, so the Repeater
-    // delegate set does not churn on the per-tick values updates.
+    // The number of bars to draw. Stable for a given configuration; only the
+    // values move per tick.
     property int count: 20
 
     // -----------------------------------------------------------------------
@@ -72,11 +76,14 @@ Item {
     property color frameColor: Theme.surfacePanel
     property color barColor: Theme.accentSoft
     property real  frameRadius: 4
-    property real  barRadius: 1
 
     // Inner padding from the frame edge to the plot area, and the gap between bars.
-    // The bar width then falls out of the remaining width divided by `count`.
-    property real  paddingX: 7
+    // The bars are whole pixels wide, all the same, and the row is centered in
+    // the plot, so the side padding is chosen to make the split come out even:
+    // in the player bar's 120 px slot, 1 px a side leaves 118 for the plot,
+    // which is exactly twenty 4 px bars with 2 px gaps. The vertical padding
+    // keeps the end bars clear of the frame's 4 px corner radius.
+    property real  paddingX: 1
     property real  paddingTop: 6
     property real  paddingBottom: 6
     property real  barGap: 2
@@ -105,37 +112,17 @@ Item {
             anchors.topMargin: root.paddingTop
             anchors.bottomMargin: root.paddingBottom
 
-            // One bar per index. Width is the leftover after the gaps, split evenly;
-            // x steps by width+gap; height is the min nub plus the value's share of
-            // the remaining plot height, bottom-anchored.
-            readonly property real barWidth:
-                root.count > 0
-                    ? Math.max(1, (width - (root.count - 1) * root.barGap) / root.count)
-                    : 0
-
-            Repeater {
-                model: root.count
-
-                delegate: Rectangle {
-                    id: bar
-                    required property int index
-
-                    // The bar's 0..1 magnitude, guarded for a values array that is
-                    // momentarily shorter than count (or not yet populated).
-                    readonly property real level:
-                        (index < root.values.length)
-                            ? Math.max(0, Math.min(1, root.values[index]))
-                            : 0
-
-                    width: plot.barWidth
-                    x: index * (plot.barWidth + root.barGap)
-                    anchors.bottom: parent.bottom
-                    height: root.minBarHeight
-                            + (plot.height - root.minBarHeight) * level
-                    radius: root.barRadius
-                    color: root.barColor
-                    antialiasing: true
-                }
+            // The bars: width is the leftover after the gaps, split evenly; x
+            // steps by width plus gap; height is the min nub plus the value's
+            // share of the remaining plot height, bottom-anchored. All of it is
+            // laid out inside the item, from these inputs.
+            SpectrumBars {
+                anchors.fill: parent
+                values: root.values
+                count: root.count
+                color: root.barColor
+                gap: root.barGap
+                minBarHeight: root.minBarHeight
             }
         }
     }
