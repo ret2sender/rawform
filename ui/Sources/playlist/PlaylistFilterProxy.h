@@ -165,6 +165,11 @@ public:
     Q_INVOKABLE bool hideColumn(const QString& fieldId);
     Q_INVOKABLE [[nodiscard]] bool isColumnShown(const QString& fieldId) const;
 
+    /// Whether PROXY row @p row has a readable backing file (its source row's
+    /// RowAvailableRole); false for a row that does not map. The view's
+    /// playing marker reads it for the one row it draws.
+    Q_INVOKABLE [[nodiscard]] bool isRowAvailable(int row) const;
+
     // --- Row ops, mapped ---------------------------------------------------
 
     /// PlaylistModel::removeTracks over PROXY rows (mapped; unmapped rows are

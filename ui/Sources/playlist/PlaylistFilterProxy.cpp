@@ -242,6 +242,14 @@ bool PlaylistFilterProxy::isColumnShown(const QString& fieldId) const {
     return m_source->isColumnShown(fieldId);
 }
 
+bool PlaylistFilterProxy::isRowAvailable(int row) const {
+    const int src = mapRowToSource(row);
+    if (src < 0)
+        return false;
+    const TrackData* track = m_source->trackAt(src);
+    return track != nullptr && track->available;
+}
+
 // ---------------------------------------------------------------------------
 // Row ops (mapped)
 // ---------------------------------------------------------------------------

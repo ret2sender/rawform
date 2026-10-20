@@ -60,15 +60,35 @@ Item {
     // click handler in the cell delegate.
     property ItemSelectionModel selectionModel
 
-    // The CURRENT (focus) row, for the delegate's focus outline
-    //. Driven by the DATA (the root's selection model, which stays bound
-    // to the active tab regardless of the TableView's detach window), so
-    // the outline is correct even while the view's attachment is mid-swap.
+    // The CURRENT (focus) row, for the focus outline. Driven by the DATA
+    // (the root's selection model, which stays bound to the active tab
+    // regardless of the TableView's detach window), so the outline is
+    // correct even while the view's attachment is mid-swap.
     // selectionModel.currentIndex notifies on currentChanged; the
-    // selectionModel term re-evaluates across tab switches.
-    readonly property int _currentRow:
-        selectionModel && selectionModel.currentIndex.valid
+    // selectionModel term re-evaluates across tab switches. The row
+    // revision is read as well: when rows are removed or inserted above the
+    // current one, the selection model's persistent index moves with them
+    // silently (currentChanged fires only when the current row itself is
+    // removed, and then BEFORE the removal, with the row still in the old
+    // numbering), so without this term the outline would sit one row off
+    // until the next click (observed: a queue entry culled on start left
+    // the outline on the row after the one that took its place).
+    readonly property int _currentRow: {
+        void root._rowsRevision
+        return selectionModel && selectionModel.currentIndex.valid
             ? selectionModel.currentIndex.row : -1
+    }
+
+    // Bumped after every structural change of the proxy's rows (removal,
+    // insertion, move): the persistent indexes have been renumbered by then,
+    // and nothing else notifies the bindings that read a row out of one.
+    property int _rowsRevision: 0
+    Connections {
+        target: root.model
+        function onRowsRemoved() { root._rowsRevision++ }
+        function onRowsInserted() { root._rowsRevision++ }
+        function onRowsMoved() { root._rowsRevision++ }
+    }
 
     // The model is created in C++ and assigned from MainWindow so this view
     // stays reusable; tab switching swaps the model underneath it. It is the
@@ -1810,70 +1830,79 @@ Item {
                             }
                         }
 
-                        // Now-playing marker: a slim accent down the left edge of
-                        // the playing row. Drawn on column 0 only, so it reads as a
-                        // single row marker rather than a line between every cell;
-                        // the green row text above carries the cue if the first
-                        // column is ever scrolled out of view. Independent of
-                        // selection, so it still shows on a selected playing row.
-                        Rectangle {
-                            visible: cell.isPlayingRow && cell.rowAvailable
-                                     && cell.column === 0
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 3
-                            color: Theme.success
-                        }
-
-                        // Focus outline on the CURRENT row (the
-                        // remembered last-selected track; also the live focus row
-                        // during normal use). An outline, never a fill, matching
-                        // the rule that current is focus and selection is the tint. The
-                        // strokeOverlay pattern, drawn last; per-cell delegates
-                        // can't draw one row-wide rectangle, so each cell of the
-                        // row draws the top+bottom runs and only the outermost
-                        // columns close the left/right edges (interior cell
-                        // boundaries stay open so the strokes read as a single
-                        // row-wide rectangle).
-                        Rectangle {
-                            visible: cell.row === root._currentRow
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            height: 1
-                            color: Theme.focusOutline
-                        }
-                        Rectangle {
-                            visible: cell.row === root._currentRow
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: 1
-                            color: Theme.focusOutline
-                        }
-                        Rectangle {
-                            visible: cell.row === root._currentRow && cell.column === 0
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 1
-                            color: Theme.focusOutline
-                        }
-                        Rectangle {
-                            visible: cell.row === root._currentRow
-                                     && cell.column === tableView.columns - 1
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 1
-                            color: Theme.focusOutline
-                        }
-
+                        // The now-playing marker and the current-row outline
+                        // are NOT drawn here: they are the two row-wide items
+                        // after this delegate, one each for the one row each
+                        // applies to, rather than five invisible rectangles in
+                        // every cell waiting for their row to come up. A cell
+                        // is this rectangle and its text.
                         // Note: clicks are handled by the single overlay
                         // MouseArea (sibling of the Column below), not here.
                         // Keeping the cell free of its own MouseArea avoids any
                         // event-routing competition between the two.
+                    }
+
+                    // The two row markers. Declared as children of the
+                    // TableView, which (as any Flickable) places them in its
+                    // contentItem beside the delegates: they sit in content
+                    // coordinates, scroll with the rows, and are clipped with
+                    // them, so no scroll offset is tracked and the header and
+                    // the scroll bars stay above them as they are above the
+                    // cells. z 2 keeps them over the delegates, which the view
+                    // parents into the same item at z 1 (the documented
+                    // overlay idiom). Both span the row arithmetic the view
+                    // uses everywhere (uniform row height); the outline spans
+                    // the table's CONTENT width so it closes on the last
+                    // column's edge. Neither takes input.
+
+                    // Now-playing marker: a slim accent down the left edge of
+                    // the playing row; the green row text carries the cue if
+                    // the first column is ever scrolled out of view.
+                    // Independent of selection, so it still shows on a
+                    // selected playing row. Gated on the row's file being
+                    // present, exactly as the text color is: a row the engine
+                    // is "on" but that is missing/unreadable (a failed open)
+                    // must not read as playing. The source model's
+                    // dataRevision is read so a reload that flips availability
+                    // re-evaluates this.
+                    Rectangle {
+                        readonly property bool shown: {
+                            if (!root.model || root._playingViewRow < 0)
+                                return false
+                            void root.model.source.dataRevision
+                            return root.model.isRowAvailable(root._playingViewRow)
+                        }
+                        z: 2
+                        visible: shown
+                        x: 0
+                        y: root._playingViewRow * root._rowHeight
+                        width: 3
+                        height: root._rowHeight
+                        color: Theme.success
+                    }
+
+                    // Focus outline on the CURRENT row (the remembered
+                    // last-selected track; also the live focus row during
+                    // normal use). An outline, never a fill, matching the rule
+                    // that current is focus and selection is the tint: a 1 px
+                    // stroke on all four sides of the row's content-wide
+                    // rectangle, transparent inside so the cells' own tint
+                    // shows through. Bounded by the view's row count: a
+                    // current index that a removal left past the last row
+                    // (it happens between a queue cull and the focus-row
+                    // restore) must outline nothing, as a cell-drawn outline
+                    // had nothing to draw it with.
+                    Rectangle {
+                        z: 2
+                        visible: root._currentRow >= 0
+                                 && root._currentRow < tableView.rows
+                        x: 0
+                        y: root._currentRow * root._rowHeight
+                        width: tableView.contentWidth
+                        height: root._rowHeight
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Theme.focusOutline
                     }
                 }
             }
