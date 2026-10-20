@@ -21,10 +21,11 @@
 // SpectrumAnalyzer.cpp
 //
 // Implementation of the spectrum transform. The whole file is plain,
-// single-threaded DSP: a Hann window, a hand-rolled iterative radix-2 FFT, a
-// per-bin magnitude, a fold into log-spaced bands, and a fixed dB-to-0..1 mapping.
-// See the header for why each stage is here and why the FFT is hand-rolled rather
-// than pulled from a third-party library.
+// single-threaded DSP: a Hann window, a hand-rolled iterative radix-2 FFT run as
+// a real-input transform (half the points, then a split), a per-bin magnitude,
+// a fold into log-spaced bands, and a fixed dB-to-0..1 mapping. See the header
+// for why each stage is here and why the FFT is hand-rolled rather than pulled
+// from a third-party library.
 
 #include "rawform/audio/SpectrumAnalyzer.h"
 
@@ -103,13 +104,16 @@ void SpectrumAnalyzer::configure(std::uint32_t sampleRate,
     // zero or inverts.
     m_ceilDb = ceilDb > floorDb ? ceilDb : floorDb + 1.0;
 
-    // (Re)size the scratch buffers once here, never in analyze().
-    m_re.assign(m_fftSize, 0.0f);
-    m_im.assign(m_fftSize, 0.0f);
+    // (Re)size the scratch buffers once here, never in analyze(). The complex
+    // buffers hold the packed half-length transform (see analyze), so they are
+    // fftSize / 2 long; the magnitudes cover the full real spectrum up to Nyquist.
+    m_re.assign(m_fftSize / 2, 0.0f);
+    m_im.assign(m_fftSize / 2, 0.0f);
     m_mag.assign(m_fftSize / 2 + 1, 0.0f);
     m_bars.assign(barCount, 0.0f);
 
     buildWindow();
+    buildTwiddles();
     buildBands();
 }
 
@@ -126,6 +130,23 @@ void SpectrumAnalyzer::buildWindow() {
     for (std::size_t i = 0; i < m_fftSize; ++i) {
         m_window[i] = static_cast<float>(
             0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / denom));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The split twiddles e^(-2 pi i k / N) for k in 0..N/2, used once per bin per
+// analyze() to recombine the half-length transform into the real spectrum.
+// Built once per configure(); the per-bin cos/sin would otherwise be the most
+// expensive part of the split.
+void SpectrumAnalyzer::buildTwiddles() {
+    const std::size_t half = m_fftSize / 2;
+    m_twRe.assign(half + 1, 0.0f);
+    m_twIm.assign(half + 1, 0.0f);
+    for (std::size_t k = 0; k <= half; ++k) {
+        const double ang = -2.0 * kPi * static_cast<double>(k) /
+                           static_cast<double>(m_fftSize);
+        m_twRe[k] = static_cast<float>(std::cos(ang));
+        m_twIm[k] = static_cast<float>(std::sin(ang));
     }
 }
 
@@ -178,14 +199,15 @@ void SpectrumAnalyzer::buildBands() {
 }
 
 // ---------------------------------------------------------------------------
-// In-place iterative radix-2 decimation-in-time FFT. The standard two phases: an
-// up-front bit-reversal permutation, then log2(N) stages of butterflies with the
-// twiddle accumulated across each stage. m_im is all zero on entry (real input),
-// but this is the general complex routine, which keeps it short and obviously
-// correct. Forward transform (negative exponent); we only ever read magnitudes, so
-// the sign and any overall scale wash out of the normalized result.
-void SpectrumAnalyzer::fftInPlace() {
-    const std::size_t n = m_fftSize;
+// In-place iterative radix-2 decimation-in-time FFT over the first n points of
+// m_re / m_im. The standard two phases: an up-front bit-reversal permutation,
+// then log2(n) stages of butterflies with the twiddle accumulated across each
+// stage. This is the general complex routine, which keeps it short and obviously
+// correct; analyze() feeds it a genuinely complex input (the packed even and odd
+// samples), so none of it is wasted on zeros. Forward transform (negative
+// exponent); we only ever read magnitudes, so the sign and any overall scale wash
+// out of the normalized result.
+void SpectrumAnalyzer::fftInPlace(std::size_t n) {
 
     // Bit-reversal permutation.
     for (std::size_t i = 1, j = 0; i < n; ++i) {
@@ -240,27 +262,47 @@ const std::vector<float>& SpectrumAnalyzer::analyze(const float* mono,
         return m_bars;
     }
 
-    // Window the most recent fftSize samples into m_re, zero the imaginary part.
-    // When the caller supplies more than a window (a tap often hands over its whole
-    // buffer), keep the LATEST fftSize; when it supplies fewer (the first instants
-    // of playback), use what there is and leave the tail zero.
+    // Window the most recent fftSize samples and pack them as fftSize / 2 complex
+    // points: the even samples as the real part, the odd ones as the imaginary
+    // part. One half-length complex FFT then holds the whole real spectrum,
+    // recovered by the split below; that is half the butterfly work of running
+    // the full-length transform on an all-zero imaginary part. When the caller
+    // supplies more than a window (a tap often hands over its whole buffer),
+    // keep the LATEST fftSize; when it supplies fewer (the first instants of
+    // playback), use what there is and leave the tail zero.
     const std::size_t take   = std::min(n, m_fftSize);
     const std::size_t offset = n - take;  // index of the first sample we keep
-    for (std::size_t i = 0; i < take; ++i) {
-        m_re[i] = mono[offset + i] * m_window[i];
-        m_im[i] = 0.0f;
-    }
-    for (std::size_t i = take; i < m_fftSize; ++i) {
-        m_re[i] = 0.0f;
-        m_im[i] = 0.0f;
+    const std::size_t half   = m_fftSize / 2;
+    for (std::size_t i = 0; i < half; ++i) {
+        const std::size_t even = 2 * i;
+        const std::size_t odd  = even + 1;
+        m_re[i] = (even < take) ? mono[offset + even] * m_window[even] : 0.0f;
+        m_im[i] = (odd < take) ? mono[offset + odd] * m_window[odd] : 0.0f;
     }
 
-    fftInPlace();
+    fftInPlace(half);
 
-    // Per-bin magnitude up to Nyquist.
-    const std::size_t bins = m_fftSize / 2;
-    for (std::size_t k = 0; k <= bins; ++k) {
-        m_mag[k] = std::sqrt(m_re[k] * m_re[k] + m_im[k] * m_im[k]);
+    // Split the packed transform Z into the real spectrum X, bins 0..N/2:
+    //   E[k] = (Z[k] + conj(Z[N/2 - k])) / 2        the even samples' spectrum
+    //   O[k] = (Z[k] - conj(Z[N/2 - k])) / (2 i)    the odd samples' spectrum
+    //   X[k] = E[k] + e^(-2 pi i k / N) O[k]
+    // with Z indexed modulo N/2 (so Z[N/2] is Z[0]). Only the magnitude is kept.
+    for (std::size_t k = 0; k <= half; ++k) {
+        const std::size_t a = k % half;            // Z[k]
+        const std::size_t b = (half - k) % half;   // Z[N/2 - k]
+        const float ar = m_re[a];
+        const float ai = m_im[a];
+        const float br = m_re[b];
+        const float bi = -m_im[b];                 // conjugated
+        const float er = 0.5f * (ar + br);
+        const float ei = 0.5f * (ai + bi);
+        const float orr = 0.5f * (ai - bi);        // (a - b) / (2 i): real part
+        const float oi = -0.5f * (ar - br);        // (a - b) / (2 i): imaginary part
+        const float wr = m_twRe[k];
+        const float wi = m_twIm[k];
+        const float xr = er + (wr * orr - wi * oi);
+        const float xi = ei + (wr * oi + wi * orr);
+        m_mag[k] = std::sqrt(xr * xr + xi * xi);
     }
 
     // Fold into log bands and map to 0..1. Per band, take the loudest bin (so a

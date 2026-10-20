@@ -116,16 +116,18 @@ public:
     [[nodiscard]] std::size_t fftSize() const noexcept { return m_fftSize; }
 
 private:
-    /// Rebuild the Hann window (length fftSize) and the per-bar bin ranges from the
-    /// log-spaced band edges and the current sample rate. Called by configure().
+    /// Rebuild the Hann window (length fftSize), the split twiddles (fftSize / 2 + 1)
+    /// and the per-bar bin ranges from the log-spaced band edges and the current
+    /// sample rate. Called by configure().
     void buildWindow();
+    void buildTwiddles();
     void buildBands();
 
-    /// In-place iterative radix-2 FFT over m_re / m_im (length fftSize, a power of
-    /// two). Decimation-in-time (DIT) with an up-front bit-reversal permutation; the
-    /// twiddles are computed inline. Real input means m_im is all zero on entry, but
-    /// the routine is the general complex FFT so it stays simple and correct.
-    void fftInPlace();
+    /// In-place iterative radix-2 FFT over the first n points of m_re / m_im (n a
+    /// power of two). Decimation-in-time (DIT) with an up-front bit-reversal
+    /// permutation; the stage twiddles are computed inline. analyze() runs it at
+    /// fftSize / 2 on the packed real input and splits the result (see the .cpp).
+    void fftInPlace(std::size_t n);
 
     static std::size_t roundUpPow2(std::size_t n) noexcept;
 
@@ -137,8 +139,10 @@ private:
     double        m_ceilDb  = 0.0;
 
     std::vector<float> m_window;  ///< Hann coefficients, length fftSize
-    std::vector<float> m_re;      ///< FFT real part / windowed input, length fftSize
-    std::vector<float> m_im;      ///< FFT imaginary part, length fftSize
+    std::vector<float> m_twRe;    ///< split twiddles, cos, length fftSize/2 + 1
+    std::vector<float> m_twIm;    ///< split twiddles, sin, length fftSize/2 + 1
+    std::vector<float> m_re;      ///< packed transform, real part, length fftSize/2
+    std::vector<float> m_im;      ///< packed transform, imaginary part, length fftSize/2
     std::vector<float> m_mag;     ///< per-bin magnitude, length fftSize/2 + 1
 
     /// Per-bar half-open bin range [lo, hi) into m_mag. Each band covers at least

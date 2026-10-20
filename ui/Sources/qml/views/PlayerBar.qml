@@ -246,8 +246,14 @@ Item {
 
                 // Off-screen metrics that size the kbps slot (non-visual, ignored by
                 // the layout). kbpsRefMetrics is the four-digit floor; kbpsNowMetrics
-                // tracks the current value so a five-digit rate widens the slot
-                // rather than overflowing it.
+                // tracks the current value's DIGIT COUNT so a five-digit rate widens
+                // the slot rather than overflowing it. The digit count, not the
+                // digits: the live rate changes at every 100 ms position tick on a
+                // VBR stream, and a metrics object re-measures on every text change,
+                // so measuring the value itself was a text layout per tick for a
+                // width that only moves when a digit comes or goes. A string of
+                // eights of the same length is at least as wide (eight is the
+                // widest digit) and changes only then.
                 TextMetrics {
                     id: kbpsRefMetrics
                     font.family: Theme.uiFont
@@ -260,7 +266,7 @@ Item {
                     font.family: Theme.uiFont
                     font.pixelSize: Theme.fontSizeBody
                     font.weight: Font.Bold
-                    text: "" + AudioController.displayBitrateKbps
+                    text: "8".repeat(String(AudioController.displayBitrateKbps).length)
                 }
 
                 Text {

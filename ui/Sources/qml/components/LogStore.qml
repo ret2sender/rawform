@@ -64,7 +64,9 @@ QtObject {
     // Emitted on every successful append (the console can react if it wants).
     signal appended(string level, string text)
 
-    // Pre-built HTML lines, newest last; joined into logText on each append.
+    // Pre-built HTML lines, newest last. logText is the concatenation; an
+    // append extends it in place and the join is redone only when the cap
+    // trims the oldest lines away.
     property var _lines: []
 
     // Per-level color, shared with StatusLogBar's mapping so the two agree.
@@ -99,9 +101,12 @@ QtObject {
         var line = '<span style="color:' + _color(level) + '">'
                  + stamp + '&nbsp;&nbsp;' + _escape(text) + '</span><br>'
         _lines.push(line)
-        if (_lines.length > maxEntries)
+        if (_lines.length > maxEntries) {
             _lines.splice(0, _lines.length - maxEntries)
-        logText = _lines.join("")
+            logText = _lines.join("")
+        } else {
+            logText += line
+        }
         latestText = text
         latestLevel = level
         appended(level, text)
