@@ -28,6 +28,7 @@
 
 #include "media/TrackReader.h"
 #include "utils/FutureRelease.h" // releaseFuture: drop the result stores after a request
+#include "utils/PerfLog.h"       // the enumeration and read timing lines
 
 #include <QChar>
 #include <QCollator>
@@ -35,6 +36,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
 #include <QStringConverter>
 #include <QTextStream>
@@ -112,9 +114,18 @@ QStringList expandM3u(const QString& m3uPath) {
 /// Dedup is by canonical path across the WHOLE request (overlapping drops),
 /// preserving first-seen order. Duplicates across SEPARATE requests are allowed
 /// (a playlist may queue the same track twice).
+///
+/// The canonical form is built per DIRECTORY, not per file: a library's
+/// symlinks sit on its folders (a mount under a shorter name, an album linked
+/// into a collection), so resolving each parent once and joining the file
+/// name gives the same key as resolving every file, at one realpath walk per
+/// folder instead of one per file (the walk visits every path component, and
+/// a scan is mostly files). A file that is itself a symlink is the one case
+/// the join would miss, and it is resolved in full.
 QStringList enumerateFiles(const QStringList& inputs) {
     QStringList ordered;
     QSet<QString> seen;
+    QHash<QString, QString> canonicalDirs; // absolute directory -> canonical
 
     QCollator coll;
     coll.setNumericMode(true);
@@ -123,9 +134,25 @@ QStringList enumerateFiles(const QStringList& inputs) {
         return coll.compare(a, b) < 0;
     };
 
+    const auto canonicalDir = [&](const QString& dir) -> QString {
+        const auto it = canonicalDirs.constFind(dir);
+        if (it != canonicalDirs.constEnd())
+            return it.value();
+        QString canonical = QFileInfo(dir).canonicalFilePath();
+        if (canonical.isEmpty())
+            canonical = dir;
+        canonicalDirs.insert(dir, canonical);
+        return canonical;
+    };
+
     const auto addFile = [&](const QString& path) {
         const QFileInfo fi(path);
-        QString key = fi.canonicalFilePath();
+        QString key;
+        if (fi.isSymLink()) {
+            key = fi.canonicalFilePath();
+        } else {
+            key = canonicalDir(fi.absolutePath()) + QLatin1Char('/') + fi.fileName();
+        }
         if (key.isEmpty())
             key = fi.absoluteFilePath();
         if (seen.contains(key))
@@ -233,6 +260,7 @@ void TrackScanner::startRequest(QStringList inputs, int at) {
     m_nextEmit = 0;
     m_total = 0; // No total until enumeration completes
     m_buffer.clear();
+    m_requestClock.start();
     setScanning(true);
 
     // Resolve the insertion point in the receiver (it knows the model); we just
@@ -245,6 +273,9 @@ void TrackScanner::startRequest(QStringList inputs, int at) {
 void TrackScanner::onEnumerated() {
     QStringList files = m_enumWatcher.result();
     releaseFuture(m_enumWatcher); // the path list lives on in `files` alone
+    qCDebug(lcPerf, "scan: enumerated %lld files in %lld ms",
+            static_cast<long long>(files.size()),
+            static_cast<long long>(m_requestClock.elapsed()));
     if (files.isEmpty()) {
         onScanFinished(); // nothing to scan; close the request out cleanly
         return;
@@ -304,6 +335,8 @@ void TrackScanner::onScanFinished() {
     releaseFuture(m_scanWatcher);
     m_flushTimer.stop();
     flush(); // emit the tail
+    qCDebug(lcPerf, "scan: read %d files (%d skipped) in %lld ms from the request",
+            m_total, m_skipped, static_cast<long long>(m_requestClock.elapsed()));
     // Finalize the bar before the finish notification, so a consumer
     // that clears its state on scanFinished has seen a complete bar first.
     emit scanProgress(m_total, m_total);

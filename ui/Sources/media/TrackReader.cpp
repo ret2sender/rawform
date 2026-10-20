@@ -43,11 +43,13 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>  // std::max: the chunked sync search's resume point
 #include <memory>
 #include <utility>
 
 #include <taglib/audioproperties.h>
 #include <taglib/fileref.h>
+#include <taglib/tbytevector.h>
 #include <taglib/tpropertymap.h>
 #include <taglib/tstringlist.h>
 
@@ -59,8 +61,8 @@
 // surface, validated by the shipping build. If a future TagLib moves any of
 // them, the fix is localized to the corresponding helper in the anonymous
 // namespace; each format sits in its own dynamic_cast block on purpose. The
-// plain byte readers (sniffOggCodec, flacVendorString, the MP3 and MP4
-// sniffers) do not depend on TagLib at all.
+// plain byte readers (sniffOggCodec, the MP3 and MP4 sniffers) do not depend
+// on TagLib at all.
 // ---------------------------------------------------------------------------
 #include <taglib/flacfile.h>
 #include <taglib/flacproperties.h>
@@ -109,12 +111,6 @@ quint32 byteAt(const QByteArray& b, int off) {
 quint32 beU32(const QByteArray& b, int off) {
     return (byteAt(b, off)     << 24) | (byteAt(b, off + 1) << 16)
          | (byteAt(b, off + 2) << 8)  |  byteAt(b, off + 3);
-}
-
-/// Little-endian u32 at `off`.
-quint32 leU32(const QByteArray& b, int off) {
-    return  byteAt(b, off)            | (byteAt(b, off + 1) << 8)
-         | (byteAt(b, off + 2) << 16) | (byteAt(b, off + 3) << 24);
 }
 
 /// Last-resort codec label from the container extension. Only used when the
@@ -181,66 +177,40 @@ std::unique_ptr<TagLib::File> openOggFile(const char* fileName, const QString& c
 
 /// The Vorbis-comment VENDOR string of a native FLAC file (e.g. "reference
 /// libFLAC 1.4.3"). This is what the FLAC "Tool" field shows; it is NOT an
-/// ENCODER tag, so the PropertyMap never carries it, and TagLib does not expose
-/// it reliably. We read it directly: after the "fLaC" marker, FLAC metadata
-/// blocks are [1 byte: last-flag + type][3 bytes BE: length][body]; the
-/// VORBIS_COMMENT block (type 4) begins with a 4-byte little-endian vendor
-/// length followed by the vendor bytes. Plain bytes, no TagLib dependency.
-QString flacVendorString(const QString& path) {
-    QFile fp(path);
-    if (!fp.open(QIODevice::ReadOnly))
+/// ENCODER tag, so the PropertyMap never carries it, but TagLib keeps it on the
+/// XiphComment it parsed from the VORBIS_COMMENT block. Read from the file
+/// object already in hand; no second open. Empty when the file carries no
+/// Vorbis comment (the false argument asks for the existing block only, never
+/// creates one).
+QString flacVendorString(TagLib::FLAC::File* flac) {
+    const TagLib::Ogg::XiphComment* comment = flac->xiphComment(false);
+    if (comment == nullptr)
         return {};
-    if (fp.read(4) != "fLaC")
-        return {};
-    while (true) {
-        const QByteArray hdr = fp.read(4);
-        if (hdr.size() != 4)
-            break;
-        const quint32 b0 = byteAt(hdr, 0);
-        const bool last = (b0 & 0x80) != 0;
-        const quint32 type = b0 & 0x7F;
-        // The 24-bit BE length is bytes 1..3; the mask drops the flag/type byte.
-        const quint32 len = beU32(hdr, 0) & 0x00FFFFFFu;
-        if (type == 4) { // VORBIS_COMMENT
-            const QByteArray vl = fp.read(4);
-            if (vl.size() != 4)
-                return {};
-            const quint32 vlen = leU32(vl, 0);
-            if (vlen == 0 || vlen > (1u << 20)) // sanity cap at 1 MiB
-                return {};
-            return QString::fromUtf8(fp.read(static_cast<qint64>(vlen)));
-        }
-        if (last)
-            break;
-        fp.seek(fp.pos() + static_cast<qint64>(len)); // skip this block's body
-    }
-    return {};
+    return tstr(comment->vendorID());
 }
 
 /// FLAC stores an MD5 of the DECODED audio in its STREAMINFO block; the pane shows it as
-/// "Audio MD5". TagLib does not expose it, so read it directly. STREAMINFO is mandatorily
-/// the first metadata block: after the "fLaC" marker and the 4-byte block header, the
-/// 34-byte body's last 16 bytes are the MD5 (it sits at body offset 18, after min/max
-/// block size, min/max frame size, and the packed rate/channels/bits/total-samples word).
-/// An all-zero signature means the encoder stored none (e.g. --no-md5), reported here as
-/// absent. Plain bytes, no TagLib dependency.
-QString flacAudioMd5(const QString& path) {
-    QFile fp(path);
-    if (!fp.open(QIODevice::ReadOnly))
+/// "Audio MD5". TagLib exposes it as the properties' signature (16 bytes), parsed from
+/// the same STREAMINFO the duration and rate come from. An all-zero signature means
+/// the encoder stored none (e.g. --no-md5), reported here as absent; so is a file whose
+/// STREAMINFO TagLib could not read. Read from the object in hand; no second open.
+QString flacAudioMd5(TagLib::FLAC::File* flac) {
+    const TagLib::FLAC::Properties* props = flac->audioProperties();
+    if (props == nullptr)
         return {};
-    if (fp.read(4) != "fLaC")
+    const TagLib::ByteVector md5 = props->signature();
+    if (md5.size() != 16)
         return {};
-    const QByteArray hdr = fp.read(4); // [last-flag + type][3-byte BE length]
-    if (hdr.size() != 4)
-        return {};
-    if ((byteAt(hdr, 0) & 0x7F) != 0) // 0 = STREAMINFO
-        return {};
-    if (!fp.seek(fp.pos() + 18)) // skip to the MD5 within the STREAMINFO body
-        return {};
-    const QByteArray md5 = fp.read(16);
-    if (md5.size() != 16 || md5.count('\0') == 16)
-        return {}; // short read, or no signature stored
-    return QString::fromLatin1(md5.toHex()); // 32 lowercase hex chars
+    bool allZero = true;
+    for (unsigned int i = 0; i < md5.size(); ++i) {
+        if (md5[i] != 0) {
+            allZero = false;
+            break;
+        }
+    }
+    if (allZero)
+        return {}; // no signature stored
+    return QString::fromLatin1(md5.toHex().data(), 32); // 32 lowercase hex chars
 }
 
 /// Codec label from the concrete TagLib file type (content, not extension).
@@ -376,33 +346,56 @@ Mp3BitrateInfo sniffMp3BitrateMode(const QString& path) {
     }
 
     // ----- 2. Find the first valid MPEG audio frame sync from `start`. -----
-    // Bounded so a pathological file cannot make us scan forever; the first
-    // frame always lands within the first few KB of audio in practice.
+    // Read in chunks and stop at the first sync: the first frame lands within
+    // the first few KB of audio in practice, so one chunk is the whole read
+    // for nearly every file. kScanLimit bounds the search so a pathological
+    // file cannot make us scan forever; it is a ceiling, not a request (one
+    // read of the whole ceiling would move half a megabyte per MP3 through
+    // the page cache to look at a few KB of it, the dominant cost of a scan
+    // over an MP3 library). Once the sync is found the buffer is topped up to
+    // kTailBytes past it, which covers the Xing/Info or VBRI header, the
+    // optional fields and the LAME extension read below. int offsets are
+    // exact here: the buffer is capped at kScanLimit plus the tail, and every
+    // offset below is int arithmetic on that bounded buffer.
     constexpr qint64 kScanLimit = 512 * 1024;
+    constexpr qint64 kChunk     = 32 * 1024;
+    constexpr int    kTailBytes = 256;
     if (!fp.seek(start))
         return out;
-    const QByteArray buf = fp.read(kScanLimit);
-    // int offsets are exact here: the read is capped at kScanLimit, and every
-    // offset below is int arithmetic on that bounded buffer.
-    const int n = static_cast<int>(buf.size());
+    QByteArray buf;
     const auto u8 = [&](int idx) { return static_cast<unsigned char>(buf[idx]); };
 
     int version = -1, layer = -1, channelMode = -1, frameOff = -1;
-    for (int i = 0; i + 4 <= n; ++i) {
-        if (u8(i) != 0xFF || (u8(i + 1) & 0xE0) != 0xE0)
-            continue;
-        const int ver    = (u8(i + 1) >> 3) & 0x03; // 0=2.5, 1=reserved, 2=2, 3=1
-        const int lay    = (u8(i + 1) >> 1) & 0x03; // 1=III, 2=II, 3=I, 0=reserved
-        const int brIdx  = (u8(i + 2) >> 4) & 0x0F;
-        const int srIdx  = (u8(i + 2) >> 2) & 0x03;
-        const int chMode = (u8(i + 3) >> 6) & 0x03; // 3 = single channel (mono)
-        if (ver == 1 || lay == 0 || brIdx == 0 || brIdx == 15 || srIdx == 3)
-            continue; // reserved/invalid combination: a false sync, keep scanning
-        version = ver; layer = lay; channelMode = chMode; frameOff = i;
-        break;
+    int scanned = 0; // the first offset not yet examined
+    while (frameOff < 0 && buf.size() < kScanLimit) {
+        const QByteArray chunk = fp.read(kChunk);
+        if (chunk.isEmpty())
+            break; // end of file without a sync
+        buf += chunk;
+        const int n = static_cast<int>(buf.size());
+        // A sync can straddle a chunk boundary, so resume three bytes back.
+        for (int i = std::max(0, scanned - 3); i + 4 <= n; ++i) {
+            if (u8(i) != 0xFF || (u8(i + 1) & 0xE0) != 0xE0)
+                continue;
+            const int ver    = (u8(i + 1) >> 3) & 0x03; // 0=2.5, 1=reserved, 2=2, 3=1
+            const int lay    = (u8(i + 1) >> 1) & 0x03; // 1=III, 2=II, 3=I, 0=reserved
+            const int brIdx  = (u8(i + 2) >> 4) & 0x0F;
+            const int srIdx  = (u8(i + 2) >> 2) & 0x03;
+            const int chMode = (u8(i + 3) >> 6) & 0x03; // 3 = single channel (mono)
+            if (ver == 1 || lay == 0 || brIdx == 0 || brIdx == 15 || srIdx == 3)
+                continue; // reserved/invalid combination: a false sync, keep scanning
+            version = ver; layer = lay; channelMode = chMode; frameOff = i;
+            break;
+        }
+        scanned = n;
     }
     if (frameOff < 0)
         return out;
+    // The header fields read below sit within kTailBytes of the sync; make
+    // sure the buffer reaches that far (a sync near the end of a chunk).
+    if (buf.size() < static_cast<qint64>(frameOff) + kTailBytes)
+        buf += fp.read(static_cast<qint64>(frameOff) + kTailBytes - buf.size());
+    const int n = static_cast<int>(buf.size());
 
     // The Xing/Info/VBRI header only exists in Layer III. A Layer I/II stream
     // (rare, and effectively always constant rate) is reported CBR directly.
@@ -1039,16 +1032,20 @@ TrackData readTrack(const QString& path) {
     promoteTagMap(tagMap, t);
 
     // ----- TagLib-only enrichment (no FFmpeg-probe equivalent) -------------
-    // Native FLAC stores its encoder in the Vorbis-comment VENDOR string, not an
-    // ENCODER tag, so the PropertyMap never has it. Read it directly. (Ogg Vorbis
-    // / Opus already carry an ENCODER tag, handled by the promotion above.)
-    if (t.tool.isEmpty() && oggCodec.isEmpty() && t.codec == QLatin1String("FLAC"))
-        t.tool = flacVendorString(path);
+    // Native FLAC only (the Ogg FLAC class is not a FLAC::File, which is the
+    // right exclusion: its vendor and STREAMINFO live elsewhere). Both values
+    // come from the objects TagLib already parsed, so a FLAC is opened once.
+    if (auto* flac = dynamic_cast<TagLib::FLAC::File*>(file)) {
+        // Native FLAC stores its encoder in the Vorbis-comment VENDOR string,
+        // not an ENCODER tag, so the PropertyMap never has it. (Ogg Vorbis /
+        // Opus already carry an ENCODER tag, handled by the promotion above.)
+        if (t.tool.isEmpty())
+            t.tool = flacVendorString(flac);
 
-    // FLAC Audio MD5 (STREAMINFO), native FLAC only. Conditional in the pane, so
-    // it hides for non-FLAC and for FLAC files that stored no signature.
-    if (oggCodec.isEmpty() && t.codec == QLatin1String("FLAC"))
-        t.audioMd5 = flacAudioMd5(path);
+        // FLAC Audio MD5 (STREAMINFO). Conditional in the pane, so it hides
+        // for non-FLAC and for FLAC files that stored no signature.
+        t.audioMd5 = flacAudioMd5(flac);
+    }
 
     // Embedded art PRESENCE only: keys, not the picture bytes (those are
     // fetched lazily by AlbumArtProvider for the displayed selection).

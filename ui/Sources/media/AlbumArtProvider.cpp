@@ -35,13 +35,19 @@
 
 #include "media/AlbumArtProvider.h"
 
+#include "utils/PerfLog.h"  // the per-decode timing line
+
 #include <QBuffer>
 #include <QByteArray>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QUrl>
+
+#include <algorithm>  // std::clamp, std::max: the DCT step for the request
+#include <cmath>      // std::ceil
 
 #include <taglib/fileref.h>
 #include <taglib/tbytevector.h>
@@ -52,6 +58,16 @@
 namespace rawform {
 namespace {
 
+/// What one decode cost, for the rawform.perf line: the source and decoded
+/// sizes, the format, and the JPEG DCT step the request landed on (0 when the
+/// request was not a DCT size).
+struct DecodeTrace {
+    QSize      full;
+    QSize      decoded;
+    QByteArray format;
+    int        dctNum = 0;
+};
+
 /// Decode through @p reader, bounded by @p requestedSize. When the request is
 /// valid and the source is larger than it on either axis, the reader is told
 /// the aspect-preserving target BEFORE reading, so the handler decodes to it
@@ -59,24 +75,54 @@ namespace {
 /// handlers decode in full and hand back only the reduced result). A source
 /// already within the bound is returned as is: never upscaled, so a small
 /// cover stays small and the view's PreserveAspectFit does the stretching.
-/// An invalid request (no sourceSize on the QML side) means a full decode,
-/// exactly as before.
-QImage decodeScaled(QImageReader& reader, const QSize& requestedSize) {
+/// An invalid request (no sourceSize on the QML side) means a full decode.
+///
+/// JPEG is asked for a size its decoder can produce outright. libjpeg scales
+/// at the DCT in eighths (an output of ceil(W * M / 8) for M in 1..8), and
+/// Qt's handler picks the smallest M whose output still covers the request,
+/// then smooth-scales that output down to the exact request on the CPU; for
+/// the common cover that resample costs more than the decode it follows. So
+/// when the aspect-fit target sits between two DCT steps, the request is
+/// rounded UP to the step above it, provided that step is a whole-pixel size
+/// on both axes (W * M and H * M divisible by 8; otherwise Qt's own rounding
+/// would land on M + 1 and resample anyway, and the plain request stands).
+/// A step of 8 is the full image, so the request is dropped: a full decode
+/// beats a full decode followed by a few-percent resample, for at most 8/7 of
+/// the bound in memory. The view fits whatever size comes back on the GPU.
+QImage decodeScaled(QImageReader& reader, const QSize& requestedSize, DecodeTrace& trace) {
+    trace.format = reader.format();
     if (requestedSize.isValid() && !requestedSize.isEmpty()) {
         // size() reads the header only; an invalid size (a handler that
         // cannot report it) just falls through to a full decode.
         const QSize full = reader.size();
+        trace.full = full;
         if (full.isValid()
             && (full.width() > requestedSize.width()
                 || full.height() > requestedSize.height())) {
-            reader.setScaledSize(full.scaled(requestedSize, Qt::KeepAspectRatio));
+            QSize target = full.scaled(requestedSize, Qt::KeepAspectRatio);
+            if (trace.format == "jpeg") {
+                const double ratio =
+                    std::max(static_cast<double>(target.width()) / full.width(),
+                             static_cast<double>(target.height()) / full.height());
+                const int num = std::clamp(static_cast<int>(std::ceil(8.0 * ratio)), 1, 8);
+                if (num >= 8) {
+                    target = full;  // the DCT cannot help; take the full decode
+                } else if ((full.width() * num) % 8 == 0 && (full.height() * num) % 8 == 0) {
+                    target = QSize(full.width() * num / 8, full.height() * num / 8);
+                    trace.dctNum = num;
+                }
+            }
+            if (target != full)
+                reader.setScaledSize(target);
         }
     }
-    return reader.read();
+    QImage img = reader.read();
+    trace.decoded = img.size();
+    return img;
 }
 
 /// Try the conventional sidecar cover-art names in @p dir. First hit wins.
-QImage loadSidecar(const QDir& dir, const QSize& requestedSize) {
+QImage loadSidecar(const QDir& dir, const QSize& requestedSize, DecodeTrace& trace) {
     static const QStringList kNames = {
         QStringLiteral("cover"),  QStringLiteral("folder"),
         QStringLiteral("front"),  QStringLiteral("album"),
@@ -91,7 +137,7 @@ QImage loadSidecar(const QDir& dir, const QSize& requestedSize) {
             const QString candidate = dir.absoluteFilePath(name + QLatin1Char('.') + ext);
             if (QFile::exists(candidate)) {
                 QImageReader reader(candidate);
-                const QImage img = decodeScaled(reader, requestedSize);
+                const QImage img = decodeScaled(reader, requestedSize, trace);
                 if (!img.isNull())
                     return img;
             }
@@ -102,7 +148,7 @@ QImage loadSidecar(const QDir& dir, const QSize& requestedSize) {
 
 /// Extract the first embedded picture from @p path via TagLib's complex
 /// properties (the bytes are read here, on demand).
-QImage loadEmbedded(const QString& path, const QSize& requestedSize) {
+QImage loadEmbedded(const QString& path, const QSize& requestedSize, DecodeTrace& trace) {
     TagLib::FileRef f(QFile::encodeName(path).constData(),
                       /*readAudioProperties=*/false);
     if (f.isNull() || !f.file())
@@ -127,7 +173,7 @@ QImage loadEmbedded(const QString& path, const QSize& requestedSize) {
         return {};
 
     QImageReader reader(&buffer);
-    return decodeScaled(reader, requestedSize);
+    return decodeScaled(reader, requestedSize, trace);
 }
 
 } // namespace
@@ -156,11 +202,23 @@ QImage AlbumArtProvider::requestImage(const QString& id, QSize* size,
 
     // Sidecar takes priority over the embedded picture. Both decode to the
     // requested bound (decodeScaled), so no post-decode scaling happens here.
-    QImage img = loadSidecar(fi.absoluteDir(), requestedSize);
+    QElapsedTimer clock;
+    clock.start();
+    DecodeTrace trace;
+    QImage img = loadSidecar(fi.absoluteDir(), requestedSize, trace);
     if (img.isNull())
-        img = loadEmbedded(path, requestedSize);
+        img = loadEmbedded(path, requestedSize, trace);
     if (img.isNull())
         return {};
+
+    // The timing line, on the image-reader thread: the source and decoded
+    // sizes say what the request bought (a JPEG at a DCT step decodes
+    // straight to the decoded size; "dct 0/8" means the handler resampled).
+    qCDebug(lcPerf, "art: %dx%d -> %dx%d %s dct %d/8 in %lld ms",
+            trace.full.width(), trace.full.height(),
+            trace.decoded.width(), trace.decoded.height(),
+            trace.format.constData(), trace.dctNum,
+            static_cast<long long>(clock.elapsed()));
 
     if (size)
         *size = img.size();

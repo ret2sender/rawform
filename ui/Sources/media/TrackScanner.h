@@ -50,6 +50,7 @@
 #include "media/TrackData.h"
 #include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
+#include <QElapsedTimer>
 #include <QFutureWatcher>
 #include <QList>
 #include <QObject>
@@ -141,6 +142,7 @@ private:
     int                   m_requestedAt = -1; ///< echoed via scanStarted
     int                   m_added = 0;      ///< valid tracks emitted this request
     int                   m_skipped = 0;    ///< files dropped this request
+    QElapsedTimer         m_requestClock;   ///< the rawform.perf timing of each request
     bool m_scanning = false;
 };
 
