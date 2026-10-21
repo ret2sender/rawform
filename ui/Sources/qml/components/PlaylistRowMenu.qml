@@ -97,7 +97,7 @@ ThemedMenu {
     ThemedMenu {
         title: "File Operations"
         ThemedMenuItem {
-            text: "Rename to..."
+            text: "Rename to…"
             onTriggered: rowMenu.renameRequested()
         }
     }
