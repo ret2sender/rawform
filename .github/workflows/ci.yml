@@ -31,9 +31,8 @@
 #     sets it on every UI test, so a new test is picked up here without a
 #     workflow edit), and the engine tree runs the other nine (this is
 #     exactly what `make test` does locally).
-#   - CMake: ui/ requires 4.2, newer than any distro repo, so the Linux app
-#     job installs it from PyPI. audio/ only requires 3.20, which Fedora's
-#     own cmake satisfies.
+#   - CMake: ui/ requires 3.28 and audio/ 3.20; the Fedora container's own
+#     cmake satisfies both trees, so no job downloads a CMake.
 #   - The app tree's Debug builds compile with -Werror on GCC/Clang/AppleClang,
 #     so the app build steps double as the warning gate; the engine tree
 #     builds with -Wall -Wextra -Wpedantic and no -Werror, so an engine
@@ -45,10 +44,12 @@
 #     cascade and the conformance suite's FFmpeg cases. Between the two
 #     platforms both build configurations stay green.
 #   - The qmllint step is non-blocking: it is a log to compare against the
-#     previous run. The wiring files disable the unqualified-access category
-#     for the context properties they reach (see the lint section of
-#     ui/CMakeLists.txt), so the expected count is zero; promoting the step
-#     to blocking needs a run with zero warnings on record.
+#     previous run. The tree carries no file-wide lint disables (the C++
+#     services are module singletons the views reach by type name; see the
+#     lint section of ui/CMakeLists.txt), so the expected count is zero;
+#     promoting the step to blocking needs a run with zero warnings on
+#     record. The target is the project's own rawform_qmllint, the one the
+#     README names, not the aggregate all_qmllint.
 #   - App-level GUI-session sanitizer runs stay manual (they need a
 #     compositor and a human driving); the TSan job here covers the engine,
 #     whose concurrency soaks are exactly what the audio CMake profile was
@@ -77,11 +78,10 @@ jobs:
       - name: Install toolchain and dependencies
         run: |
           dnf install -y \
-            git-core gcc-c++ ninja-build pkgconf python3-pip \
+            git-core gcc-c++ cmake ninja-build pkgconf \
             qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
             libsndfile-devel flac-devel mpg123-devel libebur128-devel \
             yaml-cpp-devel pipewire-devel zlib-devel
-          python3 -m pip install --break-system-packages "cmake>=4.2"
           cmake --version
 
       # Pinned source build, mirroring the Flatpak manifest's taglib module
@@ -131,7 +131,7 @@ jobs:
       # (see the lint section of ui/CMakeLists.txt and the header note).
       - name: QML lint (non-blocking)
         continue-on-error: true
-        run: cmake --build build --target all_qmllint
+        run: cmake --build build --target rawform_qmllint
 
   macos:
     name: macOS (FFmpeg fallback enabled)
@@ -212,8 +212,7 @@ jobs:
     steps:
       # Engine-only dependency set; audio/ needs no Qt, TagLib, or yaml-cpp.
       # pipewire-devel is included so the PipeWire sink compiles under TSan
-      # even though the tests drive injected sinks. Fedora's cmake satisfies
-      # the engine's 3.20 minimum, keeping this job PyPI-free.
+      # even though the tests drive injected sinks.
       - name: Install toolchain and dependencies
         run: |
           dnf install -y \

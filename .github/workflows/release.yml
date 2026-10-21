@@ -8,23 +8,40 @@
 # fires it, so the tag push is the deliberate release action.
 #
 # Job design notes:
+#   - A preflight job checks the pushed tag against ui/VERSION.txt before
+#     either build starts: every artifact and the release notes are named
+#     from VERSION.txt, so a tag pushed before the bump would publish a
+#     draft titled after the tag and filled with the previous version. A
+#     pre-release suffix on the tag (v1.4.0-rc1) is allowed, for the dry
+#     runs described below; anything else that differs fails in seconds
+#     rather than after the FFmpeg build.
 #   - The macOS job is the CI macos recipe plus `make BUILD_TYPE=Release
-#     dmg`. This is the one CI exercise of the Makefile path (CI configures
-#     CMake directly): QT_PREFIX resolves through `brew --prefix qt`, gated
-#     on Qt6Config.cmake actually existing there, and macdeploy.sh finds
-#     macdeployqt under the same prefix. macdeploy's final
+#     RAWFORM_FFMPEG=on dmg`. This is the one CI exercise of the Makefile
+#     path (CI configures CMake directly): QT_PREFIX resolves through `brew
+#     --prefix qt`, gated on Qt6Config.cmake actually existing there, and
+#     macdeploy.sh finds macdeployqt under the same prefix. FFmpeg is
+#     required rather than probed because the distributed build is
+#     documented as shipping the fallback; a detection miss fails here
+#     instead of producing a native-only image. macdeploy's final
 #     outside-the-bundle report is the pass criterion for the image, not
 #     any exit code; it prints in the build step's log and must be read
 #     there, because a dylib resolving into /opt/homebrew on the runner
 #     would be missing on a user's machine.
+#   - The macOS runner is pinned to a named image, not macos-latest, and
+#     the image's major version equals the CMAKE_OSX_DEPLOYMENT_TARGET in
+#     ui/CMakeLists.txt (15 today): the bundle's libraries are Homebrew
+#     bottles, which Homebrew builds against the macOS they were bottled
+#     on, so the dmg cannot run below the runner's macOS whatever the plist
+#     declares. The two numbers move together when the image retires; the
+#     README's macOS section states the resulting minimum.
 #   - The Linux job runs plain flatpak-builder on the Ubuntu host rather
 #     than the flatpak-github-actions builder action: fewer third-party
-#     moving parts, and the steps mirror the local BANCHAN recipe exactly,
-#     so the job doubles as documentation. The host distro is irrelevant to
-#     the artifact: everything builds against org.kde.Platform//6.11 inside
-#     the Flatpak sandbox, and the bundle is distro-agnostic by
-#     construction (x86_64 only, matching the runner; the release notes
-#     say so rather than implying otherwise).
+#     moving parts, and the steps mirror the manifest header's local recipe
+#     exactly, so the job doubles as documentation. The host distro is
+#     irrelevant to the artifact: everything builds against
+#     org.kde.Platform//6.11 inside the Flatpak sandbox, and the bundle is
+#     distro-agnostic by construction (x86_64 only, matching the runner;
+#     the release notes say so rather than implying otherwise).
 #   - flatpak-builder runs from a scratch directory outside the workspace,
 #     for the same reason the manifest header mandates it locally: the tool
 #     drops state and stray ref-named files into the CWD, and the
@@ -42,11 +59,12 @@
 #   - Plain `gh release create` over a marketplace release action: less
 #     third-party surface, and the runner ships gh preinstalled.
 #
-# Dry-run protocol: push a throwaway pre-release tag (e.g. vX.Y.Z-rc1) to
-# exercise the whole workflow end to end, inspect the draft's assets, then
-# delete both the tag and the draft. Artifact names derive from
-# ui/VERSION.txt, not the tag, so a dry run on an rc tag still emits files
-# named after the release version; fine for something being thrown away.
+# Dry-run protocol: push a throwaway pre-release tag (e.g. vX.Y.Z-rc1, with
+# X.Y.Z equal to ui/VERSION.txt so preflight accepts it) to exercise the
+# whole workflow end to end, inspect the draft's assets, then delete both
+# the tag and the draft. Artifact names derive from ui/VERSION.txt, not the
+# tag, so a dry run on an rc tag still emits files named after the release
+# version; fine for something being thrown away.
 # `gh release create` fails if a release for the tag already exists, so
 # delete the previous draft before re-running a failed publish on the same
 # tag.
@@ -63,9 +81,35 @@ permissions:
   contents: write
 
 jobs:
+  preflight:
+    name: Tag matches ui/VERSION.txt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The tag minus its leading v must equal VERSION.txt exactly, or be
+      # VERSION.txt followed by a hyphenated pre-release suffix.
+      - name: Compare the tag with ui/VERSION.txt
+        run: |
+          VERSION="$(tr -d '[:space:]' < ui/VERSION.txt)"
+          TAG="${GITHUB_REF_NAME#v}"
+          case "$TAG" in
+            "$VERSION")
+              echo "tag $GITHUB_REF_NAME matches ui/VERSION.txt ($VERSION)" ;;
+            "$VERSION"-*)
+              echo "pre-release tag $GITHUB_REF_NAME for version $VERSION (dry run)" ;;
+            *)
+              echo "error: tag $GITHUB_REF_NAME does not match ui/VERSION.txt ($VERSION)" >&2
+              exit 1 ;;
+          esac
+
   macos-dmg:
     name: macOS dmg (arm64)
-    runs-on: macos-latest
+    needs: preflight
+    # Pinned image: its macOS major is the dmg's real floor (header note).
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -84,7 +128,7 @@ jobs:
       # both CMake and macdeploy.sh. macdeploy's outside-the-bundle report
       # prints at the end of this step's log; READ IT on the first run.
       - name: Build release dmg
-        run: make -j"$(sysctl -n hw.ncpu)" BUILD_TYPE=Release dmg
+        run: make -j"$(sysctl -n hw.ncpu)" BUILD_TYPE=Release RAWFORM_FFMPEG=on dmg
 
       - name: Collect artifact
         run: |
@@ -101,6 +145,7 @@ jobs:
 
   linux-flatpak:
     name: Linux Flatpak bundle (x86_64)
+    needs: preflight
     runs-on: ubuntu-latest
     # Cold builds compile FFmpeg from source inside the sandbox; warm runs
     # (state cache hit) finish in a fraction of this.
@@ -234,9 +279,9 @@ jobs:
           cat sha256sums.txt
 
       # The body is the CHANGELOG section for the version in
-      # ui/VERSION.txt (not the tag: a dry-run rc tag still gets the
-      # 1.0.0 section). Empty extraction is a hard failure: it means the
-      # CHANGELOG heading and VERSION.txt disagree.
+      # ui/VERSION.txt (not the tag: a dry-run rc tag gets the release's
+      # own section, the one VERSION.txt names). Empty extraction is a hard
+      # failure: it means the CHANGELOG heading and VERSION.txt disagree.
       - name: Extract release notes from CHANGELOG
         run: |
           VERSION="$(tr -d '[:space:]' < ui/VERSION.txt)"
