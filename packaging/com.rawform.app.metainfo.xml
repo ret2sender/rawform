@@ -30,13 +30,14 @@
       Features include gapless playback, tabbed playlists with per-tab
       persistence, tag editing via TagLib, ReplayGain scanning and playback
       with clip prevention, a spectrum display, output device selection, and
-      honest bit-perfect reporting down to the driver's realized format on
-      PipeWire.
+      honest bit-perfect reporting that follows the driver's realized rate
+      and format and the system mixer's volume on PipeWire.
     </p>
   </description>
   <launchable type="desktop-id">com.rawform.app.desktop</launchable>
   <url type="homepage">https://github.com/ret2sender/rawform</url>
   <url type="bugtracker">https://github.com/ret2sender/rawform/issues</url>
+  <url type="vcs-browser">https://github.com/ret2sender/rawform</url>
   <developer id="io.github.ret2sender">
     <name>Etienne Fleurant</name>
   </developer>
@@ -53,18 +54,23 @@
   <!--
     Screenshot URLs must be reachable by catalog builders, so they point at
     raw.githubusercontent.com rather than the repository tree. The path is
-    pinned to the v1.0.0 tag, not main, so renaming or replacing the image
+    pinned to a release tag, not main, so renaming or replacing the image
     later can never break metadata that catalogs have already ingested; a
-    future release that wants a new screenshot updates the URL and the tag
-    together.
+    release that wants a new screenshot updates the URL and the tag
+    together, and the image must be committed before that tag is pushed.
   -->
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/ret2sender/rawform/v1.0.0/docs/images/rawform_interface_screenshot.png</image>
+      <image>https://raw.githubusercontent.com/ret2sender/rawform/v1.4.0/docs/images/rawform_interface_screenshot.png</image>
       <caption>Main window with tabbed playlists, album art, and metadata panel</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.4.0" date="2026-10-20">
+      <description>
+        <p>The audit release: output failures, decode damage and underruns are reported instead of swallowed; the bit-perfect claim covers the system volume and the device depth; the window chrome is keyboard-reachable with accessibility roles; large playlist edits, Find indexing and playlist checks no longer stall the window; startup creates less before the first frame; the PipeWire handshake no longer delays the window; the spectrum display pauses while hidden and offers a 30 Hz refresh rate; the macOS bundle declares its minimum system version; the Flatpak reads GVFS locations.</p>
+      </description>
+    </release>
     <release version="1.3.0" date="2026-10-05">
       <description>
         <p>Add the Playback Queue (cross-playlist play-next list as a tab), run every UI test in CI by label, and hint shortcuts in the row menu</p>
@@ -85,7 +91,7 @@
         <p>Keyboard shortcuts for playback and playlist commands, keyboard seeking with an on-screen step indicator, resizable Settings and Custom Columns windows, and fixes for playlist scrollbar sizing and album art memory growth.</p>
       </description>
     </release>
-    <release version="1.0.0" date="2026-09-02">
+    <release version="1.0.0" date="2026-09-12">
       <description>
         <p>Initial release.</p>
       </description>

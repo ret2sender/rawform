@@ -5,6 +5,182 @@ All notable changes to rawform are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-20
+
+The audit release: four passes over the 1.3.0 tree (the audio engine, the
+interface, performance, and the project's own metadata and documentation),
+their findings fixed. Output failures and decode damage are reported instead
+of swallowed, the bit-perfect claim covers the whole output path, the window
+chrome is keyboard-reachable, large playlists edit in milliseconds, startup
+builds less before the first frame, and the README describes the application
+that ships.
+
+### Added
+
+- Output failures end the listening session instead of leaving the player in
+  Playing: a selected device that disappears, a stream that errors, a lost
+  PipeWire connection, or a device that silently stops consuming (a 10 s
+  watchdog, `RAWFORM_OUTPUT_STALL_MS`, 0 disables) stops playback with an
+  error line in the console. When following the system default, a device
+  that disappears hands playback to the new default at the listening
+  position, as before.
+- Decode damage is reported: a damaged FLAC or FFmpeg-decoded track keeps
+  playing, and the number of recovered errors (and frames lost, for exact
+  sources) is reported when the track ends; a track that ends early is
+  reported as truncated; a decoder failure names its reason.
+- Underruns are reported as they happen ("underrun: N frames of silence
+  inserted") and summed in the CLI's completion line.
+- The output claim now covers the whole path: "(Volume Adjusted by
+  PipeWire)" / "(Volume Adjusted by System)" when a software volume or mute
+  outside rawform is on the samples, "(N-bit source, M-bit output)" when the
+  device is fed fewer bits than the source carries; "(Bit Perfect)" means
+  none of that applies. The claim follows the system mixer live.
+- Multichannel and mono tracks declare their speaker positions to the
+  output: on PipeWire a 5.1 track downmixes to a stereo device with its
+  center and surrounds, and mono reaches both speakers on both platforms.
+- An ID3v2-tagged file is routed by the bytes after the tag, so a tagged AAC
+  or FLAC goes to the right decoder.
+- Keyboard reach for the window chrome: dialog buttons, the segmented
+  selectors, the Properties tabs and the Settings navigation are Tab stops
+  with arrow-key movement; Enter runs OK in Settings, Properties and Rename
+  Files; Ctrl+Tab / Ctrl+Shift+Tab cycle playlist tabs; the seek bar, the
+  volume bar and the mute readout take keyboard focus. Controls carry
+  accessibility roles and names (buttons, radio groups, page tabs, sliders).
+- File > Quit (Ctrl+Q) on Linux and Windows.
+- Settings > Spectrum view > Refresh rate: 60 Hz (the default) or 30 Hz,
+  which halves the work the spectrum display costs while a track plays; the
+  bars settle at the same speed at both. Stored as `refresh_hz` in
+  `spectrum.yaml`.
+- Three UI unit tests (the Properties apply sequencer, the playlist model's
+  bulk edits, the worker-result release helper), bringing the tree to
+  seventeen test binaries: nine engine, eight UI.
+- `docs/macos-audio.md`: what the CoreAudio backend does to the device's
+  sample rate, when it is restored, and what the crash ledger is for. The
+  README now links it, `docs/linux-audio.md` and `docs/KEYBOARD_SHORTCUTS.md`.
+
+### Changed
+
+- Turning the bit-perfect rate policy off now gives the device its own rate
+  back at the next track; the Settings text describes this on both
+  platforms.
+- Changing the output device while playing resumes at the listening
+  position without playing the start of the track first; a paused player
+  stays paused.
+- Seeking during the last moments of a track in a gapless sequence now
+  announces the track that actually plays.
+- Startup does less work before the first frame: the QML front end is
+  loaded through a plain engine without the file-selector probing of every
+  resource path (about 130 million fewer instructions, a fifth of the
+  instructions to the first frame), and the Settings, Find and About
+  windows, the Custom Columns manager, the file dialogs, the playlist's
+  context menus and the frosted popup backdrops are created the first time
+  they are opened (about a sixth fewer instructions spent creating the user
+  interface at launch, measured).
+- On Linux, connecting to the PipeWire daemon no longer waits on it before
+  the window appears (about 40 ms, measured, and up to 4 s when the daemon
+  is slow to answer); the first play waits instead, where it already did.
+- Deleting many scattered rows from a large playlist, or dragging a large
+  block, completes in milliseconds instead of seconds (a many-run removal is
+  applied in one pass; a block move is one rotation).
+- Clicking or arrowing through a playlist no longer rewrites its live
+  playlist file after every pause; the focus row is saved with the next
+  edit, when you switch tabs, and at quit.
+- Checking a large playlist against disk (at load, and Reload info from
+  file(s)) applies its results in short batches, so the window keeps
+  rendering during the pass.
+- The Find dialog builds its search index on a worker thread; typing the
+  first letter over a large playlist no longer stalls the window.
+- Scanning reads each FLAC once instead of three times, and reads a few
+  tens of kilobytes of an MP3 to find its first frame instead of half a
+  megabyte (about nine times fewer bytes over an MP3 library, measured).
+- Album covers that are JPEGs with dimensions divisible by four decode
+  straight to the size the art pane needs, without a resampling pass.
+- The spectrum display pauses while the window is minimized, hidden or
+  fully covered, and resumes when it is shown again; it no longer analyzes
+  audio for a window nobody can see.
+- The spectrum bars are drawn as one item instead of twenty, with uniform
+  widths and an antialiased top edge; the spectrum's FFT runs as a
+  real-input transform (half the arithmetic per tick).
+- An open menu no longer re-renders and re-blurs what is behind it on every
+  frame while a track plays; the frosted backdrop is a still of the moment
+  the menu opened.
+- The playlist draws its playing marker and current-row outline once per
+  row instead of in every cell.
+- The playlist's Modified and Created columns show ISO dates
+  (yyyy-MM-dd HH:mm:ss), the same form as the Properties Details tab.
+- Lengths over an hour read h:mm:ss in the playlist and in Properties.
+- The app no longer links Qt Widgets.
+- The build requires CMake 3.28 instead of 4.2; CI uses the distribution's
+  CMake instead of a PyPI download.
+- The macOS bundle declares its minimum system version (macOS 15), the
+  Music category, a copyright string, and folder-access prompts that say
+  what rawform wants with the folder; the release image is built on a
+  pinned macOS 15 runner so the bundled libraries honor that floor.
+- The desktop entry no longer advertises file arguments (`Exec=rawform`):
+  rawform does not read its command line yet, and the entry said otherwise.
+  It gains launcher keywords and startup notification.
+- Flatpak: the sandbox can read the per-user GVFS tree (`xdg-run/gvfs`), so
+  a file dropped from an `smb://` or `sftp://` location in GNOME or KDE
+  opens; both release builds now require FFmpeg at configure time instead
+  of probing for it, so a detection miss fails the build rather than
+  shipping a native-only release.
+- The release workflow checks the pushed tag against `ui/VERSION.txt`
+  before building (a `-rc` suffix is allowed for dry runs).
+- README: Usage now covers Add files / Add folder, Reload info and missing
+  tracks, the Properties tabs and tools as they are, Rename Files, the
+  spectrum options, the log console, every Settings page (Playback,
+  ReplayGain, Spectrum view, Tagging / MP3 and what its defaults write),
+  the Flatpak-shipped `rawform_audio_cli`, the `rawform.perf` logging
+  category and the environment knobs; Supported formats lists `spx` and
+  places Ogg Vorbis and Opus with the FFmpeg decoders, where the shipped
+  builds decode them. `REUSE.toml` records the license of every asset
+  without a header of its own.
+
+### Fixed
+
+- The rate decision after a declined in-place device reconfigure was made
+  against the device's pre-restore rate and could open without the needed
+  switch.
+- Several formal data races and shutdown-order hazards found under
+  ThreadSanitizer (engine shutdown destroying the command queue before the
+  sink; the visualization tap; the PipeWire io position pointer; the
+  engine-to-GUI callback handoff; the ring swap against the device thread's
+  last pull).
+- CoreAudio: a rate switch that lands on a rate other than its target is
+  now recorded as a debt and restored at close; the device listeners are
+  installed before the open's own switch so it is never mistaken for an
+  external change.
+- The macOS "Audio MIDI Setup" wording no longer appears on Linux.
+- The main window opens centered on the primary screen and never larger
+  than its available area; a saved position is kept as is, and resizing no
+  longer moves the window on X11, Windows and macOS.
+- A preset, custom-column or column-layout write that fails is reported
+  (status line or console) instead of a silent "saved"; an unreadable
+  playlist file titles its tab "Unreadable playlist" with a warning in the
+  console.
+- Editing a track in Properties after Stop no longer logs "Stopped
+  playback" for a track that was not playing.
+- Touchpad scrolling over the volume bar moves it a few steps instead of to
+  an end; a horizontal scroll leaves it alone.
+- The Custom Columns Align picker uses the app's own combo box (it painted
+  light under a light system theme).
+- Speex (.spx) files can be added through Add files and the drop targets.
+- Restoring a session whose active playlist file had vanished no longer
+  activates the wrong tab.
+- After a Playback Queue entry started and left the queue, the current-row
+  outline could sit on the wrong row (or on no row) until the next click.
+- The metainfo dated the 1.0.0 release 2026-09-02; the tag is dated
+  2026-09-12, as this file already said.
+- The 1.0.0 entry below described Properties tools, a pane and a shortcut
+  that never existed; it now describes the release it documents.
+
+### Removed
+
+- The dead rate-gate fields (`needsDeviceReconfigure`, `keepSink`) and the
+  `rates` command's `reconfigure:` line.
+
+[1.4.0]: https://github.com/ret2sender/rawform/releases/tag/v1.4.0
+
 ## [1.3.0] - 2026-10-05
 
 The playback queue: a cross-playlist "play these next" list, shown as a tab
@@ -60,8 +236,14 @@ of its own.
 
 ## [1.2.1] - 2026-10-03
 
-Trim the heap after a tool window closes (HeapTrim singleton, glibc only).
+One change: the memory a tool window used is returned to the system when it
+closes.
 
+### Changed
+
+- Trim the heap after a tool window closes (HeapTrim singleton, glibc only).
+
+[1.2.1]: https://github.com/ret2sender/rawform/releases/tag/v1.2.1
 
 ## [1.2.0] - 2026-10-02
 
@@ -189,10 +371,10 @@ fixed.
 - Album art memory growth on Linux while browsing across albums. Covers
   decode straight to the display bound instead of at full size (a 3000x3000
   embedded JPEG is 36 MB as ARGB32), the art frame holds exactly one decoded
-  cover (pixmap cache off), glibc's mmap threshold is pinned so image-sized
-  transients return to the OS, and the heap is trimmed after each scan so a
-  large library load no longer leaves its peak resident. macOS was not
-  affected.
+  cover (pixmap cache off), and glibc's mmap threshold is pinned so
+  image-sized transients return to the OS. macOS was not affected.
+- A large library load left its peak resident on Linux: the heap is trimmed
+  after each scan so the memory the scan used goes back to the system.
 - Build: qmlcachegen's generated sources no longer inherit `-Werror`. Their
   content varies with the Qt version that produced them, and a CI image on a
   different Qt than the workstation failed on code nobody in the tree wrote.
@@ -218,8 +400,9 @@ at this release.
   (AAC, ALAC, WMA, AC3, DTS, ...). Native decoders are always tried first;
   the file's leading bytes pick the cascade and the extension only biases
   the order.
-- Gapless playback, sample-accurate seeking, and a `playNow` primitive that
-  makes playback follow the playlist.
+- Gapless playback, frame-accurate seeking (bit-exact on PCM and FLAC; the
+  lossy decoders resume at the frame, not the sample), and a `playNow`
+  primitive that makes playback follow the playlist.
 - Bit-perfect rate management: the output device follows each track's native
   sample rate when the hardware supports it, with a nearest-best fallback,
   and the published status always reports what the device is actually doing.
@@ -255,12 +438,12 @@ at this release.
 
 ### Metadata and Properties
 
-- Multi-instance, non-modal Properties windows (metadata, ReplayGain, and
-  Location panes) with tag editing written back through TagLib and
+- Multi-instance, non-modal Properties windows (Metadata, Details, and
+  ReplayGain tabs) with tag editing written back through TagLib and
   cross-window write serialization so concurrent edits cannot interleave.
 - Metadata transforms (capitalize, clean up, crop, automatic track
-  numbering), clipboard support, and a Tools menu with Reload info, Rewrite
-  tags, Remove tags, and an MP3-only Optimize size.
+  numbering), clipboard support, and a Tools menu with Add new field, Auto
+  track number, Remove tags, the ReplayGain scans, and Reload info.
 - ReplayGain scanning stages track and album gains for review before
   anything is written, with multi-album selections bucketed automatically;
   playback applies the gains with clip prevention.
@@ -276,7 +459,9 @@ at this release.
   profile on Linux), window geometry persistence including saved sizes for
   the tool windows, and adaptive context menus.
 - Keyboard-friendly by design: two-stage Escape, Alt+Enter for Properties,
-  and Ctrl+F / Ctrl+P / Ctrl+Enter playlist reveal shortcuts, among others.
+  the Ctrl+F / Ctrl+P playlist reveal shortcuts (reassigned in 1.1.0 and
+  1.2.0), and Enter to play the current row, centering it when it is off
+  screen, among others.
 
 ### Platform and packaging
 
