@@ -16,7 +16,26 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-cmake_minimum_required(VERSION 4.2)
+# 3.28 is the oldest CMake this tree is verified to configure and build with
+# (Qt 6.11's own floor for consumer projects is 3.22; cmake_path below needs
+# 3.20). The ...4.2 upper bound sets every policy introduced up to 4.2 to NEW
+# on a newer CMake, so a 4.x host behaves exactly as the tree was developed
+# against, with no policy warnings; a 3.28 host sees only the policies it
+# knows.
+cmake_minimum_required(VERSION 3.28...4.2)
+
+# ---------------------------------------------------------------------------
+# macOS deployment target
+# ---------------------------------------------------------------------------
+# Read by project(), so it must be set before it; ignored off Darwin. The
+# value is the floor the DISTRIBUTED bundle honors, not Qt's own (13): the
+# dylibs macdeploy copies in are Homebrew bottles, built against the macOS
+# they were bottled on, and the release workflow pins its runner to the same
+# major (release.yml, macos-15). Declaring a lower floor would put a number
+# in LSMinimumSystemVersion that the bundled libraries cannot keep. A cache
+# entry, so a local build may override it on the command line.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING
+    "Minimum macOS version the bundle declares and the compiler targets")
 
 # ---------------------------------------------------------------------------
 # Project version
@@ -336,13 +355,23 @@ qt_add_executable(rawform
 # no separate build counter. Both flow from ui/VERSION.txt via project().
 # CLion keeps working unchanged: it resolves bundle targets to the inner
 # executable (rawform.app/Contents/MacOS/rawform) when running and debugging.
+#
+# The Info.plist comes from the project's own template
+# (packaging/macos/Info.plist.in, Qt's cmake/macos/Info.plist.app.in plus
+# the application category and the folder-access usage strings), configured
+# by CMake with the MACOSX_BUNDLE_* properties below and the deployment
+# target set at the top of this file. Without a template of its own, Qt
+# applies its template, which carries none of those additions.
 if(APPLE)
     set_target_properties(rawform PROPERTIES
             MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_INFO_PLIST
+                "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/macos/Info.plist.in"
             MACOSX_BUNDLE_BUNDLE_NAME "rawform"
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.rawform.app"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
             MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_COPYRIGHT "Copyright (C) 2026 Etienne Fleurant"
             # CFBundleIconFile. The value is the file NAME inside the bundle's
             # Resources directory, not a path; the file itself is packaged by
             # the target_sources + MACOSX_PACKAGE_LOCATION pair below. This is

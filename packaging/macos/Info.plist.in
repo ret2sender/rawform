@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  This file is part of rawform.
+  Copyright (C) 2026 Etienne Fleurant
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  Info.plist template for the macOS bundle, named by MACOSX_BUNDLE_INFO_PLIST
+  in ui/CMakeLists.txt and configured by CMake at generate time: every
+  ${...} is a MACOSX_BUNDLE_* target property or CMAKE_OSX_DEPLOYMENT_TARGET.
+  The first part is Qt's own cmake/macos/Info.plist.app.in, key for key, so
+  the bundle keeps everything Qt's deployment expects; the keys after it are
+  the project's additions. The usage descriptions are what macOS shows in
+  its folder-access prompt the first time rawform reads music from one of
+  those locations (a non-sandboxed app still gets the prompt; without a
+  description the system's generic wording appears instead).
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>${MACOSX_BUNDLE_COPYRIGHT}</string>
+
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleAllowMixedLocalizations</key>
+    <true/>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+
+    <!-- Project additions. -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.music</string>
+
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>rawform reads the music files you add from your Desktop folder.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>rawform reads the music files you add from your Documents folder.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>rawform reads the music files you add from your Downloads folder.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>rawform reads the music files you add from external drives.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>rawform reads the music files you add from network volumes.</string>
+</dict>
+</plist>
