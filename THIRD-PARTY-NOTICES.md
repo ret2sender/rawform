@@ -10,6 +10,8 @@ project, grouped by which component depends on them, followed by a section
 per packaged distribution describing what each one actually ships. Every
 listed open-source license is compatible with GPLv3; the one proprietary item
 (Segoe Fluent Icons, below) is not bundled and is called out separately.
+The same provenance is recorded per file, machine-readably, in `REUSE.toml`
+at the repository root for every asset that carries no header of its own.
 
 ---
 
@@ -35,7 +37,7 @@ The full license text for each font ships alongside the font files in
 
 - **Inter** - `ui/Sources/fonts/Inter-*.ttf` (variable fonts, upright and
   italic)
-  Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
   SIL Open Font License, Version 1.1 - see `ui/Sources/fonts/Inter_OFL.txt`.
 
 - **JetBrains Mono** - `ui/Sources/fonts/JetBrainsMono-*.ttf` (variable
@@ -106,7 +108,8 @@ carry no third-party obligation:
 - the caption-control icons in `ui/Sources/icons/default/` (an original
   variation of the maximize / minimize / close / restore set);
 - the tool-dialog close glyph
-  `ui/Sources/icons/app/dialogs/tool_dialog_close_x.svg`;
+  `ui/Sources/icons/app/dialogs/tool_dialog_close_x.svg` and the combo box
+  indicator `ui/Sources/icons/app/dialogs/double_arrow.svg`;
 - the transport-control glyphs in `ui/Sources/icons/app/track_controls/`;
 - the application logo mark (the waveform glyph), shipped as
   `ui/Sources/icons/app/rawform.svg`, the derived `rawform.icns` and
@@ -268,7 +271,8 @@ Notes:
   therefore part of the corresponding source for this component.
 - **FFmpeg is built only with its internal codecs.** The Flatpak configures
   FFmpeg with `--enable-gpl --enable-version3 --enable-shared
-  --disable-programs --disable-doc` and no external codec libraries, so
+  --disable-programs --disable-doc --disable-ffnvcodec` and no external
+  codec libraries, so
   unlike the macOS bundle it carries no x264, x265, SVT-AV1, libvpx, dav1d,
   Opus or LAME. The GPL flags are kept for parity with the macOS posture and
   the project's outbound license.

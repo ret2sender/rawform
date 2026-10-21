@@ -18,10 +18,20 @@ rawform's stream exists, and lifts the moment the stream goes away, including
 if rawform is killed. There is no state to clean up and no configuration to
 restore; the daemon does it structurally.
 
-The player bar tells the truth about the outcome: "(Bit Perfect)" when the
-graph genuinely clocks the track's rate, "(Resampled to N Hz)" when PipeWire's
-resampler is bridging. The rate shown is measured from the live graph clock,
-not assumed from the request.
+The player bar tells the truth about the outcome. "(Bit Perfect)" means the
+graph genuinely clocks the track's rate (measured from the live graph clock,
+not assumed from the request), no software volume or mute outside rawform is
+applied to the samples, the output node is fed at least the track's bit
+depth, and rawform's own gain is at unity. Otherwise the bar names what
+applies, in this order of precedence: "(Resampled to N Hz)" when PipeWire's
+resampler is bridging; "(Volume Adjusted by PipeWire)" when rawform's stream
+or the sink node carries a soft volume or mute (the per-application sliders
+in a mixer such as pavucontrol or the Plasma applet are exactly that);
+"(N-bit source, M-bit output)" when the sink node's negotiated format has
+fewer bits than the track. Both the volume and the format are watched live
+on the target node's Props and Format parameters, so moving a mixer slider
+while a track plays changes the claim at once, and a console line records
+each change.
 
 Notes on the mechanism:
 
@@ -104,10 +114,14 @@ the graph.
   graph's own rate.
 - rawform's log console (the `>` prompt on the status line under the
   playlist opens it) narrates every rate decision, switch, confirmation,
-  external change, and device event.
+  external change, device event and output-alteration change, and reports
+  output failures ("output failed: ..."), underruns ("underrun: N frames of
+  silence inserted") and decode damage as they happen.
 - `RAWFORM_PW_PODS=1 rawform_audio_cli rates` dumps the raw EnumFormat pod
   inventory of the resolved output device: what the driver actually
-  advertises, before any interpretation.
+  advertises, before any interpretation. Inside the Flatpak the CLI ships
+  beside the app:
+  `flatpak run --env=RAWFORM_PW_PODS=1 --command=rawform_audio_cli com.rawform.app rates`.
 
 ## Crash recovery
 

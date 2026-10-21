@@ -1,7 +1,7 @@
 # Keyboard shortcuts
 
 All shortcuts rawform responds to, by where they apply. `Ctrl` is `Cmd` on
-macOS throughout, with the two exceptions noted in their rows.
+macOS throughout, with the exceptions noted in their rows.
 
 Two scopes matter:
 
@@ -26,15 +26,23 @@ keys: Space types a space, Left/Right move the caret, Ctrl+A/C/V edit text.
 | `Q` | Add the selected tracks to the end of the Playback Queue | Main window |
 | `Shift+Q` | Play Next: put the selected tracks at the front of the Playback Queue | Main window |
 | `Ctrl+Shift+Q` | Show or hide the Playback Queue tab | Main window |
-| `Right` | Seek forward 5 s | Playlist |
-| `Left` | Seek back 5 s | Playlist |
+| `Right` | Seek forward 5 s | Playlist, seek bar |
+| `Left` | Seek back 5 s | Playlist, seek bar |
+| `Home` | Rewind to the start | Seek bar |
 | `Enter` | Play the current (focus) row from the start, centering it if it is off screen. In a playlist this also clears the Playback Queue; in the queue tab it plays that entry now and drops the entries above it | Playlist |
+| `Up` / `Right` and `Down` / `Left` | Volume up / down by 5 percent | Volume bar |
+| `Home` / `End` | Volume to silence / to full | Volume bar |
+| `Space` | Mute / unmute | Mute readout |
 
 Seek keys repeat while held and compound: each press adds 5 s to the target,
 the engine is asked at most every 150 ms, and a badge above the fill's tip
 shows the running total ("+15") until it fades. Seeking works while paused and
 leaves playback paused at the new spot. A press that moves nothing (Left at
 0:00, Right at the end) does nothing.
+
+The seek bar, the mute readout and the volume bar are Tab stops after the
+playlist, in that order; the rows marked with them above apply while one of
+them has keyboard focus (a focus ring shows which).
 
 Media keys (Play/Pause, Previous, Next on a keyboard's function row) are not
 handled yet. On KDE, GNOME and macOS the desktop grabs them and routes them
@@ -48,6 +56,8 @@ through MPRIS, which rawform does not expose yet; that is planned.
 | `Ctrl+O` | Open playlist... | Main window |
 | `Ctrl+S` | Save playlist... (save as) | Main window |
 | `Ctrl+W` | Close the active playlist tab. Closing the last tab leaves a fresh empty one | Main window |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous playlist tab, wrapping at both ends. On macOS this is `Control+Tab` / `Control+Shift+Tab` (the Control key, not Cmd: Cmd+Tab is the application switcher) | Main window |
+| `Ctrl+Q` | Quit (Linux and Windows; on macOS, Cmd+Q from the application menu as usual) | Main window |
 | `Ctrl+F` | Find... (search the active playlist) | Main window |
 | `Ctrl+P` | Settings... (also `Cmd+P` on macOS, not `Cmd+,`) | Main window |
 | `Alt+F` / `Alt+E` / `Alt+V` / `Alt+P` / `Alt+H` | Open (or close) the File / Edit / View / Playback / Help menu | Anywhere in the app |
@@ -93,13 +103,24 @@ ReplayGain tab: `Ctrl+A` selects all rows, `Escape` clears the selection or
 closes the window. Inside a value editor, `Enter` commits and `Escape`
 discards.
 
+## Find dialog
+
+| Key | Action |
+| --- | --- |
+| `Enter` / `Shift+Enter` | Step the current row to the next / previous match (from the String field) |
+| `Escape` | Close the dialog; every row shows again |
+
 ## Other windows
 
 | Key | Action |
 | --- | --- |
 | `Escape` | Settings: discard unapplied changes and close. About, Rename Files: close. Custom Columns: clear the selection, then close (edits there are live). Log console: hide it. Edit Value dialog: cancel |
 | `Ctrl+A` / `Ctrl+C` / `Ctrl+V` | Edit Value dialog: select all / copy / paste in the value field |
-| `Enter` | Edit Value dialog and the ReplayGain settings fields: commit |
+| `Enter` | Settings, Properties (outside the Metadata field list) and Rename Files (also from the pattern field): run OK. Edit Value dialog and the ReplayGain settings fields: commit |
+| `Tab` / `Shift+Tab` | Move between the dialog's controls: the footer buttons, the segmented selectors, the Properties tab strip, the Settings navigation. On macOS, Tab reaches buttons only with System Settings > Keyboard > Keyboard navigation turned on (the platform rule) |
+| `Space` | Activate the focused button |
+| `Left` / `Right`, `Home` / `End` | On a focused segmented selector: pick the previous / next, first / last choice. On the Properties tab strip: previous / next tab |
+| `Up` / `Down` | On the Settings navigation: previous / next page |
 
 ## Mouse gestures
 
@@ -109,7 +130,7 @@ Playlist rows: click selects; `Ctrl`+click toggles a row; `Shift`+click selects
 a range from the anchor; `Ctrl+Shift`+click adds a range; double-click plays the
 row (clearing the Playback Queue; in the queue tab it jumps the line instead);
 drag moves the selected rows; right-click opens the row menu (Add to Playback
-Queue, Play Next, Reload info, Rename files, Properties, ...). Header: drag
+Queue, Play Next, Reload info, Rename Files, Properties, ...). Header: drag
 reorders columns, drag the edge resizes, right-click opens the column menu.
 
 Tabs: click switches; double-click the title renames (not the Playback Queue
@@ -119,5 +140,5 @@ Queue tab hides it with its contents intact. Dropping files on the strip makes
 a new tab for them.
 
 Player bar: click or drag the progress bar to seek (one seek, on release);
-click the volume percentage to mute / unmute; wheel over the volume slider
-adjusts it.
+click the volume percentage to mute / unmute; wheel or two-finger scroll over
+the volume slider adjusts it a step at a time.
