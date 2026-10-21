@@ -24,21 +24,32 @@ CLI and tests are built only in a standalone engine build (`make core`).
 
 ## Usage
 
-Tracks are added to playlists by drag and drop from Finder or your file
-manager. Dropping onto the active playlist appends there; dropping onto the
-tab bar opens a new tab. What lands depends on what you drop:
+The interface is English only. The main window needs at least 960 x 600
+logical pixels; on a smaller screen it is clamped to the available area
+but does not shrink below that.
 
-- **Audio files** are appended in order.
+Tracks are added to playlists by drag and drop from Finder or your file
+manager, or with File > Add files (which appends the chosen files to the
+active playlist) and File > Add folder (which opens the folder in a new tab
+named after it). Dropping onto the active playlist inserts at the drop
+position (at the end while a Find filter is active, or when the drop lands
+below the last row); dropping onto the tab bar opens a new tab. What lands
+depends on what you drop:
+
+- **Audio files** are inserted in order.
 - **Folders** are walked recursively, picking up every supported audio file
   in every subfolder.
 - **`.m3u` / `.m3u8` playlists** are expanded into their entries.
 - **`.rwfpl` files** (rawform's own playlist format) each open in their own
   new tab.
 
-Playlists live in tabs. Each tab is continuously persisted,
-so quitting and relaunching restores every tab, in order, with the active tab
-selected. Playlists can also be saved to and opened from `.rwfpl` files
-explicitly.
+Playlists live in tabs. Each tab is continuously persisted, so quitting and
+relaunching restores every tab, in order, with the active tab selected; the
+focus row is written with the next edit, when you switch tabs, and at quit.
+Playlists can also be saved with File > Save playlist and opened with File >
+Open playlist. The Save dialog defaults to M3U, which other players read but
+which drops the column layout and the positions; the `.rwfpl` choice keeps
+them.
 
 Right-clicking a playlist's column header manages columns, including custom
 columns defined with a `%pattern%` syntax in the Custom
@@ -66,22 +77,78 @@ searched. Invalid entries are underlined. Filter expressions can be saved as
 named presets. Enter and Shift+Enter step through the matches; closing the
 dialog shows every row again.
 
-Selecting tracks and opening **Properties** shows a non-modal
-window (metadata, ReplayGain, Location panes); several can be open
-at once, and tag edits are written back through TagLib. The Tools menu offers
-Reload info, Rewrite tags, Remove tags, and an MP3-only Optimize size.
+Selecting tracks and opening **Properties** (right-click > Properties, or
+`Alt+Enter`) shows a non-modal window with three tabs: Metadata (the editable
+tag fields), Details (file name, folder, path, size, dates, duration, sample
+rate, channels and the other read-only facts) and ReplayGain. Several can be
+open at once, and tag edits are written back through TagLib on Apply or OK.
+The Tools menu offers Add new field, Auto track number, Remove tags, the
+ReplayGain scans, and Reload info.
+
+Tracks are read from disk once and kept in the playlist, so a file edited in
+another application or deleted between sessions is stale until it is
+checked. A playlist is checked against disk when it loads, and the rows of
+the current selection are checked as you move through them; Edit > Reload
+info from file(s) (also in the row menu) forces a re-read of the selection,
+or of the whole playlist when nothing is selected. A file that is gone is
+grayed in place and keeps its row; Edit > Remove missing tracks (also in the
+row menu) drops every grayed row of the active playlist.
 
 **ReplayGain scanning** measures BS.1770 loudness with libebur128 and stages
 track and album gains into the Properties window before anything is written.
 Multi-album selections are bucketed into albums automatically.
 
-The **spectrum viewer** renders a log-banded FFT of either the output or the
-source signal; the **player bar** shows the codec, bitrate, sample rate, and
-whether output is currently bit perfect or resampled.
+**Rename Files** (File Operations > Rename to... in the row menu) renames the
+selected files from a `%pattern%` expression in the custom column syntax,
+with a preview per file and saveable pattern presets.
+
+The **spectrum view** renders a log-banded FFT of either the output or the
+source signal at 60 Hz or 30 Hz (Settings > Spectrum view); it pauses while
+the window is minimized, hidden or fully covered and resumes when the window
+is shown again, while the track keeps playing. The **player bar** shows the
+codec, bitrate, sample rate, and whether output is currently bit perfect or
+what alters it.
+
+The status line under the playlist carries the latest event; its `>` prompt
+opens the **log console**, which narrates the session: every rate decision,
+switch and confirmation, device events, output failures, decode damage and
+underruns, and what every write and reload did.
+
+**Settings** (Edit > Settings, `Ctrl+P`) has three pages, two of them with
+a sub-section. Playback holds the output device picker (Follow system
+default, or a pinned device remembered across launches) and the bit-perfect
+switch; its ReplayGain sub-section holds the mode (Off, Track, Album), the
+two pre-amps, clip prevention and whether scans skip files that already
+carry values. Spectrum view holds the analyzer source (Output or Source) and
+the refresh rate. Tagging / MP3 decides what a tag save
+writes to an MP3: the ID3v2 version (2.3 by default; 2.4 unlocks UTF-8 text
+frames), whether an ID3v1 tag is written, preserved or stripped (written by
+default), whether an APEv2 tag is preserved or stripped (preserved by
+default), and the ID3v2 text encoding (Latin-1, UTF-16 or UTF-8; UTF-16 by
+default). Every row can be reset to its default from its right-click menu;
+changes land on Apply or OK.
 
 **Bit-perfect playback** is on by default: the output device is switched to
 each track's native sample rate when the device supports it, with a
-nearest-best fallback otherwise. It can be toggled in Settings > Playback.
+nearest-best fallback otherwise, and the device's own rate is restored when
+playback stops or rawform quits. It can be turned off in Settings > Playback,
+in which case the device keeps its own rate and every track is resampled to
+it; either way the change applies at the next track. The player bar's claim
+covers the whole path: "(Bit Perfect)" means the device clocks the source
+rate, no software volume or mute outside rawform touches the samples (on
+PipeWire: the stream's and the sink node's soft volumes), the device is fed
+at least the source's bit depth, and rawform's own gain is at unity;
+otherwise it names what applies ("(Resampled to N Hz)", "(Volume Adjusted
+by PipeWire)" / "(Volume Adjusted by System)", "(N-bit source, M-bit
+output)"). A 32-bit integer source loses its low byte in the float32
+pipeline and is reported as "(32-bit source, 24-bit output)". On macOS the
+rate is measured but the system volume slider and the device's physical
+format are not watched yet. The backends differ in what a rate switch does
+to the rest of the system; [`docs/linux-audio.md`](docs/linux-audio.md) and
+[`docs/macos-audio.md`](docs/macos-audio.md) explain each.
+
+Every shortcut, by window, is listed in
+[`docs/KEYBOARD_SHORTCUTS.md`](docs/KEYBOARD_SHORTCUTS.md).
 
 ## Files rawform writes
 
@@ -94,10 +161,10 @@ the Flatpak sandbox the same paths resolve to
 |------|----------|
 | `settings.yaml` | Tagging preferences (the MP3/ID3 write settings) |
 | `playback.yaml` | Master volume and mute, ReplayGain settings, output rate policy, output device selection |
-| `spectrum.yaml` | Spectrum-view preferences (analyzer source) |
-| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename To, Settings, Custom Playlist Columns, Find) |
+| `spectrum.yaml` | Spectrum-view preferences (analyzer source and refresh rate) |
+| `window.yaml` | Main window geometry, plus saved sizes for the tool windows (Properties, Rename Files, Settings, Custom Playlist Columns, Find) |
 | `playlist_custom_columns.yaml` | Custom column definitions |
-| `rename_patterns.yaml` | Saved Rename To pattern presets |
+| `rename_patterns.yaml` | Saved Rename Files pattern presets |
 | `search_filters.yaml` | Saved Find filter presets |
 | `columns.rwftp` | Default playlist column layout |
 | `queue_columns.rwftp` | Playback Queue tab column layout |
@@ -116,17 +183,22 @@ the decoder cascade, the extension only biases the order, and the first
 decoder that opens wins.
 
 - **Native reference decoders**: FLAC (libFLAC), MP3 (libmpg123), and the
-  libsndfile family (WAV, AIFF, and the other formats libsndfile handles,
-  including Ogg Vorbis and Opus).
-- **FFmpeg fallback** (optional, on by default when FFmpeg is found): AAC,
-  ALAC/M4A, WMA, AC3, DTS, and the rest of the long tail. The native
-  decoders are always tried first; FFmpeg only catches what they decline.
+  libsndfile PCM family (WAV, AIFF, AU, CAF, and the other containers
+  libsndfile handles).
+- **FFmpeg fallback** (optional, on by default when FFmpeg is found): Ogg
+  Vorbis, Opus, AAC, ALAC/M4A, WMA, AC3, DTS, and the rest of the long tail.
+  The native decoders are always tried first; FFmpeg only catches what they
+  decline. Vorbis and Opus are declined by the libsndfile decoder on purpose
+  when FFmpeg is in the build, because FFmpeg reports their live bitrate and
+  libsndfile cannot; a build without FFmpeg plays them through libsndfile
+  with a zero bitrate reading.
 
-The playlist import filter (which extensions drag and drop accepts) is
-hardcoded in `ui/Sources/media/TrackScanner.cpp`: flac, mp3, wav, ogg, oga,
-opus, m4a, mp4, aac, wv, ape, wma, aiff, aif, mpc, tta, ac3, dts. A build
-without FFmpeg imports all of these but can only play what the native
-decoders cover.
+The playlist import filter (which extensions drag and drop, Add files and
+Add folder accept) is one list in `ui/Sources/media/TrackScanner.cpp`
+(`TrackScanner::audioSuffixes()`): flac, mp3, wav, ogg, oga, opus, spx, m4a,
+mp4, aac, wv, ape, wma, aiff, aif, mpc, tta, ac3, dts. The Add files dialog
+filter is generated from the same list. A build without FFmpeg imports all
+of these but can only play what the native decoders cover.
 
 Internally everything is interleaved float32. Metadata and embedded cover
 art are read with TagLib, with an FFmpeg-based probe as the metadata
@@ -134,9 +206,13 @@ fallback for formats TagLib cannot parse (ac3, dts).
 
 ## Prerequisites
 
-- CMake 4.2 or newer
+- CMake 3.28 or newer
 - A C++20 compiler
 - Qt 6 (Core, Gui, Quick, QuickControls2, Svg, Concurrent)
+
+Windows is not supported: the tree carries the Windows window chrome and
+builds there, but the engine has no Windows output backend, so a Windows
+build runs with no audio and there is no Windows release.
 
 ### macOS
 
@@ -188,8 +264,11 @@ either way; the manifest bundles TagLib itself.
 `pipewire-devel` is what enables audio output on Linux:
 the engine's PipeWire sink compiles in when `libpipewire-0.3` is found and
 the build prints a warning (and produces a player with no output device)
-without it. FFmpeg is optional as on macOS; note that Fedora's default
-`ffmpeg-free` covers fewer codecs than a full FFmpeg from RPM Fusion.
+without it; `make check-deps` warns about the missing library before CMake
+runs. What the sink does with the PipeWire graph is described in
+[`docs/linux-audio.md`](docs/linux-audio.md). FFmpeg is optional as on
+macOS; note that Fedora's default `ffmpeg-free` covers fewer codecs than a
+full FFmpeg from RPM Fusion.
 
 Wayland and X11 are both supported; the window decorations adapt to the
 desktop (a Breeze/KWin profile on KDE Plasma).
@@ -256,8 +335,9 @@ cmake -S audio -B build/core -DCMAKE_BUILD_TYPE=Release
 cmake --build build/core
 ctest --test-dir build/core
 
-# UI unit tests (opt-in; console binaries, no display needed). The engine's
-# tests are registered in this tree too but not built by it, hence the label.
+# UI unit tests (opt-in; eight console binaries, no display needed). The
+# engine's nine tests are registered in this tree too but not built by it,
+# hence the label.
 cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
 cmake --build build/app
 ctest --test-dir build/app -L ui
@@ -271,24 +351,45 @@ ctest --test-dir build/app -L ui
 - Both CMake projects offer `-DRAWFORM_SANITIZE=thread|address` (TSan, or
   ASan+UBSan together) for sanitized runs; the Makefile's `SANITIZE=` forwards
   it to the engine build and keeps a separate build directory per profile.
-- QML is lint-gated: `cmake --build <dir> --target rawform_qmllint` should
-  stay warning-free.
+- QML is lint-checked and warning-free today: `cmake --build <dir> --target
+  rawform_qmllint` should stay that way (CI runs it as a non-blocking step
+  whose log is compared against the previous run).
 - Selecting tracks that have no cover art (no sidecar image, no embedded
   picture) would normally print one `Failed to get image from provider` QML
   warning per selection; rawform suppresses exactly that message and passes
   every other QML warning through unchanged. Set `RAWFORM_LOG_ART_MISSES=1`
   in the environment (for example in a CLion run configuration) to let the
   art-miss warnings through again for a diagnostic session.
+- Timing lines live in the `rawform.perf` logging category, off by default:
+  `QT_LOGGING_RULES="rawform.perf.debug=true"` turns them on (add
+  `QT_LOGGING_TO_CONSOLE=1` when stderr is not a terminal on a systemd
+  distribution, or Qt routes them to the journal). Each line names the
+  operation, its count and its elapsed time: playlist removals and moves,
+  the reloader's drain slices, the Find index build, the audio sink's
+  construction at startup, the spectrum display parking and resuming with
+  the window's exposure, each scan's enumeration and read, and each cover
+  decode.
+- Engine knobs read from the environment: `RAWFORM_OUTPUT_STALL_MS` (the
+  output stall watchdog in milliseconds, default 10000, 0 disables),
+  `RAWFORM_NO_GAPLESS` (any value other than empty or 0 disables the
+  gapless stitch), `RAWFORM_DECODER_LOG` (print which decoder opened each
+  file to stderr), and `RAWFORM_PW_PODS` (dump the raw PipeWire format pods;
+  see `docs/linux-audio.md`).
 
 ## Packaging
 
 ### macOS
 
 Prebuilt `.dmg` images for Apple Silicon are attached to each
-[GitHub Release](https://github.com/ret2sender/rawform/releases). They are
-ad-hoc signed and not notarized, so Gatekeeper objects on first launch; see
+[GitHub Release](https://github.com/ret2sender/rawform/releases). They
+require macOS 15 (Sequoia) or later: the bundle declares that minimum, and
+the libraries it carries are Homebrew builds from a macOS 15 runner, which
+do not load on anything older. They are ad-hoc signed and not notarized, so
+Gatekeeper objects on first launch; see
 [Opening an unsigned macOS build](#opening-an-unsigned-macos-build) below
-before writing the app off as broken.
+before writing the app off as broken. What the CoreAudio backend does to
+the output device's sample rate is described in
+[`docs/macos-audio.md`](docs/macos-audio.md).
 
 To build the image yourself instead:
 
@@ -387,6 +488,13 @@ libebur128, TagLib, yaml-cpp, FFmpeg) and talks to PipeWire directly through
 `xdg-run/pipewire-0`, which is what preserves bit-perfect device-rate
 switching inside the sandbox. Its header comments document every sandbox
 permission and pinning decision.
+
+The Flatpak also ships the engine's diagnostic command line, so the device
+inventory can be read from inside the exact environment the app runs in:
+
+```sh
+flatpak run --command=rawform_audio_cli com.rawform.app rates
+```
 
 For plain (non-Flatpak) dev builds, `ui/tools/install_linux_icons.sh`
 installs the per-user `.desktop` entry and icon so the desktop shows the
