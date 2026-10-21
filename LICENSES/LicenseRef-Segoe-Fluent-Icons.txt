@@ -1,0 +1,18 @@
+Segoe Fluent Icons: provenance record for the window-control glyphs
+
+The SVG files under ui/Sources/icons/windows/ (minimize bar, maximize
+square, restore squares, close cross) reproduce the window-chrome glyphs of
+Microsoft's Segoe Fluent Icons as vector outlines, so that rawform's custom
+title bar matches native Windows chrome. Only the glyph geometry is
+re-expressed as project SVG paths; the font itself is not bundled with
+rawform and is not redistributed in any form.
+
+Segoe Fluent Icons is Copyright Microsoft Corporation and is distributed by
+Microsoft under its own license terms rather than an open-source license:
+
+    https://learn.microsoft.com/en-us/windows/apps/design/style/segoe-fluent-icons-font
+
+This file exists so that the REUSE annotation for those four files names a
+license text, as the specification requires. It grants nothing beyond what
+Microsoft's terms grant; it documents where the glyphs come from. See
+THIRD-PARTY-NOTICES.md, "Window-control glyphs (Segoe Fluent Icons)".

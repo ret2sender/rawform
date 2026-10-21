@@ -42,8 +42,20 @@
 # Source pinning: git tags for everything with a canonical git host (this
 # also fetches TagLib's utfcpp submodule, which its GitHub tarballs omit);
 # mpg123 has no canonical git, so it is the one tarball, pinned by the
-# checksum BLFS publishes. Flathub-readiness (out of scope) would pin each
-# git source to a commit hash and swap the mpg123 checksum to sha256.
+# checksum BLFS publishes.
+#
+# Flathub readiness, out of this manifest's scope and listed here so the
+# submission starts from one place:
+#   - pin each git source to a commit hash and swap the mpg123 checksum to
+#     sha256;
+#   - a real install(TARGETS) rule in ui/CMakeLists.txt in place of the
+#     hand-placed artifacts in the rawform module below;
+#   - the app id: com.rawform.app needs control of rawform.com under
+#     Flathub's verification rules, while the developer id in the metainfo
+#     is already io.github.ret2sender; io.github.ret2sender.rawform needs no
+#     domain, but changing the id after release moves every user's config
+#     (~/.var/app/<id>), so the choice is made once, before the first
+#     submission, and documented in the metainfo.
 #
 # Sandbox notes:
 #   - --filesystem=xdg-run/pipewire-0 is a HARD requirement: direct
@@ -87,6 +99,14 @@ finish-args:
   # Flathub-review justification is "in-place tag editing on a user-located
   # library".
   - --filesystem=host
+  # host covers system mounts (/mnt, /media, /run/media, fstab and autofs
+  # shares) but not the per-user GVFS tree under $XDG_RUNTIME_DIR/gvfs,
+  # which is how GNOME and most KDE setups expose smb:// and sftp://
+  # locations; a drop from such a share lands as a path inside that tree,
+  # unreadable without this grant. KIO-FUSE mounts live under a randomized
+  # kio-fuse-* runtime directory that no finish-arg can name; a drop from
+  # one of those remains unreadable (a documented limitation).
+  - --filesystem=xdg-run/gvfs
 
 cleanup:
   - /include
@@ -260,6 +280,12 @@ modules:
     no-make-install: true
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
+      # Required, not probed: the Flatpak is documented (README, the
+      # third-party notices) as shipping the FFmpeg fallback, so a detection
+      # miss (a header drift in the SDK, a pkg-config path change) must fail
+      # the build here instead of producing a native-only bundle that still
+      # claims otherwise.
+      - -DRAWFORM_FFMPEG=on
     post-install:
       # The audio subtree is added EXCLUDE_FROM_ALL, so the default build
       # only compiles what the GUI links; the CLI must be named explicitly.

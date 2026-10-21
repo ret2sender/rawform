@@ -112,11 +112,13 @@ install -Dm644 "${REPO_SVG}" "${ICON_FILE}"
 
 mkdir -p "${DESKTOP_DIR}"
 # The committed asset is the single source of truth for the entry's content
-# (theme-name Icon=, %F so open-with hands files to the running instance,
-# SingleMainWindow). Only Exec= is substituted here: the committed file carries the plain
-# "rawform" the Flatpak exporter rewrites, while a dev install needs the
-# actual binary path for launcher-menu starts.
-sed "s|^Exec=.*|Exec=${EXEC_PATH} %F|" "${REPO_DESKTOP}" > "${DESKTOP_FILE}"
+# (theme-name Icon=, Keywords, StartupNotify, SingleMainWindow). Only Exec=
+# is substituted here: the committed file carries the plain "rawform" the
+# Flatpak exporter rewrites, while a dev install needs the actual binary
+# path for launcher-menu starts. No field code follows the path: the
+# application does not read its command line, so the entry advertises no
+# file arguments.
+sed "s|^Exec=.*|Exec=${EXEC_PATH}|" "${REPO_DESKTOP}" > "${DESKTOP_FILE}"
 chmod 644 "${DESKTOP_FILE}"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then

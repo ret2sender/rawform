@@ -160,6 +160,11 @@ check-qt:
 # FFmpeg is only REQUIRED here when RAWFORM_FFMPEG=on; auto is the engine's
 # probe-quietly mode and gets a status line, not a failure.
 #
+# libpipewire-0.3 is probed on Linux with a warning, not a failure: the
+# engine builds without it (RAWFORM_HAVE_PIPEWIRE=0, the configuration one
+# CI job exists to keep compiling), but the player it yields has no output
+# device, and that is worth saying before CMake rather than at first play.
+#
 # If pkg-config itself is absent the checks are skipped with a warning rather
 # than failed: CMake's CONFIG-mode discovery can still succeed without it,
 # and a false failure would be worse than a late one.
@@ -198,6 +203,11 @@ check-deps:
 			else \
 				echo "FFmpeg fallback: will be disabled (RAWFORM_FFMPEG=auto, libs not found)"; \
 			fi; \
+		fi; \
+		if [ "$(UNAME_S)" = "Linux" ] && ! pkg-config --exists libpipewire-0.3; then \
+			echo "warning: libpipewire-0.3 not found (pipewire-devel)."; \
+			echo "         The build will have no audio output on Linux; a sink-less"; \
+			echo "         build is allowed, so this is a warning, not a failure."; \
 		fi; \
 	fi
 
