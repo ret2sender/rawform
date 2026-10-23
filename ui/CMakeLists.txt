@@ -688,8 +688,19 @@ option(RAWFORM_BUILD_TESTS "Build rawform unit tests" OFF)
 if(RAWFORM_BUILD_TESTS)
     enable_testing()
 
-    # Register a UI test under the `ui` label (see the block header).
+    # Register a UI test under the `ui` label (see the block header), and give
+    # its binary the sanitizer suppression floor the app carries
+    # (utils/SanitizerSuppressions.cpp: the proven third-party patterns baked
+    # in as the runtimes' default suppressions; the TU compiles to nothing
+    # outside a sanitizer profile). The sanitize block at the top of this
+    # file instruments every target in the tree, so a test that drives Qt's
+    # thread pool (rawform_future_test's QtConcurrent harness) meets the same
+    # uninstrumented-Qt choreography the app does and fails on exit code 66
+    # with a passing check count unless it has the floor; the one
+    # registration path is what keeps a new test from forgetting it.
     function(rawform_add_ui_test name target)
+        target_sources(${target} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp)
         add_test(NAME ${name} COMMAND ${target})
         set_tests_properties(${name} PROPERTIES LABELS ui)
     endfunction()

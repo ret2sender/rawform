@@ -170,6 +170,30 @@ extern "C" const char* __tsan_default_suppressions() {
         // no hand-written rawform frame carries. Absent on macOS, whose
         // runtime sees the join: the tiebreaker that licenses the entry.
         "race:rawform_qmlcache_loader.cpp\n"
+
+        // The scene graph's threaded render loop against QQuickItem
+        // subclasses compiled (instrumented) into this binary; SpectrumBars
+        // is the first, and the Rectangles it replaced did the same work
+        // inside libQt6Quick where the runtime could not see it. Two shapes:
+        // cleanupNodesOnShutdown reads every item's meta-object on the
+        // render thread while the GUI thread is blocked in the window
+        // teardown, and the item is deleted later on the main thread by the
+        // QML engine's root teardown, after that thread was joined (the
+        // report prints it as "finished"); updateDirtyNode calls
+        // updatePaintNode on the render thread during the sync phase, GUI
+        // thread blocked, reading members only the item's GUI-thread setters
+        // write. Both edges are the loop's QMutex/QWaitCondition, futex-based
+        // on Linux, so the happens-before that is really there never reaches
+        // the runtime. Anchored on the Qt frame that establishes the
+        // contract, so the entries cover every item subclass and never a
+        // thread rawform started; the stated exception to the criteria in
+        // tools/tsan.supp. COST: an updatePaintNode that read a member some
+        // worker thread writes would be masked by the second entry; the item
+        // rule (it draws whatever list it is given) keeps that case out, by
+        // review. Linux/GCC only, by the same mechanism as the entries above;
+        // the macOS run is the tiebreaker that confirms it.
+        "race:QQuickWindowPrivate::cleanupNodesOnShutdown\n"
+        "race:QQuickWindowPrivate::updateDirtyNode\n"
 #endif
         ;
 }
@@ -178,8 +202,26 @@ extern "C" const char* __tsan_default_suppressions() {
 
 #if defined(RAWFORM_ASAN_BUILD)
 
+// Runtime defaults for the ASan profile, by the same no-delivery-chain route
+// as the suppressions (ASAN_OPTIONS in the environment still overrides).
+//
+// fast_unwind_on_malloc=0: the default unwinder walks frame pointers and
+// stops at the first frame without one, and the prebuilt Qt libraries are
+// built without them, so a leak allocated inside Qt is recorded as two
+// frames (the allocator and one unsymbolized Qt address) and nothing above:
+// not the Qt function, not the thread, not a rawform caller if there is one.
+// That leaves every Qt-involved leak unclassifiable under the admission
+// criteria, and it defeats an anchored leak: entry, whose frame is then
+// never recorded (the FreeType entry below matched 33 of 33 allocations
+// with the full stack and none with the truncated one). The slow unwinder
+// reads the unwind tables and records the whole stack. Cost: slower
+// allocation under this profile only, a diagnostic build.
+extern "C" const char* __asan_default_options() {
+    return "fast_unwind_on_malloc=0";
+}
+
 // LeakSanitizer runs piggybacked on the ASan profile; leak: entries match a
-// frame anywhere in the ALLOCATION stack.
+// frame anywhere in the ALLOCATION stack, as the unwinder above records it.
 extern "C" const char* __lsan_default_suppressions() {
     return
         // Mesa EGL/Wayland screen-factory init caches (zink/dri2 under
@@ -197,7 +239,25 @@ extern "C" const char* __lsan_default_suppressions() {
         // singletons the Wayland client teardown never frees; every frame of
         // every allocation stack is libxkbcommon's own, so the module
         // pattern cannot mask a rawform leak.
-        "leak:libxkbcommon\n";
+        "leak:libxkbcommon\n"
+
+        // Qt's per-thread FreeType data against variable fonts (Qt 6.11.1,
+        // qfontengine_ft.cpp): a QThread that rasterized text exits,
+        // QThreadStorage nulls the thread's QtFreetypeData slot and runs
+        // its destructor, which calls QFreetypeFace::cleanup() per cached
+        // face; a variable-font face (mm_var set) calls FT_Done_MM_Var(
+        // qt_getFreetype(), mm_var), and qt_getFreetypeData() finds the
+        // slot empty and allocates a new QtFreetypeData plus a new FreeType
+        // library, which QThreadStorageData::finish then nulls without
+        // deleting. 2496 bytes in 33 allocations per exiting thread that
+        // drew text (the render thread of a destroyed window, such as a
+        // Properties window closing). Triggered by the bundled Inter and
+        // JetBrains Mono variable fonts; every frame is Qt's or FreeType's.
+        // A per-event leak admitted under the stated exception in
+        // tools/lsan.supp: a located upstream defect, bounded by window
+        // destruction, fixed cost, no rawform fix short of static fonts.
+        // Anchored on the defect's own frame. Re-examine on every Qt bump.
+        "leak:QFreetypeFace::cleanup\n";
 }
 
 #endif // RAWFORM_ASAN_BUILD

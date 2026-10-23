@@ -39,6 +39,17 @@
 # module loader) is Qt's, and a pattern anchored on the generated file name
 # cannot reach a hand-written rawform frame.
 #
+# ONE STATED EXCEPTION: a rawform frame that is a QQuickItem virtual Qt itself
+# calls on the scene graph render thread under its sync contract
+# (updatePaintNode, with the GUI thread blocked for the duration), or the
+# item's destructor running after Qt has joined that thread, is Qt's
+# choreography entered through Qt's contract, not a thread rawform chose. Such
+# a report qualifies when the OTHER racing stack is entirely Qt's and the
+# access on the rawform side is a plain member read in the virtual or the
+# member release in the destructor. The pattern is then anchored on the Qt
+# frame that establishes the contract, never on the rawform frame, so it
+# covers every item subclass the tree grows and never a hand-written thread.
+#
 # Context: the Qt frameworks in use are the prebuilt Online Installer
 # binaries, which are NOT TSan-instrumented. The runtime therefore cannot see
 # all synchronization Qt establishes internally, and some of Qt's own
@@ -69,3 +80,24 @@ race:QtConcurrent::
 # the library. Linux/GCC only; the macOS runtime sees the join. Baked into
 # SanitizerSuppressions.cpp once the macOS run confirmed it absent there.
 race:rawform_qmlcache_loader.cpp
+
+# The scene graph render thread against QQuickItem subclasses compiled in
+# this tree (SpectrumBars is the first; the Rectangles it replaced did the
+# same work inside libQt6Quick, where the runtime could not see it). Two
+# shapes, same mechanism, both Linux/GCC only:
+#   - cleanupNodesOnShutdown reads every item's meta-object on the render
+#     thread while the GUI thread is blocked in the loop's window teardown;
+#     the item is deleted later on the main thread by the QML engine's root
+#     teardown, after the thread was joined (the report prints the thread as
+#     "finished"). The join is QThread::wait, futex-based on Linux.
+#   - updateDirtyNode calls updatePaintNode on the render thread during the
+#     sync phase, with the GUI thread blocked in the same futex-based wait;
+#     the members it reads (the values list, the look) are written only by
+#     the item's setters on the GUI thread, before the sync.
+# Both edges are Qt's QMutex/QWaitCondition on the threaded render loop,
+# invisible with the uninstrumented Qt binaries; the macOS runtime sees them.
+# The second pattern would also mask a future updatePaintNode that reads a
+# member some worker thread writes; the item rule ("it draws whatever list it
+# is given", SpectrumBars.h) is what keeps that case out, by review.
+race:QQuickWindowPrivate::cleanupNodesOnShutdown
+race:QQuickWindowPrivate::updateDirtyNode

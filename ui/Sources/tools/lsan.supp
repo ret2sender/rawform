@@ -35,6 +35,15 @@
 # implicate rawform code and cannot grow over a session. A leak that recurs
 # per action (per file, per track, per dialog open) does NOT qualify, however
 # third-party its stack looks: growth means a real bug somewhere.
+#
+# ONE STATED EXCEPTION: a per-event leak whose every allocation frame is
+# third-party AND whose cause is a located upstream defect (the frames name
+# the function, the library's source shows the re-entry or the missing free)
+# qualifies when the event is bounded by something the user does a handful
+# of times per session (a window destroyed, a thread exited), the cost per
+# event is fixed and small, and no rawform change short of replacing an
+# asset or a library would remove it. The entry names the defect, the
+# trigger and the cost, so it is re-examined when the library moves.
 
 # libxkbcommon keymap/compose state, allocated once by the Qt Wayland platform
 # plugin (QWaylandDisplay::setupConnection and the text-input compose table
@@ -45,3 +54,22 @@
 # incidental. Graduated into SanitizerSuppressions.cpp; kept here so a run
 # with a stale binary still has it.
 leak:libxkbcommon
+
+# Qt's per-thread FreeType data against variable fonts (qfontengine_ft.cpp,
+# Qt 6.11.1): when a QThread that rasterized text exits, QThreadStorage
+# nulls the thread's QtFreetypeData slot and then runs its destructor, which
+# calls QFreetypeFace::cleanup() on every cached face; for a face with
+# variation data (mm_var, set only for a variable font) cleanup() calls
+# FT_Done_MM_Var(qt_getFreetype(), mm_var), and qt_getFreetypeData() finds
+# the slot empty and allocates a fresh QtFreetypeData plus a fresh FreeType
+# library to serve the call. QThreadStorageData::finish then nulls the
+# re-created slot without deleting it (its own comment says so). 48 bytes
+# direct plus 2448 bytes of FreeType modules indirect, 2496 in 33
+# allocations, once per exiting thread that drew text: in rawform the scene
+# graph render thread of a window that is destroyed (a Properties window
+# closing), not the hidden-and-reused windows. Triggered by the bundled
+# Inter and JetBrains Mono variable fonts; a static font takes the other
+# branch. Every frame is libQt6Gui, libQt6Core or libfreetype; rawform
+# appears nowhere. Anchored on the defect's own frame, present in all nine
+# stacks. Re-examine on every Qt bump: a fixed Qt makes the entry dead.
+leak:QFreetypeFace::cleanup
