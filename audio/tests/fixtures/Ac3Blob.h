@@ -23,7 +23,7 @@
 // Embedded AC3 conformance fixture: a real raw AC3 elementary stream, 2 ch,
 // 44100 Hz. Produced once with FFmpeg:
 //
-//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30" \
+//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30"
 //          -ac 2 -c:a ac3 -b:a 192k -f ac3 conf_ac3.ac3
 //   xxd -i conf_ac3.ac3
 //

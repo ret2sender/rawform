@@ -27,7 +27,7 @@
 // (codec == Dts, i.e. routed to FfmpegDecoder) is the regression guard. Produced
 // once with FFmpeg (the DTS encoder is "dca", marked experimental):
 //
-//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30" \
+//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30"
 //          -ac 2 -c:a dca -strict -2 -f dts conf_dts.dts
 //   xxd -i conf_dts.dts
 //

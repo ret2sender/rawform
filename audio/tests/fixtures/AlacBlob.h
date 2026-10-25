@@ -27,7 +27,7 @@
 // FFmpeg: no native reference decoder reads MP4, so the cascade falls through to
 // the terminal FfmpegDecoder. Produced once with FFmpeg:
 //
-//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30" \
+//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30"
 //          -ac 2 -c:a alac conf_alac.m4a
 //   xxd -i conf_alac.m4a
 //

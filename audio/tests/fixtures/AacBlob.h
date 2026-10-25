@@ -23,7 +23,7 @@
 // Embedded AAC conformance fixture: a real ADTS-AAC stream, 2 ch, 44100 Hz.
 // Produced once with FFmpeg:
 //
-//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.20" \
+//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.20"
 //          -ac 2 -c:a aac -b:a 128k -f adts conf_aac.aac
 //   xxd -i conf_aac.aac
 //

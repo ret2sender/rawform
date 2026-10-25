@@ -32,13 +32,13 @@
 //     ctest --test-dir build            # or run ./build/rawform_pattern_test
 //
 // or by hand (macOS/Homebrew Qt example, from ui/):
-//     c++ -std=c++20 -fPIC \
-//         Sources/tests/PatternEvaluatorTest.cpp \
-//         Sources/columns/PatternEvaluator.cpp \
-//         Sources/columns/ColumnSchema.cpp \
-//         Sources/utils/Formats.cpp \
-//         -I Sources -I Sources/columns -I Sources/media \
-//         $(pkg-config --cflags --libs Qt6Core) \
+//     c++ -std=c++20 -fPIC
+//         Sources/tests/PatternEvaluatorTest.cpp
+//         Sources/columns/PatternEvaluator.cpp
+//         Sources/columns/ColumnSchema.cpp
+//         Sources/utils/Formats.cpp
+//         -I Sources -I Sources/columns -I Sources/media
+//         $(pkg-config --cflags --libs Qt6Core)
 //         -o pattern_test && ./pattern_test
 //
 // Exits non-zero if any check fails (so it doubles as a CI gate).

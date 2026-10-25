@@ -45,7 +45,7 @@
 //                                     elsewhere and the hunt continues.
 //
 // Build (mirror the project's sanitizer profile):
-//   g++     -std=c++20 -O0 -g -fsanitize=thread -fno-omit-frame-pointer \
+//   g++     -std=c++20 -O0 -g -fsanitize=thread -fno-omit-frame-pointer
 //           tsan_spsc_min.cpp -o spsc_std && ./spsc_std
 //   g++     -DUSE_BUILTINS=1 ... -o spsc_builtin && ./spsc_builtin
 //   clang++ (same two lines)

@@ -27,7 +27,7 @@
 // payload (the same false-sync hazard that bit raw DTS). Produced once with
 // FFmpeg:
 //
-//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30" \
+//   ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=0.30"
 //          -ac 2 -c:a wmav2 -b:a 128k conf_wma.wma
 //   xxd -i conf_wma.wma
 //
