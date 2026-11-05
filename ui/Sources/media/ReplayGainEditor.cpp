@@ -20,9 +20,10 @@
 
 // ReplayGainEditor.cpp
 //
-// The write worker. See the header for the contract. The write mirrors the read
-// in TrackReader: open with QFile::encodeName + TagLib::FileRef, take the file's
-// PropertyMap, replace or erase the four REPLAYGAIN_* keys, set it back, and save.
+// The write worker. See the header for the contract. The write has the shape of
+// the read in TrackReader, opened read-write here: QFile::encodeName +
+// TagLib::FileRef by name, take the file's PropertyMap, replace or erase the four
+// REPLAYGAIN_* keys, set it back, and save.
 // Values are normalized to a canonical form on the way out (gains signed two
 // decimals + " dB", peaks fixed six decimals) so the cache and display settle to
 // one representation regardless of how the user typed them.
@@ -124,6 +125,7 @@ ReplayGainEditor::WriteResult writeOne(const Job& j) {
     const TagWriteLock lease(j.path);
 
     const QByteArray enc = QFile::encodeName(j.path);
+    // The name-based constructor is what gives the save its read-write open.
     TagLib::FileRef ref(enc.constData(), /*readAudioProperties=*/false);
     TagLib::File* file = ref.file();
     if (!file)

@@ -27,8 +27,9 @@
 // reload; the window drives MetadataReloader afterwards, exactly as the RG path
 // does.
 //
-// The write mirrors the read in TrackReader: QFile::encodeName -> TagLib FileRef
-// -> the file's live PropertyMap. Only the keys named in the edits are touched
+// The write has the shape of the read in TrackReader, opened read-write here:
+// QFile::encodeName -> TagLib FileRef by name -> the file's live PropertyMap.
+// Only the keys named in the edits are touched
 // (set or removed); every other tag in the map is left exactly as it was, so
 // unknown tags, multi-value tags, and tags owned by other tabs (ReplayGain)
 // survive a save untouched.

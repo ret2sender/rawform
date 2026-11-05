@@ -920,6 +920,34 @@ if(RAWFORM_BUILD_TESTS)
             Qt6::Concurrent
     )
     rawform_add_ui_test(future_release rawform_future_test)
+
+    # -----------------------------------------------------------------------
+    # The open mode of the read paths: an inotify watch on a fixture in a
+    # writable directory proves readTrack and the embedded-art read never
+    # ask for write access. Touches the filesystem and needs TagLib, the
+    # engine's probe and Qt Quick (the image provider's base class). The
+    # MP3 fixture is the engine's conformance blob.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_read_open_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/ReadOnlyOpenTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media/AlbumArtProvider.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media/AlbumArtProvider.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media/TrackReader.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/media/TrackReader.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/PerfLog.cpp
+    )
+    target_include_directories(rawform_read_open_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+            ${CMAKE_CURRENT_SOURCE_DIR}/../audio/tests/fixtures
+    )
+    target_link_libraries(rawform_read_open_test PRIVATE
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick
+            TagLib::tag
+            rawform_audio
+    )
+    rawform_add_ui_test(read_only_open rawform_read_open_test)
 endif()
 
 # ---------------------------------------------------------------------------
