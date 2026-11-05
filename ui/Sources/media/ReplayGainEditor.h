@@ -21,8 +21,9 @@
 // ReplayGainEditor.h
 //
 // Writes the REPLAYGAIN_* tags to disk off the GUI thread, the ReplayGain
-// sibling of MetadataEditor, mirroring how TrackReader reads them
-// (QFile::encodeName path -> TagLib FileRef -> PropertyMap). Registered into
+// sibling of MetadataEditor, in the shape of how TrackReader reads them but opened
+// read-write (QFile::encodeName path -> TagLib FileRef by name -> PropertyMap).
+// Registered into
 // the com.rawform.app QML module via QML_ELEMENT, so the Properties window
 // instantiates it directly with no main.cpp wiring.
 //

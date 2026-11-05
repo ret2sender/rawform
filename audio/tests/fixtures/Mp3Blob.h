@@ -27,8 +27,8 @@
 // TSSE frame in the bytes below records Lavf60.16.100); the exact command line
 // was not kept, and the blob is the fixture of record.
 //
-// Included once, inside ConformanceTest.cpp's anonymous namespace, so the
-// array keeps internal linkage.
+// Included once per test, inside its anonymous namespace, so the array keeps
+// internal linkage.
 #pragma once
 
 const unsigned char kMp3[] = {

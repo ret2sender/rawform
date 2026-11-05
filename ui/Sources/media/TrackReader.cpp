@@ -50,6 +50,7 @@
 #include <taglib/audioproperties.h>
 #include <taglib/fileref.h>
 #include <taglib/tbytevector.h>
+#include <taglib/tfilestream.h>
 #include <taglib/tpropertymap.h>
 #include <taglib/tstringlist.h>
 
@@ -162,16 +163,21 @@ QString sniffOggCodec(const QString& path) {
 
 /// Open the Ogg file with the class matching the sniffed codec, so the audio
 /// properties and tags come from the correct parser (TagLib's FileRef would
-/// resolve .ogg to Vorbis by extension and misread an Opus stream).
-std::unique_ptr<TagLib::File> openOggFile(const char* fileName, const QString& codec) {
-    if (codec == QLatin1String("Opus"))
-        return std::make_unique<TagLib::Ogg::Opus::File>(fileName, true);
-    if (codec == QLatin1String("Vorbis"))
-        return std::make_unique<TagLib::Ogg::Vorbis::File>(fileName, true);
-    if (codec == QLatin1String("FLAC"))
-        return std::make_unique<TagLib::Ogg::FLAC::File>(fileName, true);
-    if (codec == QLatin1String("Speex"))
-        return std::make_unique<TagLib::Ogg::Speex::File>(fileName, true);
+/// resolve .ogg to Vorbis by extension and misread an Opus stream). The file borrows
+/// @p stream, which must outlive it.
+std::unique_ptr<TagLib::File> openOggFile(TagLib::IOStream* stream, const QString& codec) {
+    if (codec == QLatin1String("Opus")) {
+        return std::make_unique<TagLib::Ogg::Opus::File>(stream, true);
+    }
+    if (codec == QLatin1String("Vorbis")) {
+        return std::make_unique<TagLib::Ogg::Vorbis::File>(stream, true);
+    }
+    if (codec == QLatin1String("FLAC")) {
+        return std::make_unique<TagLib::Ogg::FLAC::File>(stream, true);
+    }
+    if (codec == QLatin1String("Speex")) {
+        return std::make_unique<TagLib::Ogg::Speex::File>(stream, true);
+    }
     return nullptr;
 }
 
@@ -939,6 +945,11 @@ TrackData readTrack(const QString& path) {
     };
     const QByteArray enc = QFile::encodeName(path);
 
+    // A name-based open asks for write access first, and a file opened for writing
+    // raises IN_CLOSE_WRITE when it closes, which sync clients and media servers watch.
+    // The file objects below borrow this stream, so it is declared first to die last.
+    TagLib::FileStream stream(enc.constData(), /*openReadOnly=*/true);
+
     std::unique_ptr<TagLib::File> owned; // owns the Ogg file when we open one
     TagLib::FileRef ref;                 // owns the file for every other format
     TagLib::File* file = nullptr;
@@ -947,15 +958,19 @@ TrackData readTrack(const QString& path) {
     if (kOggExts.contains(suffix))
         oggCodec = sniffOggCodec(path);
 
-    if (!oggCodec.isEmpty())
-        owned = openOggFile(enc.constData(), oggCodec);
+    if (!oggCodec.isEmpty()) {
+        owned = openOggFile(&stream, oggCodec);
+    }
 
     if (owned && owned->isValid()) {
         file = owned.get();
         t.codec = oggCodec;
     } else {
         owned.reset();
-        ref = TagLib::FileRef(enc.constData(), /*readAudioProperties=*/true);
+        // A declined Ogg parse has already read from the stream.
+        stream.clear();
+        stream.seek(0);
+        ref = TagLib::FileRef(&stream, /*readAudioProperties=*/true);
         file = ref.file();
         if (file)
             t.codec = codecForFile(file, suffix);

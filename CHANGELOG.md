@@ -138,6 +138,10 @@ that ships.
 
 ### Fixed
 
+- Scanning a library, reading properties and loading embedded art no longer
+  open audio files for writing. Each read made a write-open that sync clients
+  and media servers could take for a change, and two opens per file on a
+  read-only mount.
 - The rate decision after a declined in-place device reconfigure was made
   against the device's pre-restore rate and could open without the needed
   switch.

@@ -171,6 +171,7 @@ MetadataEditor::WriteResult writeOne(const Job& j) {
     const TagWriteLock lease(j.path);
 
     const QByteArray nativePath = QFile::encodeName(j.path);
+    // The name-based constructor is what gives the save its read-write open.
     TagLib::FileRef ref(nativePath.constData(), /*readAudioProperties=*/false);
     TagLib::File* file = ref.file();
     if (!file)

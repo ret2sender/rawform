@@ -51,6 +51,7 @@
 
 #include <taglib/fileref.h>
 #include <taglib/tbytevector.h>
+#include <taglib/tfilestream.h>
 #include <taglib/tlist.h>
 #include <taglib/tstringlist.h>
 #include <taglib/tvariant.h>
@@ -149,8 +150,11 @@ QImage loadSidecar(const QDir& dir, const QSize& requestedSize, DecodeTrace& tra
 /// Extract the first embedded picture from @p path via TagLib's complex
 /// properties (the bytes are read here, on demand).
 QImage loadEmbedded(const QString& path, const QSize& requestedSize, DecodeTrace& trace) {
-    TagLib::FileRef f(QFile::encodeName(path).constData(),
-                      /*readAudioProperties=*/false);
+    // Read-only for the reason given in readTrack. The FileRef borrows the stream, so
+    // the stream is declared first to die last.
+    const QByteArray encoded = QFile::encodeName(path);
+    TagLib::FileStream stream(encoded.constData(), /*openReadOnly=*/true);
+    TagLib::FileRef f(&stream, /*readAudioProperties=*/false);
     if (f.isNull() || !f.file())
         return {};
 
