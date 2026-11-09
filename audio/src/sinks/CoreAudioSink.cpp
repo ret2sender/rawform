@@ -61,18 +61,22 @@
 //
 // The rate ledger. Leaving a device at a rate its hardware cannot faithfully
 // clock corrupts all system audio, so a borrowed rate is a debt. The ledger
-// (originalRate, rateChanged) starts at open(), accumulates across
-// reconfigure() calls, and is repaid once by the final close(). rateChanged
-// is always "does the device now sit anywhere other than originalRate", so a
-// switch that lands on a third rate is a debt too. It is published on change
-// through ISinkEventListener::onRateDebtChanged so the owner can persist it,
-// and repayStaleRateDebt() settles a persisted debt from a crashed session
-// before the sink is ever opened. An external nominal-rate change on the bound
-// device (the user or another program asserting ownership) FORGIVES the debt:
-// the asserted rate becomes the new baseline, and the measurement follows. Our
-// own sets are told apart from external ones by a marker the initiating call
-// plants before it changes the rate; the per-open listener is installed before
-// the open's own switch for exactly that reason.
+// (RateLedger.h: the rate at session open, the rate this sink last left the
+// device at) starts at open(), accumulates across reconfigure() calls, and is
+// repaid once by the final close(). The debt is always "does the device now
+// sit anywhere other than the rate it opened at", so a switch that lands on a
+// third rate is a debt too. It is published on change through
+// ISinkEventListener::onRateDebtChanged so the owner can persist it, and
+// repayStaleRateDebt() settles a persisted debt from a crashed session before
+// the sink is ever opened. An external nominal-rate change on the bound device
+// (the user or another program asserting ownership) FORGIVES the debt: the
+// asserted rate becomes the new baseline, and the measurement follows. Our own
+// sets are told apart from external ones by the rate a notification reads, not
+// by when it arrives (the ledger's header has the rule): during one of our
+// sets every notification is ours, and afterwards a notification reading the
+// rate we left the device at is ours however late it comes. The per-open
+// listener is installed before the open's own switch so that switch is
+// classified like every later one.
 //
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
@@ -113,6 +117,7 @@
 #include "rawform/audio/IAudioSink.h"
 #include "rawform/audio/RateManager.h"
 #include "rawform/audio/Types.h"
+#include "sinks/RateLedger.h"
 #include "sinks/SinkLog.h"
 
 #include <AudioToolbox/AudioToolbox.h>
@@ -168,8 +173,6 @@ struct CoreAudioSinkImpl {
     // thread.
     std::atomic<double> deviceRate{0.0}; // AUHAL output-scope rate, measured
     std::atomic<bool>   bitPerfect{false}; // measured: output scope == source rate
-    double        originalRate = 0.0; // device nominal rate at SESSION open, for restore
-    bool          rateChanged  = false; // does the device sit off originalRate?
     bool          opened       = false;
     bool          started      = false;
     ILogOutput*   logOut       = nullptr; // non-owning line logger
@@ -181,15 +184,14 @@ struct CoreAudioSinkImpl {
 
     // ----- sink event machinery ---------------------------------------------
     // stateMtx guards what BOTH the engine thread and CoreAudio's notification
-    // threads touch: the restore ledger (originalRate, rateChanged), the
-    // working format the forgiveness callback compares against, the
-    // self-change marker, the installed event listener, and the last debt
-    // shape published. Every guarded section is short and allocation-light;
-    // the RT render path never touches any of it.
+    // threads touch: the restore ledger (including whether one of our own
+    // rate sets is in progress), the working format the forgiveness callback
+    // compares against, the installed event listener, and the last debt shape
+    // published. Every guarded section is short and allocation-light; the RT
+    // render path never touches any of it.
     std::mutex          stateMtx;
+    RateLedger          ledger;                      // the session's rate debt
     ISinkEventListener* events             = nullptr;
-    bool                hasPendingSelfRate = false;  // our own rate set in flight
-    double              pendingSelfRate    = 0.0;
     bool                systemListeners    = false;  // ctor-installed pair
     bool                deviceListener     = false;  // per-open nominal-rate listener
     bool                aliveListener      = false;  // per-open liveness listener
@@ -694,29 +696,23 @@ OSStatus onDeviceOverloadEvent(AudioObjectID /*objectId*/, UInt32 /*nAddrs*/,
 // did not initiate is the user (or another program) asserting ownership. The
 // asserted rate becomes the session baseline: the debt is gone, the final
 // close restores nothing, and the measurement follows so the engine's
-// republication tells the truth. Our own sets are recognized by the marker the
-// initiating call planted (open() and reconfigure() both plant it, with the
-// listener already installed); a marker mismatch means external. (A
-// late-arriving self notification after the marker was withdrawn would be
-// misread as external; the consequence is a forgiven debt, i.e. no restore of
-// a rate the user has since seen the device reach: benign, and documented
-// rather than chased.)
+// republication tells the truth. Whether the change is ours is the ledger's
+// call, made from the rate the device reads: our set's own notification can be
+// delivered after setDeviceNominalRate returned (its wait ends on the readback,
+// not on the notification), or twice, and a judgment by timing would forgive
+// the debt and adopt our own borrowed rate as the one to restore. The read is
+// made under stateMtx so it cannot interleave with the bookkeeping of a set
+// that starts or ends meanwhile; open() reads the HAL under the same lock.
 OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
                            const AudioObjectPropertyAddress* /*addrs*/,
                            void* clientData) {
     auto* impl = static_cast<CoreAudioSinkImpl*>(clientData);
+    std::lock_guard<std::mutex> lock(impl->stateMtx);
     const double newRate =
         deviceNominalRate(static_cast<AudioDeviceID>(objectId));
-    if (newRate <= 0.0) {
-        return noErr;
+    if (impl->ledger.notice(newRate) == RateLedger::Notice::Own) {
+        return noErr;  // our own set landing, late or repeated; no event
     }
-    std::lock_guard<std::mutex> lock(impl->stateMtx);
-    if (impl->hasPendingSelfRate && ratesEqual(newRate, impl->pendingSelfRate)) {
-        impl->hasPendingSelfRate = false;  // our own set landing; no event
-        return noErr;
-    }
-    impl->originalRate = newRate;
-    impl->rateChanged  = false;
     impl->deviceRate.store(newRate, std::memory_order_relaxed);
     impl->bitPerfect.store(
         ratesEqual(newRate, static_cast<double>(impl->working.sampleRate)),
@@ -745,10 +741,13 @@ void publishDebt(CoreAudioSinkImpl* impl) {
     std::uint32_t       borrowed = 0;
     {
         std::lock_guard<std::mutex> lock(impl->stateMtx);
-        active = impl->rateChanged && impl->device != kAudioObjectUnknown &&
-                 impl->originalRate > 0.0;
-        borrowed = active ? static_cast<std::uint32_t>(std::lround(
-                                impl->deviceRate.load(std::memory_order_relaxed)))
+        active = impl->ledger.owes() && impl->device != kAudioObjectUnknown;
+        // The NOMINAL rate we left the device at, not the AUHAL measurement:
+        // the crash-recovery repay compares this against the nominal rate, and
+        // a measurement that misread the device would make a real debt look
+        // moot.
+        borrowed = active ? static_cast<std::uint32_t>(
+                                std::lround(impl->ledger.knownRate()))
                           : 0;
         if (active == impl->lastDebtActive &&
             borrowed == impl->lastDebtBorrowed) {
@@ -756,7 +755,8 @@ void publishDebt(CoreAudioSinkImpl* impl) {
         }
         impl->lastDebtActive   = active;
         impl->lastDebtBorrowed = borrowed;
-        original = static_cast<std::uint32_t>(std::lround(impl->originalRate));
+        original =
+            static_cast<std::uint32_t>(std::lround(impl->ledger.originalRate()));
         uid      = impl->deviceUidStr;
         l        = impl->events;
     }
@@ -919,8 +919,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
     {
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
         m_impl->device          = dev;
-        m_impl->originalRate    = deviceNominalRate(dev);
-        m_impl->rateChanged     = false;
+        m_impl->ledger.beginSession(deviceNominalRate(dev));
         m_impl->deviceUidStr    = deviceUid(dev);   // the debt events' persistent key
         m_impl->deviceNameStr   = deviceName(dev);  // the failure event's label
         m_impl->failureReported = false;            // a fresh open, a fresh budget
@@ -953,11 +952,11 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
 
     // 3. Start listening on the bound device BEFORE touching its rate:
     // nominal-rate changes (external assertions from here to close; our own
-    // sets are recognized by the marker planted below), liveness (the output
-    // failure event), and IO overloads (breadcrumb). Installed first so the
-    // notification our own switch produces is classified by the marker rather
-    // than arriving at a listener installed after the fact and forgiving the
-    // debt it just created. A listener that fails to install is logged and
+    // sets are recognized by the ledger), liveness (the output failure event),
+    // and IO overloads (breadcrumb). Installed first so the notification our
+    // own switch produces is classified by the ledger like every later one,
+    // rather than arriving at a listener installed after the fact with no
+    // context. A listener that fails to install is logged and
     // leaves the sink deaf to that one event, never a failed open; close()
     // removes whatever was installed, on every failure path below too.
     {
@@ -991,17 +990,17 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
 
     // 4. Execute the rate decision. The policy already decided; here we only act.
     // Switch the device nominal rate to the chosen rate iff the decision asks,
-    // marking the set as our own for the listener above, and record the debt
-    // by the one rule the ledger has: does the device now sit off the rate it
-    // had when the session opened (a switch that lands on a third rate is a
-    // debt too, even though it did not reach its target). No advertised-list
-    // gate here: that reasoning is the RateManager's and is already folded into
+    // with the ledger told our own set is in progress for the listener above,
+    // then hand the ledger the rate the device ended up at. The debt follows
+    // the one rule the ledger has: does the device now sit off the rate it had
+    // when the session opened (a switch that lands on a third rate is a debt
+    // too, even though it did not reach its target). No advertised-list gate
+    // here: that reasoning is the RateManager's and is already folded into
     // decision.switchDevice / decision.deviceRate.
     if (decision.switchDevice) {
         {
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-            m_impl->hasPendingSelfRate = true;
-            m_impl->pendingSelfRate    = static_cast<double>(decision.deviceRate);
+            m_impl->ledger.beginOwnChange();
         }
         double achieved = 0.0;
         const bool reached =
@@ -1011,9 +1010,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
             (achieved > 0.0) ? achieved : deviceNominalRate(dev);
         {
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-            m_impl->hasPendingSelfRate = false;  // consumed or withdrawn (see the proc)
-            m_impl->rateChanged =
-                (nowRate > 0.0) && !ratesEqual(nowRate, m_impl->originalRate);
+            m_impl->ledger.endOwnChange(nowRate);
         }
         sinkLog(m_impl->logOut,
                 "CoreAudioSink: switch -> %u Hz %s (device now %.0f Hz)",
@@ -1085,8 +1082,8 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
 // does ONE transition on the existing unit and touches the driver as little as
 // possible: uninitialize, move the nominal rate iff the decision asks, set the
 // input-scope format for the new source, re-initialize, re-measure. No
-// dispose/new, no mid-session restore; the session ledger (originalRate from
-// the first open) accumulates and the final close() repays it once.
+// dispose/new, no mid-session restore; the session ledger (the rate from the
+// first open) accumulates and the final close() repays it once.
 bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
                                 const RateDecision& decision) {
     if (!m_impl->opened || m_impl->unit == nullptr || !sourceFormat.isValid()) {
@@ -1117,19 +1114,18 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
     }
 
     // 2. Execute the rate decision on the live device binding. The ledger
-    // bookkeeping collapses to this: originalRate keeps the SESSION's
-    // first-open capture, and rateChanged is recomputed as "does the device
-    // now sit anywhere other than that original", so a transition landing back
-    // ON the original rate repays the debt by itself and the final close then
-    // correctly restores nothing.
+    // keeps the SESSION's first-open rate as the original, and the debt is
+    // "does the device now sit anywhere other than that original", so a
+    // transition landing back ON the original rate repays the debt by itself
+    // and the final close then correctly restores nothing.
     if (decision.switchDevice) {
-        // Plant the self-change marker BEFORE the set, so the persistent
-        // nominal-rate listener recognizes the resulting notification as our
-        // own rather than forgiving the ledger for it.
+        // Tell the ledger BEFORE the set, so the persistent nominal-rate
+        // listener takes a notification delivered during the set as our own
+        // rather than forgiving the ledger for it; the rate the set leaves
+        // covers the notifications delivered after it.
         {
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-            m_impl->hasPendingSelfRate = true;
-            m_impl->pendingSelfRate = static_cast<double>(decision.deviceRate);
+            m_impl->ledger.beginOwnChange();
         }
         double achieved = 0.0;
         const bool reached =
@@ -1139,9 +1135,7 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
             (achieved > 0.0) ? achieved : deviceNominalRate(dev);
         {
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-            m_impl->hasPendingSelfRate = false;  // consumed or withdrawn (see the proc's comment)
-            m_impl->rateChanged =
-                (nowRate > 0.0) && !ratesEqual(nowRate, m_impl->originalRate);
+            m_impl->ledger.endOwnChange(nowRate);
         }
         sinkLog(m_impl->logOut,
                 "CoreAudioSink: reconfigure: switch -> %u Hz %s (device now "
@@ -1274,10 +1268,9 @@ void CoreAudioSink::close() {
     AudioDeviceID restoreDev    = kAudioObjectUnknown;
     {
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-        restoreNeeded = m_impl->rateChanged &&
-                        m_impl->device != kAudioObjectUnknown &&
-                        m_impl->originalRate > 0.0;
-        restoreTo  = m_impl->originalRate;
+        restoreNeeded = m_impl->ledger.owes() &&
+                        m_impl->device != kAudioObjectUnknown;
+        restoreTo  = m_impl->ledger.originalRate();
         restoreDev = m_impl->device;
     }
     if (restoreNeeded) {
@@ -1287,7 +1280,7 @@ void CoreAudioSink::close() {
         sinkLog(m_impl->logOut, "CoreAudioSink: restored device rate to %.0f Hz",
                 restored);
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-        m_impl->rateChanged = false;
+        m_impl->ledger.settle();
     }
     publishDebt(m_impl.get()); // cleared, when there was one to clear
 

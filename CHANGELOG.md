@@ -154,6 +154,10 @@ that ships.
   now recorded as a debt and restored at close; the device listeners are
   installed before the open's own switch so it is never mistaken for an
   external change.
+- CoreAudio: a playlist mixing sample rates no longer leaves the output
+  device at one of the tracks' rates after playback stops or rawform quits.
+  A late notification of rawform's own rate switch could be taken for
+  another program's change, and the device's original rate was forgotten.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no

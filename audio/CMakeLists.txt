@@ -238,6 +238,7 @@ add_library(rawform_audio STATIC
     src/EngineRingSource.cpp
     src/RateManager.cpp
     src/sinks/NullSink.cpp
+    src/sinks/RateLedger.cpp
     # Read-side FFmpeg metadata fallback. Compiled UNCONDITIONALLY (unlike
     # FfmpegDecoder.cpp): its body is guarded on RAWFORM_HAVE_FFMPEG and returns
     # std::nullopt on a native-only build, so the probeAudioMetadata symbol always
@@ -403,6 +404,17 @@ add_executable(RateManagerTest tests/RateManagerTest.cpp)
 target_link_libraries(RateManagerTest PRIVATE rawform_audio)
 target_compile_options(RateManagerTest PRIVATE ${_rawform_warnings})
 add_test(NAME RateManagerTest COMMAND RateManagerTest)
+
+# The restore ledger a rate-switching sink keeps. Portable bookkeeping with no
+# platform call, so the rules for telling the sink's own rate changes from
+# someone else's run on every platform, without a device. Its header is under
+# src/.
+add_executable(RateLedgerTest tests/RateLedgerTest.cpp)
+target_link_libraries(RateLedgerTest PRIVATE rawform_audio)
+target_include_directories(RateLedgerTest
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_options(RateLedgerTest PRIVATE ${_rawform_warnings})
+add_test(NAME RateLedgerTest COMMAND RateLedgerTest)
 
 # FlacDecoder round-trips. Like SndfileDecoderTest it owns both ends, ENCODING
 # its fixtures with libFLAC's stream encoder, so it links FLAC::FLAC explicitly
