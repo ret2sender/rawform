@@ -30,6 +30,7 @@
 
 #include "playback/AudioController.h"
 
+#include "playback/RateLedgerFile.h"
 #include "utils/YamlFile.h"
 
 #include "media/TrackData.h"
@@ -62,7 +63,6 @@
 #include <QCoreApplication>  // postEvent, the bridge's carrier
 #include <QElapsedTimer>
 #include <QEvent>
-#include <QFile>
 #include <QFileInfo>
 #include <QIODevice>
 #include <QItemSelectionModel>
@@ -93,10 +93,11 @@ QString playbackSettingsPath() {
     return userConfigDir() + QStringLiteral("/playback.yaml");
 }
 
-// rate_ledger.yaml: exists exactly while a CoreAudio session holds a
-// rate debt; a crash leaves it behind, and the next launch repays from it
-// before the sink is injected. PipeWire never writes one (its repayment is
-// structural), so on Linux this file simply never appears.
+// rate_ledger.yaml (RateLedgerFile.h): exists exactly while a CoreAudio
+// session holds a rate debt; a session that ends without repaying leaves it
+// behind, and the next launch repays from it before the sink is injected.
+// PipeWire never writes one (its repayment is structural), so on Linux this
+// file simply never appears.
 QString rateLedgerPath() {
     return userConfigDir() + QStringLiteral("/rate_ledger.yaml");
 }
@@ -236,6 +237,9 @@ float computeReplayGainLinear(const replaygain::Values& v, int mode,
 // order in the header) joins the engine thread, so no callback can fire after
 // the owner starts going away. Any still-posted carriers are removed and
 // deleted by QObject's destructor on the GUI thread, after that join.
+//
+// One callback is not posted: the rate ledger is written on the engine thread
+// (see onRateDebtChanged).
 
 namespace {
 
@@ -263,7 +267,8 @@ private:
 }  // namespace
 
 struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
-    explicit EngineListenerBridge(AudioController* owner) : m_owner(owner) {}
+    EngineListenerBridge(AudioController* owner, QString ledgerPath)
+        : m_owner(owner), m_ledgerPath(std::move(ledgerPath)) {}
 
     void onStateChanged(rawform::audio::State s) override {
         const int st = static_cast<int>(s);
@@ -322,16 +327,20 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
         });
     }
 
-    // The ledger feed; persisted immediately (crash protection has no
-    // patience for debouncing).
+    // The ledger feed, written here and now instead of posted. The final
+    // clear comes from the close that the engine's shutdown runs, after the
+    // GUI event loop has stopped, so a posted write would never happen and
+    // the file would claim a debt the close had just repaid. The file has
+    // one writer, this thread; the launch read runs before the listener is
+    // installed.
     void onRateDebtChanged(const std::string& deviceId, std::uint32_t originalRateHz,
                            std::uint32_t borrowedRateHz) override {
-        const QString id       = QString::fromStdString(deviceId);
-        const auto    orig     = static_cast<quint32>(originalRateHz);
-        const auto    borrowed = static_cast<quint32>(borrowedRateHz);
-        post([id, orig, borrowed](AudioController& c) {
-            c.applyRateDebt(id, orig, borrowed);
-        });
+        const rateledger::Entry change{.deviceId       = deviceId,
+                                       .originalRateHz = originalRateHz,
+                                       .borrowedRateHz = borrowedRateHz};
+        if (rateledger::apply(m_debts, change)) {
+            rateledger::write(m_ledgerPath, m_debts);
+        }
     }
 
     void onPositionChanged(double seconds) override {
@@ -368,6 +377,8 @@ private:
     }
 
     AudioController* m_owner;
+    const QString    m_ledgerPath;  ///< resolved on the GUI thread at construction
+    std::vector<rateledger::Entry> m_debts;  ///< the file's content; engine thread only
 };
 
 // ===========================================================================
@@ -404,49 +415,55 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
             static_cast<long long>(sinkClock.nsecsElapsed() / 1000));
 
     // Crash recovery, BEFORE the sink is injected and before any open.
-    // A rate_ledger.yaml on disk means a previous session died holding a rate
-    // debt; hand the triple to the fresh sink, which repays iff the device
-    // still sits at the borrowed rate, and delete the file either way (repaid,
+    // A rate_ledger.yaml on disk means a previous session ended holding rate
+    // debts; hand each to the fresh sink, which repays iff the device still
+    // sits at the borrowed rate, and delete the file either way (repaid,
     // moot, or the device is gone: in every case the ledger is spent). The
-    // console line is deferred one event-loop turn so the window wiring that
-    // routes infoOccurred exists by the time it fires.
+    // console lines are deferred one event-loop turn so the window wiring
+    // that routes infoOccurred exists by the time they fire.
+    const QString ledger = rateLedgerPath();
     {
-        const QString ledger = rateLedgerPath();
-        if (QFile::exists(ledger)) {
-            QString msg;
-            try {
-                const YAML::Node root = YAML::LoadFile(ledger.toStdString());
-                const std::string id =
-                    root["device_id"] ? root["device_id"].as<std::string>()
-                                      : std::string{};
-                const std::uint32_t orig =
-                    root["original_rate"] ? root["original_rate"].as<std::uint32_t>()
-                                          : 0;
-                const std::uint32_t borrowed =
-                    root["borrowed_rate"] ? root["borrowed_rate"].as<std::uint32_t>()
-                                          : 0;
-                const bool repaid =
-                    platformSink->repayStaleRateDebt(id, orig, borrowed);
-                msg = repaid
-                          ? QStringLiteral(
-                                "crash recovery: restored the output device to "
-                                "%1 Hz (a previous session left it at %2 Hz)")
-                                .arg(orig)
-                                .arg(borrowed)
-                          : QStringLiteral(
-                                "crash recovery: stale rate ledger discarded "
-                                "(device absent, moved, or debt moot)");
-            } catch (...) {
-                msg = QStringLiteral(
-                    "crash recovery: malformed rate ledger discarded");
-            }
-            QFile::remove(ledger);
-            QTimer::singleShot(0, this, [this, msg] { emit infoOccurred(msg); });
+        const rateledger::ReadResult stale = rateledger::read(ledger);
+        QStringList messages;
+        switch (stale.status) {
+            case rateledger::ReadStatus::Absent:
+                break;
+            case rateledger::ReadStatus::Malformed:
+                messages.push_back(
+                    QStringLiteral("crash recovery: malformed rate ledger discarded"));
+                break;
+            case rateledger::ReadStatus::Ok:
+                for (const rateledger::Entry& debt : stale.entries) {
+                    const bool repaid = platformSink->repayStaleRateDebt(
+                        debt.deviceId, debt.originalRateHz, debt.borrowedRateHz);
+                    messages.push_back(
+                        repaid ? QStringLiteral(
+                                     "crash recovery: restored the output device to "
+                                     "%1 Hz (a previous session left it at %2 Hz)")
+                                     .arg(debt.originalRateHz)
+                                     .arg(debt.borrowedRateHz)
+                               : QStringLiteral(
+                                     "crash recovery: stale rate ledger entry discarded "
+                                     "(device absent, moved, or debt moot)"));
+                }
+                if (stale.entries.empty()) {
+                    messages.push_back(QStringLiteral(
+                        "crash recovery: empty rate ledger discarded"));
+                }
+                break;
+        }
+        if (stale.status != rateledger::ReadStatus::Absent) {
+            rateledger::write(ledger, {});
+            QTimer::singleShot(0, this, [this, messages] {
+                for (const QString& msg : messages) {
+                    emit infoOccurred(msg);
+                }
+            });
         }
     }
     m_engine.setSink(std::move(platformSink));
 
-    m_bridge = std::make_unique<EngineListenerBridge>(this);
+    m_bridge = std::make_unique<EngineListenerBridge>(this, ledger);
     m_engine.setListener(m_bridge.get());
 
     // Lookahead rebuild coalescing (see the member comment). Zero-interval
@@ -1595,38 +1612,6 @@ void AudioController::setOutputDeviceId(const QString& id) {
     m_engine.selectOutputDevice(id.toStdString());
     emit outputDeviceIdChanged();
     schedulePlaybackPersist();
-}
-
-// The ledger file. A cleared debt deletes it; an active one writes it
-// whole through QSaveFile (the crash cannot half-write the very file that
-// exists for crashes). GUI thread, tiny file, immediate by design.
-void AudioController::applyRateDebt(const QString& deviceId,
-                                    quint32 originalRateHz,
-                                    quint32 borrowedRateHz) {
-    const QString path = rateLedgerPath();
-    if (deviceId.isEmpty() || originalRateHz == 0) {
-        if (QFile::exists(path)) {
-            QFile::remove(path);
-        }
-        return;
-    }
-    YAML::Emitter out;
-    out << YAML::BeginMap;
-    out << YAML::Key << "device_id" << YAML::Value << deviceId.toStdString();
-    out << YAML::Key << "original_rate" << YAML::Value << originalRateHz;
-    out << YAML::Key << "borrowed_rate" << YAML::Value << borrowedRateHz;
-    out << YAML::EndMap;
-
-    QByteArray content;
-    content += "# rawform rate ledger. This file exists while the audio device\n";
-    content += "# sits at a borrowed sample rate; it is deleted when the debt is\n";
-    content += "# repaid or forgiven. Found at launch, it means a previous\n";
-    content += "# session crashed: rawform restores the original rate iff the\n";
-    content += "# device still sits at the borrowed one.\n";
-    content += out.c_str();
-    content += '\n';
-
-    yamlfile::writeAtomically(path, content);
 }
 
 // The mid-track suffix update. Guarded on an outcome being shown at

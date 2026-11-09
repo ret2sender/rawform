@@ -147,8 +147,12 @@ struct IPullSource {
 ///   - onDeviceListChanged: the selectable device set, or its default-marking,
 ///     changed: a fresh enumeration would differ. The engine pushes one so
 ///     pickers stay current.
-///   - onRateDebtChanged: the restore ledger changed; the engine forwards it
-///     for persistence (crash recovery). All-zero arguments mean cleared.
+///   - onRateDebtChanged: one device's entry in the restore ledger changed;
+///     the engine forwards it for persistence (crash recovery). deviceId is
+///     the device's persistent id and is never empty. originalRateHz 0 clears
+///     that device's entry; otherwise the device owes a return from
+///     borrowedRateHz to originalRateHz. A sink publishes the clear from the
+///     close() that repays, including the engine's final one at shutdown.
 ///     Sinks whose repayment is structural (PipeWire) never emit it.
 ///   - onOutputFailed: the open session cannot continue: the bound or pinned
 ///     device disappeared, the stream entered an error state, or the daemon

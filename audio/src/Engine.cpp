@@ -136,7 +136,9 @@
 // invariant); only THEN is the ring reset and the decoder dropped. ~Engine
 // signals shutdown and joins the engine thread; the engine thread runs that
 // same teardown before exiting, so the sink is closed and the RT thread gone
-// before anything else happens. ~Engine then detaches the sink from the event
+// before anything else happens. It then drains the command queue once more,
+// relaying only the rate-debt changes the close published and dropping every
+// other command. ~Engine then detaches the sink from the event
 // and log channels and DESTROYS it, still inside requestShutdownAndJoin, while
 // the command mutex and queue are alive: a platform thread (the PipeWire loop
 // thread, a CoreAudio notification thread) can keep delivering events until
@@ -942,6 +944,21 @@ void Engine::Impl::run() {
     // Shutdown: close the sink (joins the RT thread), reset the ring, drop the
     // decoder, clear seams, so Impl's members destruct with nothing left running.
     teardownCurrent();
+
+    // The close above is where a sink repays its rate debt, and it publishes
+    // that as an event posted behind the loop's last drain. Relay it, or the
+    // listener's crash ledger keeps claiming a debt the close just repaid.
+    // Every other command is moot once the session is over.
+    std::deque<Command> late;
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        late.swap(commands);
+    }
+    for (const Command& c : late) {
+        if (c.type == CommandType::RateDebtChanged) {
+            doRateDebtChanged(c.path, c.rateA, c.rateB);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1265,7 +1282,8 @@ void Engine::Impl::doDeviceListChanged() {
 }
 
 // Ledger forward (persisted upstream). Pure relay: the sink owns the truth, the
-// listener owns the file.
+// listener owns the file. Also reached once after the shutdown teardown (see
+// run()).
 void Engine::Impl::doRateDebtChanged(const std::string& deviceId,
                                      std::uint32_t originalRateHz,
                                      std::uint32_t borrowedRateHz) {

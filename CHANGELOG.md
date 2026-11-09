@@ -158,6 +158,10 @@ that ships.
   device at one of the tracks' rates after playback stops or rawform quits.
   A late notification of rawform's own rate switch could be taken for
   another program's change, and the device's original rate was forgotten.
+- CoreAudio: quitting while a track plays no longer leaves
+  `rate_ledger.yaml` behind after the device rate was restored, so the next
+  launch no longer acts on a stale ledger. The ledger now keeps one entry per
+  device.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no

@@ -100,6 +100,7 @@ using rawform::audio::IDecoder;
 using rawform::audio::ILogOutput;
 using rawform::audio::IDecoderFactory;
 using rawform::audio::IPullSource;
+using rawform::audio::ISinkEventListener;
 using rawform::audio::NullSink;
 using rawform::audio::OutputAlteration;
 using rawform::audio::OutputAlterations;
@@ -625,6 +626,49 @@ public:
     void        stop()  override {}
     void        close() override {}
     [[nodiscard]] AudioFormat currentFormat() const override { return AudioFormat{}; }
+};
+
+// ---------------------------------------------------------------------------
+// A paced NullSink that keeps a rate ledger the way the CoreAudio sink does:
+// a successful open() borrows the device ("dev-a", opened at 96000) and
+// publishes that debt, and close() repays it and publishes the clear, both
+// from inside the engine's own sink call. Everything else forwards to the
+// wrapped NullSink, whose fire* injector carries the events.
+class DebtPublishingSink final : public IAudioSink {
+public:
+    static constexpr std::uint32_t kOriginalHz = 96000;
+
+    [[nodiscard]] SinkCapabilities capabilities() const override {
+        return m_inner.capabilities();
+    }
+    void setEventListener(ISinkEventListener* listener) override {
+        m_inner.setEventListener(listener);
+    }
+    bool open(const AudioFormat& sourceFormat, const RateDecision& decision,
+              IPullSource* source) override {
+        if (!m_inner.open(sourceFormat, decision, source)) {
+            return false;
+        }
+        m_owes = true;
+        m_inner.fireRateDebtChanged("dev-a", kOriginalHz, sourceFormat.sampleRate);
+        return true;
+    }
+    [[nodiscard]] bool start() override { return m_inner.start(); }
+    void               stop() override { m_inner.stop(); }
+    void               close() override {
+        m_inner.close();
+        if (m_owes) {
+            m_owes = false;
+            m_inner.fireRateDebtChanged("dev-a", 0, 0);  // repaid
+        }
+    }
+    [[nodiscard]] AudioFormat currentFormat() const override {
+        return m_inner.currentFormat();
+    }
+
+private:
+    NullSink m_inner{NullSink::Mode::Paced};
+    bool     m_owes = false;  // engine thread only, like every sink call
 };
 
 // ---------------------------------------------------------------------------
@@ -2000,7 +2044,7 @@ void testDeviceListAndDebtEventsRelay() {
     CHECK(engine.state() == State::Stopped);
 
     sinkPtr->fireRateDebtChanged("dev-a", 48000, 96000);
-    sinkPtr->fireRateDebtChanged("", 0, 0);  // cleared
+    sinkPtr->fireRateDebtChanged("dev-a", 0, 0);  // that device's entry cleared
     settle();
     const auto debts = listener.debts();
     CHECK(debts.size() == 2);
@@ -2008,8 +2052,46 @@ void testDeviceListAndDebtEventsRelay() {
         CHECK(debts[0].deviceId == "dev-a");
         CHECK(debts[0].originalHz == 48000);
         CHECK(debts[0].borrowedHz == 96000);
-        CHECK(debts[1].deviceId.empty());
+        CHECK(debts[1].deviceId == "dev-a");
         CHECK(debts[1].originalHz == 0);
+    }
+    CHECK(listener.errors() == 0);
+}
+
+// The engine destroyed while Playing: the shutdown teardown closes the sink,
+// the close publishes the repaid debt, and that clear reaches the listener
+// (which outlives the engine) before ~Engine returns, as the last debt event.
+// Without it, the listener's crash ledger would keep the debt the close repaid.
+void testShutdownDeliversFinalRateDebt() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    {
+        Engine engine;
+        engine.setDecoderFactory(&factory);
+        engine.setListener(&listener);
+        engine.setSink(std::make_unique<DebtPublishingSink>());
+        engine.enqueue("ramp:9000000");
+        engine.play();
+        CHECK(waitForState(engine, State::Playing));
+
+        // The open's debt arrives through the engine's queue; wait for it so
+        // the shutdown below is the only thing left to publish.
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+        while (listener.debts().empty() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CHECK(listener.debts().size() == 1);
+        // engine destroyed here, while Playing.
+    }
+    const auto debts = listener.debts();
+    CHECK(debts.size() == 2);
+    if (!debts.empty()) {
+        CHECK(debts.front().deviceId == "dev-a");
+        CHECK(debts.front().originalHz == DebtPublishingSink::kOriginalHz);
+        CHECK(debts.front().borrowedHz == 44100);
+        CHECK(debts.back().deviceId == "dev-a");
+        CHECK(debts.back().originalHz == 0);  // the repaid debt, cleared
     }
     CHECK(listener.errors() == 0);
 }
@@ -3287,6 +3369,7 @@ int main() {
     testDefaultDeviceChangeReopensWhenFollowing();
     testDefaultDeviceChangeIgnoredWhenPinned();
     testDeviceListAndDebtEventsRelay();
+    testShutdownDeliversFinalRateDebt();
 
     testOutputFailedEventStopsAndRetries();
     testOutputFailedWhileStoppedIgnored();

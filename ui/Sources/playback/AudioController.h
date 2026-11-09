@@ -564,8 +564,6 @@ private:
     void applyOutputDevices(const QVariantList& devices);
     void applyDeviceOutcome(int deviceRateHz, bool bitPerfect, int alterations,
                             int outputDepthBits);
-    void applyRateDebt(const QString& deviceId, quint32 originalRateHz,
-                       quint32 borrowedRateHz); ///< Persist/clear the ledger
 
     // --- cursor / organic advance ------------------------------------------
     void setPlayingModel(rawform::PlaylistModel* model);  ///< swap source + rewire signals

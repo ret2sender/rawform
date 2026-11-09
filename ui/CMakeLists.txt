@@ -320,6 +320,10 @@ set(APP_SOURCES
         # playback/: Qt AudioController wrapping the rawform_audio Engine
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/AudioController.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/AudioController.h
+        # playback/: rate_ledger.yaml, the crash-recovery record of borrowed
+        # device rates
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/RateLedgerFile.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/RateLedgerFile.h
 
         # playback/: the playback queue (the cross-playlist play-next list
         # behind the Playback Queue tab; the controller's lookahead prefix)
@@ -782,6 +786,26 @@ if(RAWFORM_BUILD_TESTS)
             Qt6::Core
     )
     rawform_add_ui_test(playlist_file rawform_playlist_test)
+
+    # -----------------------------------------------------------------------
+    # The rate_ledger.yaml test: per-device changes folded into the entry
+    # list, the written file read back, the single-entry file of older
+    # builds, malformed files, and the file deleted with the last debt.
+    # Filesystem via QTemporaryDir; Qt-Quick-free.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_rate_ledger_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/RateLedgerFileTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/RateLedgerFile.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
+    )
+    target_include_directories(rawform_rate_ledger_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    target_link_libraries(rawform_rate_ledger_test PRIVATE
+            Qt6::Core
+            yaml-cpp::yaml-cpp
+    )
+    rawform_add_ui_test(rate_ledger_file rawform_rate_ledger_test)
 
     # ------------------------------------------------------------------
     # The playback-queue test: the origin sidecar's alignment with the

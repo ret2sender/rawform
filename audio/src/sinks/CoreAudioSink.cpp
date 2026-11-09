@@ -202,6 +202,7 @@ struct CoreAudioSinkImpl {
     std::string         deviceNameStr;               // bound device's name, for failure text
     bool                lastDebtActive     = false;  // last published debt shape
     std::uint32_t       lastDebtBorrowed   = 0;
+    std::string         lastDebtUid;                 // device the active debt names
 };
 
 namespace {
@@ -717,6 +718,10 @@ OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     impl->bitPerfect.store(
         ratesEqual(newRate, static_cast<double>(impl->working.sampleRate)),
         std::memory_order_relaxed);
+    std::string forgivenUid;
+    if (impl->lastDebtActive) {
+        forgivenUid.swap(impl->lastDebtUid);
+    }
     impl->lastDebtActive   = false;
     impl->lastDebtBorrowed = 0;
     std::fprintf(stderr,
@@ -726,22 +731,26 @@ OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     if (impl->events != nullptr) {
         impl->events->onExternalRateChanged(
             static_cast<std::uint32_t>(std::lround(newRate)));
-        impl->events->onRateDebtChanged(std::string{}, 0, 0);  // cleared
+        if (!forgivenUid.empty()) {
+            impl->events->onRateDebtChanged(forgivenUid, 0, 0);  // cleared
+        }
     }
     return noErr;
 }
 
 // Publish the ledger's shape when it CHANGED since the last publication (the
-// persistence feed). Engine thread; takes and releases stateMtx itself.
+// persistence feed). An event names one device, so the clear goes out under
+// the UID the debt was published with. Engine thread; takes and releases
+// stateMtx itself.
 void publishDebt(CoreAudioSinkImpl* impl) {
     ISinkEventListener* l = nullptr;
-    bool                active   = false;
     std::string         uid;
     std::uint32_t       original = 0;
     std::uint32_t       borrowed = 0;
     {
         std::lock_guard<std::mutex> lock(impl->stateMtx);
-        active = impl->ledger.owes() && impl->device != kAudioObjectUnknown;
+        const bool active =
+            impl->ledger.owes() && impl->device != kAudioObjectUnknown;
         // The NOMINAL rate we left the device at, not the AUHAL measurement:
         // the crash-recovery repay compares this against the nominal rate, and
         // a measurement that misread the device would make a real debt look
@@ -750,24 +759,26 @@ void publishDebt(CoreAudioSinkImpl* impl) {
                                 std::lround(impl->ledger.knownRate()))
                           : 0;
         if (active == impl->lastDebtActive &&
-            borrowed == impl->lastDebtBorrowed) {
+            borrowed == impl->lastDebtBorrowed &&
+            (!active || impl->deviceUidStr == impl->lastDebtUid)) {
             return;  // same shape; nothing to say
+        }
+        if (active) {
+            original = static_cast<std::uint32_t>(
+                std::lround(impl->ledger.originalRate()));
+            uid = impl->deviceUidStr;
+        } else {
+            uid = impl->lastDebtUid;  // original stays 0: the clear
         }
         impl->lastDebtActive   = active;
         impl->lastDebtBorrowed = borrowed;
-        original =
-            static_cast<std::uint32_t>(std::lround(impl->ledger.originalRate()));
-        uid      = impl->deviceUidStr;
-        l        = impl->events;
+        impl->lastDebtUid      = active ? impl->deviceUidStr : std::string{};
+        l                      = impl->events;
     }
-    if (l == nullptr) {
-        return;
+    if (l == nullptr || uid.empty()) {
+        return;  // no listener, or a device without a UID: nothing to persist
     }
-    if (active) {
-        l->onRateDebtChanged(uid, original, borrowed);
-    } else {
-        l->onRateDebtChanged(std::string{}, 0, 0);
-    }
+    l->onRateDebtChanged(uid, original, borrowed);
 }
 
 }  // namespace

@@ -202,9 +202,12 @@ public:
         virtual void onDeviceOutcomeChanged(std::uint32_t /*deviceRateHz*/,
                                             bool /*bitPerfect*/,
                                             OutputAlterations /*alterations*/) {}
-        /// The sink's restore ledger changed; all-zero means cleared.
-        /// Persisted upstream for crash recovery. Engine thread, like everything
-        /// here.
+        /// One device's entry in the sink's restore ledger changed:
+        /// originalRateHz 0 clears the entry for deviceId (never empty);
+        /// anything else records a debt from borrowedRateHz back to
+        /// originalRateHz. Persisted upstream for crash recovery. Engine
+        /// thread, like everything here; the clear from the sink's last close
+        /// arrives during ~Engine, after the engine thread's final teardown.
         virtual void onRateDebtChanged(const std::string& /*deviceId*/,
                                        std::uint32_t /*originalRateHz*/,
                                        std::uint32_t /*borrowedRateHz*/) {}

@@ -22,7 +22,7 @@
 //
 // The shared file-IO half of the app's YAML persistence idiom. Each store
 // (SettingsStore, WindowGeometryStore, NamedPatternStore,
-// CustomColumnRegistry, SpectrumProvider, AudioController) keeps its own
+// CustomColumnRegistry, SpectrumProvider, AudioController, RateLedgerFile) keeps its own
 // schema: what to emit, the banner comment, and the tolerant per-key parse.
 // What is shared is only the IO discipline, so every store gets the same
 // first-run and crash-safety behavior without restating it:
@@ -34,7 +34,9 @@
 //          mid-write can never truncate the file; a qWarning on each failure
 //          mode (dir, open, short write, commit), never an exception.
 //
-// Free functions, no state, GUI-thread only like every caller.
+// Free functions with no state and no thread affinity. Every store calls them
+// on the GUI thread except the rate ledger, which writes from the engine
+// thread (RateLedgerFile.h); no two threads ever touch the same file.
 
 #pragma once
 
