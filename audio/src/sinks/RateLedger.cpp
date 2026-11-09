@@ -24,7 +24,9 @@
 
 #include "sinks/RateLedger.h"
 
+#include <algorithm>
 #include <cmath>  // std::fabs
+#include <utility>
 
 namespace rawform::audio {
 
@@ -36,6 +38,15 @@ void RateLedger::beginSession(double currentRate) noexcept {
     m_originalRate = currentRate;
     m_knownRate    = currentRate;
     m_ownChange    = false;
+}
+
+bool RateLedger::carry(double originalRate, double borrowedRate) noexcept {
+    if (originalRate <= 0.0 || m_knownRate <= 0.0 ||
+        !ratesEqual(m_knownRate, borrowedRate)) {
+        return false;
+    }
+    m_originalRate = originalRate;
+    return true;
 }
 
 void RateLedger::beginOwnChange() noexcept {
@@ -65,6 +76,69 @@ void RateLedger::settle() noexcept {
 bool RateLedger::owes() const noexcept {
     return m_originalRate > 0.0 && m_knownRate > 0.0 &&
            !ratesEqual(m_knownRate, m_originalRate);
+}
+
+// ---------------------------------------------------------------------------
+RateDebtBook::Settlement RateDebtBook::settlement(const Entry& debt,
+                                                  double currentRate) noexcept {
+    if (currentRate <= 0.0) {
+        return Settlement::Keep;
+    }
+    return RateLedger::ratesEqual(currentRate, static_cast<double>(debt.borrowedHz))
+               ? Settlement::Restore
+               : Settlement::Moot;
+}
+
+void RateDebtBook::keepUnpaid(const Entry& debt) {
+    if (debt.deviceId.empty() || debt.originalHz == 0) {
+        return;
+    }
+    const auto it = std::ranges::find(m_unpaid, debt.deviceId, &Entry::deviceId);
+    if (it != m_unpaid.end()) {
+        *it = debt;
+    } else {
+        m_unpaid.push_back(debt);
+    }
+}
+
+std::optional<RateDebtBook::Entry> RateDebtBook::takeUnpaid(const std::string& deviceId) {
+    const auto it = std::ranges::find(m_unpaid, deviceId, &Entry::deviceId);
+    if (it == m_unpaid.end()) {
+        return std::nullopt;
+    }
+    Entry debt = std::move(*it);
+    m_unpaid.erase(it);
+    return debt;
+}
+
+std::vector<RateDebtBook::Entry> RateDebtBook::publish(const std::optional<Entry>& session) {
+    // The standing set: the unpaid debts, with the live session's debt taking
+    // its device's place (a session never runs on a device with an unpaid
+    // debt, since open() takes it, but the session is the fresher truth).
+    std::vector<Entry> standing = m_unpaid;
+    if (session && !session->deviceId.empty() && session->originalHz != 0) {
+        const auto it = std::ranges::find(standing, session->deviceId, &Entry::deviceId);
+        if (it != standing.end()) {
+            *it = *session;
+        } else {
+            standing.push_back(*session);
+        }
+    }
+
+    std::vector<Entry> events;
+    for (const Entry& was : m_published) {
+        if (std::ranges::find(standing, was.deviceId, &Entry::deviceId) == standing.end()) {
+            events.push_back(Entry{.deviceId = was.deviceId, .originalHz = 0, .borrowedHz = 0});
+        }
+    }
+    for (const Entry& now : standing) {
+        const auto it = std::ranges::find(m_published, now.deviceId, &Entry::deviceId);
+        if (it == m_published.end() || *it != now) {
+            events.push_back(now);
+        }
+    }
+    m_published = std::move(standing);
+    return events;
 }
 
 }  // namespace rawform::audio

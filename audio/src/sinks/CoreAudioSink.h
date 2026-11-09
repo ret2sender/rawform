@@ -54,14 +54,17 @@
 // device mechanics owned by this file.
 //
 // The session model: open() acquires the device and starts a rate ledger
-// (originalRate at that moment); reconfigure() retunes the same unit across
-// track boundaries without disposing it and without a mid-session restore, so
-// the ledger accumulates; the final close() repays it once. That is one
-// nominal-rate transition per boundary instead of two, which is what keeps
-// the built-in audio controller's cross-family clock churn (the AppleMCA2
-// panic) out of the picture. The ledger is published through the event
-// channel so the owner can persist it and repayStaleRateDebt() can settle it
-// after a crash.
+// (the device's rate at that moment is the original); reconfigure() retunes
+// the same unit across track boundaries without disposing it and without a
+// mid-session restore, so the ledger accumulates; the final close() repays it
+// once. That is one nominal-rate transition per boundary instead of two, which
+// is what keeps the built-in audio controller's cross-family clock churn (the
+// AppleMCA2 panic) out of the picture. A close() whose restore misses keeps
+// the debt for the device's return: the next open() of it carries the debt,
+// and settleRateDebts() and later closes repay it once the device is back and
+// idle. The ledger is published per device through the event channel so the
+// owner can persist it and repayStaleRateDebt() can settle it at the next
+// launch.
 //
 // The device surface: enumerateDevices() lists every output-capable device by
 // UID, and selectDevice() pins one; the pin redirects what capabilities(),
@@ -134,6 +137,10 @@ public:
     bool                         repayStaleRateDebt(const std::string& deviceId,
                                                     std::uint32_t originalRateHz,
                                                     std::uint32_t borrowedRateHz) override;
+    /// Repay the debts earlier closes could not, for devices that are back,
+    /// by the same rule; the device this sink is open on is skipped. Engine
+    /// thread; each restore blocks for up to the switch's settle timeout.
+    void                         settleRateDebts() override;
     bool             open(const AudioFormat&  sourceFormat,
                           const RateDecision& decision,
                           IPullSource*        source) override;

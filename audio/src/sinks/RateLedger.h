@@ -45,9 +45,22 @@
 //   - any other rate is someone else asserting ownership of the device: it
 //     becomes the session's original and the debt is forgiven.
 //
-// rawform's CoreAudio sink is the one user; the class itself is portable.
+// A debt the final close could not repay (the device vanished, refused the
+// set, or settled on another rate) is not forgotten: it moves to the sink's
+// RateDebtBook below, keyed by the device's persistent id, and is repaid when
+// the device is back. A later session on that device carries it (carry()),
+// and a settle restores it while the device is idle. Either way the rule is
+// the crash-recovery one: repay only a device still sitting at the borrowed
+// rate, because a device moved since then was moved by someone else.
+//
+// rawform's CoreAudio sink is the one user; the classes themselves are portable.
 
 #pragma once
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace rawform::audio {
 
@@ -62,6 +75,13 @@ public:
     /// A fresh session on a device sitting at currentRate (0 when unknown):
     /// no debt, and nothing in progress.
     void beginSession(double currentRate) noexcept;
+
+    /// Take over a debt an earlier session left unpaid on this device. When
+    /// the device still sits at borrowedRate, originalRate becomes this
+    /// session's original, so the session owes it without a rate change and
+    /// its close repays it. Otherwise the device was moved since, the debt is
+    /// moot, and nothing changes. Call right after beginSession().
+    [[nodiscard]] bool carry(double originalRate, double borrowedRate) noexcept;
 
     /// One of the sink's own rate changes starts. Call before the platform
     /// set, so a notification delivered during the set is already covered.
@@ -94,6 +114,52 @@ private:
     double m_originalRate = 0.0;
     double m_knownRate    = 0.0;
     bool   m_ownChange    = false;
+};
+
+/// Every debt the sink owes, per device, and what it last published about
+/// them. The session's live debt comes from the RateLedger; the debts earlier
+/// closes could not repay are kept here. publish() turns the standing set into
+/// the per-device events the persistence feed carries, so a debt that only
+/// moves from the session to the unpaid list publishes nothing, and each
+/// device's entry is set and cleared on its own. Same locking rule as
+/// RateLedger: the owner calls under its state mutex.
+class RateDebtBook {
+public:
+    /// One device's debt, or, as an event, its clear (originalHz 0).
+    struct Entry {
+        std::string   deviceId;
+        std::uint32_t originalHz = 0;
+        std::uint32_t borrowedHz = 0;
+
+        friend bool operator==(const Entry&, const Entry&) = default;
+    };
+
+    /// What to do with an unpaid debt, given the rate its device reads now.
+    enum class Settlement {
+        Keep,     ///< the device is absent (rate 0): wait for it
+        Restore,  ///< still at the borrowed rate: set it back to the original
+        Moot,     ///< moved since: someone else's choice, drop the debt
+    };
+    [[nodiscard]] static Settlement settlement(const Entry& debt, double currentRate) noexcept;
+
+    /// Keep a debt a close could not repay; replaces an earlier one for the
+    /// same device. An entry with no device id or no original is ignored.
+    void keepUnpaid(const Entry& debt);
+
+    /// Remove and return the unpaid debt for deviceId, if any.
+    [[nodiscard]] std::optional<Entry> takeUnpaid(const std::string& deviceId);
+
+    [[nodiscard]] const std::vector<Entry>& unpaid() const noexcept { return m_unpaid; }
+
+    /// The events that bring the published set to what stands now: the unpaid
+    /// debts plus `session`, the live session's debt when it owes one. A
+    /// device whose entry is new or changed gets it; a device that no longer
+    /// owes gets its clear. Empty when nothing changed.
+    [[nodiscard]] std::vector<Entry> publish(const std::optional<Entry>& session);
+
+private:
+    std::vector<Entry> m_unpaid;
+    std::vector<Entry> m_published;
 };
 
 }  // namespace rawform::audio

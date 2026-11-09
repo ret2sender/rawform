@@ -25,14 +25,20 @@
 // own change delivered after the change returned, delivered during it, and
 // delivered twice, against a change made by someone else. Each case plays the
 // calls the CoreAudio sink makes (session open, own change begun and ended,
-// notification, close) and checks what the final close would restore. Same
-// hand-rolled CHECK harness as the rest of the suite; main returns non-zero on
-// any failure.
+// notification, close) and checks what the final close would restore. The
+// second half covers the debts a close could not repay: kept per device,
+// carried by a later session, settled, and published one device at a time.
+// Same hand-rolled CHECK harness as the rest of the suite; main returns
+// non-zero on any failure.
 
 #include "sinks/RateLedger.h"
 
+#include <cstdint>
 #include <cstdio>
+#include <optional>
+#include <vector>
 
+using rawform::audio::RateDebtBook;
 using rawform::audio::RateLedger;
 
 namespace {
@@ -165,6 +171,136 @@ void testRatesEqualTolerance() {
     CHECK(!RateLedger::ratesEqual(44100.0, 44101.0));
 }
 
+// ---------------------------------------------------------------------------
+// Unpaid debts: what a close that missed its restore leaves behind, and how
+// the debt is carried, settled and published per device.
+
+using Entry = RateDebtBook::Entry;
+
+Entry debt(const char* id, std::uint32_t original, std::uint32_t borrowed) {
+    return Entry{.deviceId = id, .originalHz = original, .borrowedHz = borrowed};
+}
+
+// The session's debt as the sink publishes it: present only while it owes.
+std::optional<Entry> sessionDebt(const RateLedger& ledger, const char* id) {
+    if (!ledger.owes()) {
+        return std::nullopt;
+    }
+    return debt(id, static_cast<std::uint32_t>(ledger.originalRate()),
+                static_cast<std::uint32_t>(ledger.knownRate()));
+}
+
+// A failed restore moves the debt to the unpaid list: the published entry
+// stands, so the move publishes nothing, and in particular no clear.
+void testFailedRestoreKeepsDebt() {
+    RateLedger   ledger;
+    RateDebtBook book;
+    ledger.beginSession(96000.0);
+    ownChange(ledger, 44100.0);
+    const std::vector<Entry> opened = book.publish(sessionDebt(ledger, "hp"));
+    CHECK(opened.size() == 1);
+    CHECK(!opened.empty() && opened[0] == debt("hp", 96000, 44100));
+
+    // The close's restore did not reach the device: keep the debt, end the
+    // session's own claim.
+    book.keepUnpaid(debt("hp", 96000, 44100));
+    ledger.settle();
+    CHECK(book.publish(sessionDebt(ledger, "hp")).empty());
+    CHECK(book.unpaid().size() == 1);
+}
+
+// A later session on the same device, which comes back at the borrowed rate,
+// carries the debt: the original is 96000 again and the session owes it with
+// no rate change, still publishing nothing new. A device that comes back at
+// another rate makes the debt moot.
+void testLaterSessionCarriesDebt() {
+    RateLedger   ledger;
+    RateDebtBook book;
+    book.keepUnpaid(debt("hp", 96000, 44100));
+    CHECK(book.publish(std::nullopt).size() == 1);  // the debt as kept
+
+    const std::optional<Entry> carried = book.takeUnpaid("hp");
+    CHECK(carried.has_value());
+    CHECK(book.unpaid().empty());
+    ledger.beginSession(44100.0);
+    CHECK(carried && ledger.carry(carried->originalHz, carried->borrowedHz));
+    CHECK(ledger.originalRate() == 96000.0);
+    CHECK(ledger.owes());
+    CHECK(book.publish(sessionDebt(ledger, "hp")).empty());  // same entry stands
+
+    // The session's close repays it: the device's clear.
+    ledger.settle();
+    const std::vector<Entry> closed = book.publish(sessionDebt(ledger, "hp"));
+    CHECK(closed.size() == 1);
+    CHECK(!closed.empty() && closed[0] == debt("hp", 0, 0));
+
+    // Back at another rate: the debt is moot, the session owes nothing, and
+    // the next publication clears the device.
+    RateLedger   moved;
+    RateDebtBook book2;
+    book2.keepUnpaid(debt("hp", 96000, 44100));
+    CHECK(book2.publish(std::nullopt).size() == 1);
+    const std::optional<Entry> stale = book2.takeUnpaid("hp");
+    moved.beginSession(48000.0);
+    CHECK(stale && !moved.carry(stale->originalHz, stale->borrowedHz));
+    CHECK(moved.originalRate() == 48000.0);
+    CHECK(!moved.owes());
+    const std::vector<Entry> cleared = book2.publish(sessionDebt(moved, "hp"));
+    CHECK(cleared.size() == 1);
+    CHECK(!cleared.empty() && cleared[0] == debt("hp", 0, 0));
+}
+
+// The settle's verdicts, and a settle that restores publishes that device's
+// clear.
+void testSettleRestoresAndClears() {
+    const Entry hp = debt("hp", 96000, 44100);
+    CHECK(RateDebtBook::settlement(hp, 0.0) == RateDebtBook::Settlement::Keep);
+    CHECK(RateDebtBook::settlement(hp, 44100.0) == RateDebtBook::Settlement::Restore);
+    CHECK(RateDebtBook::settlement(hp, 48000.0) == RateDebtBook::Settlement::Moot);
+    CHECK(RateDebtBook::settlement(hp, 96000.0) == RateDebtBook::Settlement::Moot);
+
+    RateDebtBook book;
+    book.keepUnpaid(hp);
+    CHECK(book.publish(std::nullopt).size() == 1);
+    CHECK(book.takeUnpaid("hp").has_value());  // the restore reached the device
+    const std::vector<Entry> events = book.publish(std::nullopt);
+    CHECK(events.size() == 1);
+    CHECK(!events.empty() && events[0] == debt("hp", 0, 0));
+    CHECK(book.publish(std::nullopt).empty());
+}
+
+// Two devices: the headphones' unpaid debt and the speakers' live session
+// publish and clear independently.
+void testTwoDevicesIndependent() {
+    RateDebtBook book;
+    book.keepUnpaid(debt("hp", 96000, 44100));
+    const std::vector<Entry> kept = book.publish(std::nullopt);
+    CHECK(kept.size() == 1 && kept[0] == debt("hp", 96000, 44100));
+
+    RateLedger speakers;
+    speakers.beginSession(48000.0);
+    ownChange(speakers, 88200.0);
+    const std::vector<Entry> opened = book.publish(sessionDebt(speakers, "spk"));
+    CHECK(opened.size() == 1 && opened[0] == debt("spk", 48000, 88200));
+
+    speakers.settle();  // the speakers' close repaid them
+    const std::vector<Entry> closed = book.publish(sessionDebt(speakers, "spk"));
+    CHECK(closed.size() == 1 && closed[0] == debt("spk", 0, 0));
+    CHECK(book.unpaid().size() == 1);
+
+    CHECK(book.takeUnpaid("hp").has_value());  // the headphones settled
+    const std::vector<Entry> settled = book.publish(std::nullopt);
+    CHECK(settled.size() == 1 && settled[0] == debt("hp", 0, 0));
+
+    // A repeat keep for the same device replaces its entry.
+    book.keepUnpaid(debt("hp", 96000, 44100));
+    book.keepUnpaid(debt("hp", 96000, 48000));
+    CHECK(book.unpaid().size() == 1);
+    CHECK(book.unpaid()[0] == debt("hp", 96000, 48000));
+    book.keepUnpaid(debt("", 96000, 48000));  // no device: ignored
+    CHECK(book.unpaid().size() == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -175,6 +311,10 @@ int main() {
     testThirdRateAndFailedReadback();
     testNoDebtAndSettle();
     testRatesEqualTolerance();
+    testFailedRestoreKeepsDebt();
+    testLaterSessionCarriesDebt();
+    testSettleRestoresAndClears();
+    testTwoDevicesIndependent();
 
     if (g_failures == 0) {
         std::puts("RateLedgerTest: all checks passed");

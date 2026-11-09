@@ -672,6 +672,46 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// A paced NullSink that counts settleRateDebts() calls, so a test can see
+// when the engine asks a sink to settle its unpaid debts. The wrapped
+// NullSink's fire* injectors drive the events.
+class SettleCountingSink final : public IAudioSink {
+public:
+    [[nodiscard]] NullSink& inner() noexcept { return m_inner; }
+    [[nodiscard]] int settles() const noexcept {
+        return m_settles.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] SinkCapabilities capabilities() const override {
+        return m_inner.capabilities();
+    }
+    [[nodiscard]] std::vector<rawform::audio::AudioDeviceInfo> enumerateDevices()
+        const override {
+        return m_inner.enumerateDevices();
+    }
+    void setEventListener(ISinkEventListener* listener) override {
+        m_inner.setEventListener(listener);
+    }
+    void settleRateDebts() override {
+        m_settles.fetch_add(1, std::memory_order_release);
+    }
+    bool open(const AudioFormat& sourceFormat, const RateDecision& decision,
+              IPullSource* source) override {
+        return m_inner.open(sourceFormat, decision, source);
+    }
+    [[nodiscard]] bool start() override { return m_inner.start(); }
+    void               stop() override { m_inner.stop(); }
+    void               close() override { m_inner.close(); }
+    [[nodiscard]] AudioFormat currentFormat() const override {
+        return m_inner.currentFormat();
+    }
+
+private:
+    NullSink         m_inner{NullSink::Mode::Paced};
+    std::atomic<int> m_settles{0};
+};
+
+// ---------------------------------------------------------------------------
 // Thread-safe listener that records the engine's notifications for assertion.
 // The engine fires these on its own thread, so every access is guarded. It
 // keeps a position log, and an optional engine pointer so a track change can also
@@ -2096,6 +2136,50 @@ void testShutdownDeliversFinalRateDebt() {
     CHECK(listener.errors() == 0);
 }
 
+// A device-list change asks the sink to settle its unpaid rate debts while
+// Stopped, and not while Playing, where a blocking restore would starve the
+// ring. Each change's enumeration push marks the moment it was handled.
+void testDeviceListChangeSettlesDebtsWhenNotPlaying() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto                sink    = std::make_unique<SettleCountingSink>();
+    SettleCountingSink* sinkPtr = sink.get();
+    sinkPtr->inner().setDevices(twoTestDevices());
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    auto waitForLists = [&listener](std::size_t count) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+        while (listener.deviceLists().size() < count &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return listener.deviceLists().size() >= count;
+    };
+
+    sinkPtr->inner().fireDeviceListChanged();
+    CHECK(waitForLists(1));
+    CHECK(sinkPtr->settles() == 1);  // Stopped: settled
+
+    engine.enqueue("ramp:9000000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+    sinkPtr->inner().fireDeviceListChanged();
+    CHECK(waitForLists(2));
+    CHECK(sinkPtr->settles() == 1);  // Playing: passed over
+
+    engine.stop();
+    CHECK(waitForState(engine, State::Stopped));
+    sinkPtr->inner().fireDeviceListChanged();
+    CHECK(waitForLists(3));
+    CHECK(sinkPtr->settles() == 2);  // Stopped again: settled
+    CHECK(listener.errors() == 0);
+}
+
 // ---------------------------------------------------------------------------
 // OUTPUT FAILURE SCENARIOS: the session ending from the sink's side. Three
 // shapes, all ending in the same place (onError, Stopped, the device released,
@@ -3370,6 +3454,7 @@ int main() {
     testDefaultDeviceChangeIgnoredWhenPinned();
     testDeviceListAndDebtEventsRelay();
     testShutdownDeliversFinalRateDebt();
+    testDeviceListChangeSettlesDebtsWhenNotPlaying();
 
     testOutputFailedEventStopsAndRetries();
     testOutputFailedWhileStoppedIgnored();

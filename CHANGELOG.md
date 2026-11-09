@@ -162,6 +162,10 @@ that ships.
   `rate_ledger.yaml` behind after the device rate was restored, so the next
   launch no longer acts on a stale ledger. The ledger now keeps one entry per
   device.
+- CoreAudio: a device unplugged while rawform held its sample rate gets its
+  original rate back when it returns, instead of keeping the borrowed one.
+  The failed restore is now reported as failed (it read "restored device
+  rate to 0 Hz") and its debt is kept until the device is back.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no

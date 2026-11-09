@@ -66,18 +66,27 @@ Because the rate switch is device-wide and is repaid only when the device
 closes, a session that dies holding a switched rate would leave the device
 at that rate for every other application. rawform therefore writes
 `rate_ledger.yaml` (in the config directory, next to `playback.yaml`) the
-moment a session borrows a rate, recording the device, its original rate
-and the borrowed one, and deletes the file when the debt is repaid. The
-file exists only while a rate change is in force, so on a healthy machine
-it is rarely seen.
+moment a session borrows a rate, recording each device, its original rate
+and the borrowed one, and removes a device's entry when its debt is repaid;
+the file goes with the last entry. The file exists only while a rate change
+is in force, so on a healthy machine it is rarely seen.
 
-On the next launch, a ledger left behind by a crash is read before the
-first open: if the device is still at the borrowed rate it is set back to
-the original, and the console says so; if the device has since moved (or is
-gone) the ledger is moot. The file is deleted in every case. A rate changed
-by another application while rawform held it is treated as that
-application's choice and is not undone. Linux never writes this file; the
-PipeWire backend's rate force lifts with the stream.
+A device unplugged while rawform holds its rate cannot be restored at that
+moment. The console says the restore failed and the debt is kept, and the
+entry stays in the ledger. When the device comes back, rawform restores it
+once it is idle: right away if nothing is playing, otherwise when playback
+next stops, or by carrying the debt into the next session on that device,
+whose close restores it. The same applies to a device that refuses the
+restore.
+
+On the next launch, a ledger left behind (by a crash, or by a device that
+was still unplugged at quit) is read before the first open: for each
+device still at the borrowed rate, the original is set back, and the
+console says so; a device that has since moved, or is gone, is left alone.
+The launch deletes the file in every case. A rate changed by another
+application while rawform held it is treated as that application's choice
+and is not undone. Linux never writes this file; the PipeWire backend's
+rate force lifts with the stream.
 
 ## Diagnostics
 

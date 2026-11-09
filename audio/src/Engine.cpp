@@ -714,7 +714,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void doSelectOutputDevice(const std::string& id);    // pin device, reopen-at-position
     void doExternalRateChanged(std::uint32_t newRateHz); // republish the outcome
     void doDefaultDeviceChanged();                       // refresh; reopen when following
-    void doDeviceListChanged();                          // push a fresh enumeration
+    void doDeviceListChanged();                          // settle debts, re-enumerate
     void doRateDebtChanged(const std::string& deviceId,  // forward for persistence
                            std::uint32_t originalRateHz, std::uint32_t borrowedRateHz);
     void doOutputFailed(const std::string& reason);      // error, teardown, Stopped
@@ -1276,8 +1276,16 @@ void Engine::Impl::doDefaultDeviceChanged() {
 }
 
 // The selectable set changed (hot-plug, profile flip): push a fresh
-// enumeration so any open picker tracks it live.
+// enumeration so any open picker tracks it live. A device coming back may be
+// one a close could not restore, so the sink settles its unpaid rate debts
+// first, except while Playing: a restore can block the engine thread for up to
+// its settle timeout, longer than the ring's runway. A debt passed over here
+// is repaid by the next close, the next session on that device, or the next
+// launch.
 void Engine::Impl::doDeviceListChanged() {
+    if (sink && stateAtomic.load(std::memory_order_relaxed) != State::Playing) {
+        sink->settleRateDebts();
+    }
     doRequestOutputDevices();
 }
 

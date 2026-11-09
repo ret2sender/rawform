@@ -170,7 +170,7 @@ the Flatpak sandbox the same paths resolve to
 | `queue_columns.rwftp` | Playback Queue tab column layout |
 | `live_playlist/*.rwfpl` | One live copy per open playlist tab |
 | `live_playlist/.session` | Tab order, active tab, and the Playback Queue tab's position when shown |
-| `rate_ledger.yaml` | CoreAudio rate-debt crash ledger. Exists only transiently on macOS while a session holds a rate change; a crash leaves it behind and the next launch restores the device rate from it. Never appears on Linux. |
+| `rate_ledger.yaml` | CoreAudio rate-debt ledger, one entry per device. Exists only on macOS while a device sits at a rate rawform switched it to, including a device unplugged before its rate could be restored; a crash, or a quit with that device still away, leaves it behind and the next launch restores the device rates from it. Never appears on Linux. |
 
 `.rwfpl` and `.rwftp` are binary formats (Qt `QDataStream`); the YAML files
 are plain text. All writes are atomic (`QSaveFile`). Deleting the directory

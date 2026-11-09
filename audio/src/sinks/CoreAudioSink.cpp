@@ -78,6 +78,15 @@
 // listener is installed before the open's own switch so that switch is
 // classified like every later one.
 //
+// A restore that misses (the device was unplugged, refused the set, or
+// settled on another rate) keeps the debt instead of claiming success: it
+// moves to the unpaid list of the ledger's RateDebtBook, stays published, and
+// is repaid when the device is back. A later open of that device carries it
+// as the session's original, adding no rate transition; settleRateDebts() (the
+// engine calls it on a device-list change while not Playing) and every close
+// restore the unpaid debts of devices that are back and idle, by the
+// crash-recovery rule; and the next launch repays whatever is still persisted.
+//
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
 // property listeners live for the sink's whole life and report default-device
@@ -134,6 +143,7 @@
 #include <cstdio>
 #include <cstring>  // NOLINT: std::memset in renderCallback
 #include <mutex>
+#include <optional>  // the session's debt, when it owes one
 #include <span>  // the channel position table's view
 #include <string>
 #include <vector>
@@ -186,11 +196,12 @@ struct CoreAudioSinkImpl {
     // stateMtx guards what BOTH the engine thread and CoreAudio's notification
     // threads touch: the restore ledger (including whether one of our own
     // rate sets is in progress), the working format the forgiveness callback
-    // compares against, the installed event listener, and the last debt shape
-    // published. Every guarded section is short and allocation-light; the RT
-    // render path never touches any of it.
+    // compares against, the installed event listener, and the unpaid debts with
+    // what was last published about them. Every guarded section is short and
+    // allocation-light; the RT render path never touches any of it.
     std::mutex          stateMtx;
     RateLedger          ledger;                      // the session's rate debt
+    RateDebtBook        debts;                       // unpaid debts, publication state
     ISinkEventListener* events             = nullptr;
     bool                systemListeners    = false;  // ctor-installed pair
     bool                deviceListener     = false;  // per-open nominal-rate listener
@@ -200,9 +211,6 @@ struct CoreAudioSinkImpl {
     bool                followingDefault   = false;  // this open resolved the default
     std::string         deviceUidStr;                // bound device's UID, for debt events
     std::string         deviceNameStr;               // bound device's name, for failure text
-    bool                lastDebtActive     = false;  // last published debt shape
-    std::uint32_t       lastDebtBorrowed   = 0;
-    std::string         lastDebtUid;                 // device the active debt names
 };
 
 namespace {
@@ -693,6 +701,37 @@ OSStatus onDeviceOverloadEvent(AudioObjectID /*objectId*/, UInt32 /*nAddrs*/,
     return noErr;
 }
 
+// The session's own debt as the persistence feed carries it: present only
+// while the session owes one on a device with a UID. Called under stateMtx.
+std::optional<RateDebtBook::Entry> sessionDebt(const CoreAudioSinkImpl& impl) {
+    if (!impl.ledger.owes() || impl.device == kAudioObjectUnknown ||
+        impl.deviceUidStr.empty()) {
+        return std::nullopt;
+    }
+    // The NOMINAL rate we left the device at, not the AUHAL measurement: the
+    // crash-recovery repay compares this against the nominal rate, and a
+    // measurement that misread the device would make a real debt look moot.
+    return RateDebtBook::Entry{
+        .deviceId   = impl.deviceUidStr,
+        .originalHz = static_cast<std::uint32_t>(std::lround(impl.ledger.originalRate())),
+        .borrowedHz = static_cast<std::uint32_t>(std::lround(impl.ledger.knownRate())),
+    };
+}
+
+// Publish every per-device change since the last publication: the session's
+// debt and the unpaid ones. Called under stateMtx, from the engine thread and
+// from the forgiveness callback alike, so the events leave in the order the
+// ledger changed and a detached listener fences them.
+void publishDebtLocked(CoreAudioSinkImpl& impl) {
+    const std::vector<RateDebtBook::Entry> changes = impl.debts.publish(sessionDebt(impl));
+    if (impl.events == nullptr) {
+        return;
+    }
+    for (const RateDebtBook::Entry& e : changes) {
+        impl.events->onRateDebtChanged(e.deviceId, e.originalHz, e.borrowedHz);
+    }
+}
+
 // The forgiveness site: a nominal-rate change on the bound device that WE
 // did not initiate is the user (or another program) asserting ownership. The
 // asserted rate becomes the session baseline: the debt is gone, the final
@@ -718,12 +757,6 @@ OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     impl->bitPerfect.store(
         ratesEqual(newRate, static_cast<double>(impl->working.sampleRate)),
         std::memory_order_relaxed);
-    std::string forgivenUid;
-    if (impl->lastDebtActive) {
-        forgivenUid.swap(impl->lastDebtUid);
-    }
-    impl->lastDebtActive   = false;
-    impl->lastDebtBorrowed = 0;
     std::fprintf(stderr,
                  "CoreAudioSink: external device rate change to %.0f Hz "
                  "(rate debt forgiven)\n",
@@ -731,54 +764,85 @@ OSStatus onDeviceRateEvent(AudioObjectID objectId, UInt32 /*nAddrs*/,
     if (impl->events != nullptr) {
         impl->events->onExternalRateChanged(
             static_cast<std::uint32_t>(std::lround(newRate)));
-        if (!forgivenUid.empty()) {
-            impl->events->onRateDebtChanged(forgivenUid, 0, 0);  // cleared
-        }
     }
+    publishDebtLocked(*impl);  // the forgiven device's clear
     return noErr;
 }
 
-// Publish the ledger's shape when it CHANGED since the last publication (the
-// persistence feed). An event names one device, so the clear goes out under
-// the UID the debt was published with. Engine thread; takes and releases
-// stateMtx itself.
+// publishDebtLocked for the engine-thread paths. Takes and releases stateMtx.
 void publishDebt(CoreAudioSinkImpl* impl) {
-    ISinkEventListener* l = nullptr;
-    std::string         uid;
-    std::uint32_t       original = 0;
-    std::uint32_t       borrowed = 0;
+    std::lock_guard<std::mutex> lock(impl->stateMtx);
+    publishDebtLocked(*impl);
+}
+
+// Repay what earlier closes could not, for each device that is back, except
+// skipUid (the device this sink is bound to, or has just closed). The rule is
+// the crash-recovery one: a device still at the borrowed rate is restored, one
+// moved since is dropped as moot (someone else chose that rate), an absent one
+// waits. Engine thread; each restore blocks, so stateMtx is held only around
+// the bookkeeping. The engine thread is the only one that changes the unpaid
+// list, so the copy taken here stays current.
+void settleUnpaid(CoreAudioSinkImpl* impl, const std::string& skipUid) {
+    std::vector<RateDebtBook::Entry> unpaid;
     {
         std::lock_guard<std::mutex> lock(impl->stateMtx);
-        const bool active =
-            impl->ledger.owes() && impl->device != kAudioObjectUnknown;
-        // The NOMINAL rate we left the device at, not the AUHAL measurement:
-        // the crash-recovery repay compares this against the nominal rate, and
-        // a measurement that misread the device would make a real debt look
-        // moot.
-        borrowed = active ? static_cast<std::uint32_t>(
-                                std::lround(impl->ledger.knownRate()))
-                          : 0;
-        if (active == impl->lastDebtActive &&
-            borrowed == impl->lastDebtBorrowed &&
-            (!active || impl->deviceUidStr == impl->lastDebtUid)) {
-            return;  // same shape; nothing to say
-        }
-        if (active) {
-            original = static_cast<std::uint32_t>(
-                std::lround(impl->ledger.originalRate()));
-            uid = impl->deviceUidStr;
-        } else {
-            uid = impl->lastDebtUid;  // original stays 0: the clear
-        }
-        impl->lastDebtActive   = active;
-        impl->lastDebtBorrowed = borrowed;
-        impl->lastDebtUid      = active ? impl->deviceUidStr : std::string{};
-        l                      = impl->events;
+        unpaid = impl->debts.unpaid();
     }
-    if (l == nullptr || uid.empty()) {
-        return;  // no listener, or a device without a UID: nothing to persist
+    bool changed = false;
+    for (const RateDebtBook::Entry& debt : unpaid) {
+        if (debt.deviceId == skipUid) {
+            continue;
+        }
+        const AudioDeviceID dev     = deviceByUid(debt.deviceId);
+        const double        current =
+            (dev != kAudioObjectUnknown) ? deviceNominalRate(dev) : 0.0;
+        std::optional<RateDebtBook::Entry> stillOwed;  // nullopt: the debt is gone
+        switch (RateDebtBook::settlement(debt, current)) {
+            case RateDebtBook::Settlement::Keep:
+                continue;  // absent: nothing to do yet
+            case RateDebtBook::Settlement::Moot:
+                sinkLog(impl->logOut,
+                        "CoreAudioSink: unpaid rate debt on '%s' is moot (device at "
+                        "%.0f Hz, not the borrowed %u Hz); dropped",
+                        debt.deviceId.c_str(), current, debt.borrowedHz);
+                break;
+            case RateDebtBook::Settlement::Restore: {
+                double     restored = 0.0;
+                const bool reached  = setDeviceNominalRate(
+                    dev, static_cast<double>(debt.originalHz), &restored);
+                if (reached) {
+                    sinkLog(impl->logOut,
+                            "CoreAudioSink: repaid unpaid rate debt on '%s': %u -> "
+                            "%.0f Hz",
+                            debt.deviceId.c_str(), debt.borrowedHz, restored);
+                } else {
+                    sinkLog(impl->logOut,
+                            "CoreAudioSink: repay of unpaid rate debt on '%s' to %u Hz "
+                            "FAILED (device at %.0f Hz); the debt is kept",
+                            debt.deviceId.c_str(), debt.originalHz, restored);
+                    if (restored <= 0.0 ||
+                        RateLedger::ratesEqual(restored,
+                                               static_cast<double>(debt.borrowedHz))) {
+                        continue;  // unchanged: still owed as recorded
+                    }
+                    // It landed on a third rate: that is where a repay must find it.
+                    stillOwed = debt;
+                    stillOwed->borrowedHz =
+                        static_cast<std::uint32_t>(std::lround(restored));
+                }
+                break;
+            }
+        }
+        std::lock_guard<std::mutex> lock(impl->stateMtx);
+        (void)impl->debts.takeUnpaid(debt.deviceId);
+        if (stillOwed) {
+            impl->debts.keepUnpaid(*stillOwed);
+        }
+        changed = true;
     }
-    l->onRateDebtChanged(uid, original, borrowed);
+    if (changed) {
+        publishDebt(impl);
+    }
 }
 
 }  // namespace
@@ -959,6 +1023,39 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
               "set CurrentDevice", m_impl->logOut)) {
         close();
         return false;
+    }
+
+    // An earlier session on this device may have closed without repaying
+    // (unplugged mid-play, a refused restore). If the device still sits at
+    // that debt's borrowed rate, its original becomes this session's, so the
+    // session owes it without a transition of its own and its close repays
+    // it; if the device moved since, the debt is moot. Taken here, past every
+    // failure that returns without close(), so a carried debt always reaches
+    // a close.
+    {
+        bool                               carried = false;
+        std::optional<RateDebtBook::Entry> unpaid;
+        double                             nowRate = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+            unpaid = m_impl->debts.takeUnpaid(m_impl->deviceUidStr);
+            if (unpaid) {
+                carried = m_impl->ledger.carry(static_cast<double>(unpaid->originalHz),
+                                               static_cast<double>(unpaid->borrowedHz));
+                nowRate = m_impl->ledger.knownRate();
+            }
+        }
+        if (unpaid && carried) {
+            sinkLog(m_impl->logOut,
+                    "CoreAudioSink: carrying the unpaid rate debt on %s (restore to "
+                    "%u Hz at close)",
+                    m_impl->deviceNameStr.c_str(), unpaid->originalHz);
+        } else if (unpaid) {
+            sinkLog(m_impl->logOut,
+                    "CoreAudioSink: unpaid rate debt on %s is moot (device at %.0f Hz, "
+                    "not the borrowed %u Hz); dropped",
+                    m_impl->deviceNameStr.c_str(), nowRate, unpaid->borrowedHz);
+        }
     }
 
     // 3. Start listening on the bound device BEFORE touching its rate:
@@ -1273,30 +1370,61 @@ void CoreAudioSink::close() {
 
     // Restore the device's original nominal rate if WE changed it. Leaving a
     // device at a rate its hardware does not faithfully clock corrupts all
-    // system audio, so this is mandatory, not etiquette.
+    // system audio, so this is mandatory, not etiquette. A restore that does
+    // not reach the original (the device is gone, refused the set, or settled
+    // elsewhere) is not reported as done: the debt moves to the unpaid list,
+    // stays published, and is repaid when the device is back.
+    const bool    wasOpened     = m_impl->opened;
     bool          restoreNeeded = false;
     double        restoreTo     = 0.0;
+    double        borrowed      = 0.0;
     AudioDeviceID restoreDev    = kAudioObjectUnknown;
+    std::string   closedUid;
     {
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
         restoreNeeded = m_impl->ledger.owes() &&
                         m_impl->device != kAudioObjectUnknown;
         restoreTo  = m_impl->ledger.originalRate();
+        borrowed   = m_impl->ledger.knownRate();
         restoreDev = m_impl->device;
+        closedUid  = m_impl->deviceUidStr;
     }
     if (restoreNeeded) {
         // The restore's wait blocks; the mutex is NOT held across it.
-        double restored = 0.0;
-        setDeviceNominalRate(restoreDev, restoreTo, &restored);
-        sinkLog(m_impl->logOut, "CoreAudioSink: restored device rate to %.0f Hz",
-                restored);
+        double     restored = 0.0;
+        const bool reached  = setDeviceNominalRate(restoreDev, restoreTo, &restored);
+        if (reached) {
+            sinkLog(m_impl->logOut, "CoreAudioSink: restored device rate to %.0f Hz",
+                    restored);
+        } else {
+            sinkLog(m_impl->logOut,
+                    "CoreAudioSink: restore of device rate to %.0f Hz FAILED (%s); "
+                    "the debt is kept",
+                    restoreTo, m_impl->deviceNameStr.c_str());
+        }
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-        m_impl->ledger.settle();
+        if (!reached) {
+            // A later repay must find the device where it sits now: where the
+            // failed restore landed, or, when nothing could be read (gone), the
+            // rate this session left it at.
+            const double now = (restored > 0.0) ? restored : borrowed;
+            m_impl->debts.keepUnpaid(RateDebtBook::Entry{
+                .deviceId   = closedUid,
+                .originalHz = static_cast<std::uint32_t>(std::lround(restoreTo)),
+                .borrowedHz = static_cast<std::uint32_t>(std::lround(now)),
+            });
+        }
+        m_impl->ledger.settle();  // the session's own claim ends either way
     }
-    publishDebt(m_impl.get()); // cleared, when there was one to clear
+    publishDebt(m_impl.get()); // a repaid debt's clear; a kept one publishes nothing
 
     m_impl->opened = false;
     m_impl->source = nullptr;
+
+    // Other devices an earlier close could not restore may be back by now.
+    if (wasOpened) {
+        settleUnpaid(m_impl.get(), closedUid);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,6 +1480,17 @@ bool CoreAudioSink::repayStaleRateDebt(const std::string& deviceId,
                  deviceId.c_str(), borrowedRateHz, restored,
                  reached ? "restored" : "restore NOT confirmed");
     return reached;
+}
+
+// The bound device is skipped: its debt, if it had one, was carried into the
+// session open on it, and that session's close repays it.
+void CoreAudioSink::settleRateDebts() {
+    std::string bound;
+    if (m_impl->opened) {
+        std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+        bound = m_impl->deviceUidStr;
+    }
+    settleUnpaid(m_impl.get(), bound);
 }
 
 void CoreAudioSink::setEventListener(ISinkEventListener* listener) {

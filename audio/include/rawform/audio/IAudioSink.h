@@ -58,7 +58,8 @@
 // device is repaid at close(); a sink that keeps a ledger publishes it through
 // the event channel so the owner can persist it, and repayStaleRateDebt()
 // settles a persisted debt left by a crashed session before the sink is ever
-// opened.
+// opened. A debt close() could not repay stays published and is repaid when
+// its device is back: by the next session on it, or by settleRateDebts().
 //
 // The device surface. enumerateDevices() lists the selectable outputs by
 // persistent id (AudioDeviceInfo in Types.h) and selectDevice() pins one; the
@@ -146,7 +147,7 @@ struct IPullSource {
 ///     when it is following the default.
 ///   - onDeviceListChanged: the selectable device set, or its default-marking,
 ///     changed: a fresh enumeration would differ. The engine pushes one so
-///     pickers stay current.
+///     pickers stay current, after settleRateDebts() while not Playing.
 ///   - onRateDebtChanged: one device's entry in the restore ledger changed;
 ///     the engine forwards it for persistence (crash recovery). deviceId is
 ///     the device's persistent id and is never empty. originalRateHz 0 clears
@@ -242,6 +243,16 @@ public:
         (void)borrowedRateHz;
         return false;
     }
+
+    /// Repay the debts an earlier close() could not (the device vanished or
+    /// refused the restore), for every such device that is present again and
+    /// not open, by repayStaleRateDebt's rule: restored iff it still sits at
+    /// the borrowed rate, dropped as moot if anyone moved it since, kept while
+    /// it is absent. Engine thread. The engine calls it on a device-list
+    /// change while not Playing, because a restore can block for a while and
+    /// a playing ring must not starve. Default no-op: a sink with nothing
+    /// unpaid has nothing to settle.
+    virtual void settleRateDebts() {}
 
     /// Negotiate the device for `sourceFormat` (the interleaved float32 stream the
     /// source delivers) per `decision` (the rate the device should run at and
