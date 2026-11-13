@@ -44,10 +44,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QLatin1StringView>
 #include <QUrl>
 
-#include <algorithm>  // std::clamp, std::max: the DCT step for the request
-#include <cmath>      // std::ceil
+#include <algorithm>    // std::clamp, std::max: the DCT step for the request
+#include <array>        // std::array: the sidecar name and extension lists
+#include <cmath>        // std::ceil
+#include <type_traits>  // std::is_trivially_destructible_v
 
 #include <taglib/fileref.h>
 #include <taglib/tbytevector.h>
@@ -58,6 +61,20 @@
 
 namespace rawform {
 namespace {
+
+using namespace Qt::StringLiterals;
+
+/// The conventional sidecar cover-art names and extensions, tried names first.
+/// An image-reader thread reads these, so they must have no exit-time
+/// destructor that the main thread could run while a reader is still using them.
+constexpr std::array<QLatin1StringView, 5> kSidecarNames = {
+    "cover"_L1, "folder"_L1, "front"_L1, "album"_L1, "albumart"_L1,
+};
+constexpr std::array<QLatin1StringView, 5> kSidecarExts = {
+    "jpg"_L1, "jpeg"_L1, "png"_L1, "webp"_L1, "bmp"_L1,
+};
+static_assert(std::is_trivially_destructible_v<decltype(kSidecarNames)>);
+static_assert(std::is_trivially_destructible_v<decltype(kSidecarExts)>);
 
 /// What one decode cost, for the rawform.perf line: the source and decoded
 /// sizes, the format, and the JPEG DCT step the request landed on (0 when the
@@ -124,18 +141,9 @@ QImage decodeScaled(QImageReader& reader, const QSize& requestedSize, DecodeTrac
 
 /// Try the conventional sidecar cover-art names in @p dir. First hit wins.
 QImage loadSidecar(const QDir& dir, const QSize& requestedSize, DecodeTrace& trace) {
-    static const QStringList kNames = {
-        QStringLiteral("cover"),  QStringLiteral("folder"),
-        QStringLiteral("front"),  QStringLiteral("album"),
-        QStringLiteral("albumart"),
-    };
-    static const QStringList kExts = {
-        QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("png"),
-        QStringLiteral("webp"), QStringLiteral("bmp"),
-    };
-    for (const QString& name : kNames) {
-        for (const QString& ext : kExts) {
-            const QString candidate = dir.absoluteFilePath(name + QLatin1Char('.') + ext);
+    for (const QLatin1StringView name : kSidecarNames) {
+        for (const QLatin1StringView ext : kSidecarExts) {
+            const QString candidate = dir.absoluteFilePath(QString(name) + u'.' + ext);
             if (QFile::exists(candidate)) {
                 QImageReader reader(candidate);
                 const QImage img = decodeScaled(reader, requestedSize, trace);
