@@ -149,7 +149,8 @@ Item {
             font.family: pane.uiFont
             font.pixelSize: Theme.fontSizeSmall
             text: "How often the bars update while a track plays. 30 Hz halves the "
-                  + "work the display costs; the bars settle at the same speed."
+                  + "frames the window draws while a track plays; the bars settle at "
+                  + "the same speed."
         }
 
         Item { Layout.fillHeight: true }  // push rows to the top

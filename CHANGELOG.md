@@ -48,8 +48,8 @@ that ships.
   accessibility roles and names (buttons, radio groups, page tabs, sliders).
 - File > Quit (Ctrl+Q) on Linux and Windows.
 - Settings > Spectrum view > Refresh rate: 60 Hz (the default) or 30 Hz,
-  which halves the work the spectrum display costs while a track plays; the
-  bars settle at the same speed at both. Stored as `refresh_hz` in
+  which halves the frames the window draws while a track plays; the bars
+  settle at the same speed at both. Stored as `refresh_hz` in
   `spectrum.yaml`.
 - Three UI unit tests (the Properties apply sequencer, the playlist model's
   bulk edits, the worker-result release helper), bringing the tree to
