@@ -94,14 +94,18 @@ public:
 
     /// Upsert: replace the pattern of the existing preset named @p name (kept
     /// in place), or append a new preset. @p name is trimmed first; an empty
-    /// trimmed name or an empty pattern is a no-op (the dialogs gate these
-    /// too; the store must not rely on it). Persists and emits
-    /// patternsChanged() on any real change.
-    Q_INVOKABLE void save(const QString& name, const QString& pattern);
+    /// trimmed name or an empty pattern is refused, returning false with no
+    /// signal (the dialogs gate these too; the store must not rely on it).
+    /// Persists and emits patternsChanged() on any real change. Returns true
+    /// when the file holds the preset: written now, or already there (the
+    /// identical preset writes nothing). A failed write rolls the change back
+    /// (see persistFailed) and returns false.
+    Q_INVOKABLE bool save(const QString& name, const QString& pattern);
 
-    /// Remove the preset named @p name. No-op for an unknown name. Persists
-    /// and emits patternsChanged().
-    Q_INVOKABLE void remove(const QString& name);
+    /// Remove the preset named @p name, persist, and emit patternsChanged().
+    /// An unknown name writes nothing and returns true. A failed write rolls
+    /// the removal back (see persistFailed) and returns false.
+    Q_INVOKABLE bool remove(const QString& name);
 
     // --- last-used preset (dialog convenience) -----------------------------
     // Persisted in the same file (top-level `last_used:` key) so a freshly
@@ -112,10 +116,12 @@ public:
     /// The last name passed to setLastUsed, "" when none was ever set.
     [[nodiscard]] Q_INVOKABLE QString lastUsed() const { return m_lastUsed; }
 
-    /// Record @p name (trimmed) as the last-used preset and persist. No-op
-    /// on an unchanged or empty trimmed value. Does not emit: the preset
-    /// LIST is unchanged, and the value is only read at dialog open.
-    Q_INVOKABLE void setLastUsed(const QString& name);
+    /// Record @p name (trimmed) as the last-used preset and persist. An
+    /// unchanged or empty trimmed value writes nothing and returns true. Does
+    /// not emit patternsChanged: the preset LIST is unchanged, and the value
+    /// is only read at dialog open. A failed write restores the previous
+    /// value (see persistFailed) and returns false.
+    Q_INVOKABLE bool setLastUsed(const QString& name);
 
 signals:
     /// The preset list changed (load/save/remove). A dialog re-reads
@@ -123,10 +129,12 @@ signals:
     void patternsChanged();
 
     /// A write to the preset file failed (@p message names the file). The
-    /// in-memory state stands and the dialog still reflects the edit, so the
-    /// dialog owning this store surfaces the message in its status line;
-    /// without that, "Save preset" looked successful while only the console
-    /// knew the file was not written.
+    /// change that asked for the write is rolled back, so memory keeps
+    /// matching the file: the dropdown never lists a preset the next launch
+    /// would not load, and a retry is a real change that writes again. The
+    /// dialog owning this store surfaces the message in its status line, the
+    /// only place the person learns the file was not written. Emitted during
+    /// the failing call, before the rollback.
     void persistFailed(QString message);
 
 protected:
@@ -141,10 +149,10 @@ private:
     /// Index of the preset named @p name (exact match), or -1.
     [[nodiscard]] int indexOf(const QString& name) const;
 
-    /// Write the whole list to the file (atomic; a failed write logs a
-    /// warning, emits persistFailed and keeps the in-memory state). User
-    /// order preserved.
-    void persist();
+    /// Write the whole list to the file (atomic; user order preserved). A
+    /// failed write logs a warning, emits persistFailed and returns false;
+    /// the caller rolls its change back.
+    [[nodiscard]] bool persist();
 
     QString       m_path;       ///< absolute; may not exist yet
     QByteArray    m_banner;

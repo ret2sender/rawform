@@ -126,44 +126,61 @@ QString NamedPatternStore::patternFor(const QString& name) const {
     return i >= 0 ? m_presets.at(i).pattern : QString();
 }
 
-void NamedPatternStore::save(const QString& name, const QString& pattern) {
+bool NamedPatternStore::save(const QString& name, const QString& pattern) {
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty() || pattern.isEmpty()) {
-        return; // the dialogs gate these; the store does not rely on it
+        return false; // the dialogs gate these; the store does not rely on it
     }
     const int i = indexOf(trimmed);
+    if (i >= 0 && m_presets.at(i).pattern == pattern) {
+        return true; // memory matches the file, so the file already holds it
+    }
+    const QList<Preset> before = m_presets;
     if (i >= 0) {
-        if (m_presets.at(i).pattern == pattern) {
-            return; // saving the identical preset is a no-op, no churn
-        }
         m_presets[i].pattern = pattern; // upsert in place, position kept
     } else {
         m_presets.push_back(Preset{ trimmed, pattern });
     }
-    persist();
+    if (!persist()) {
+        m_presets = before;
+        return false;
+    }
     emit patternsChanged();
+    return true;
 }
 
-void NamedPatternStore::remove(const QString& name) {
+bool NamedPatternStore::remove(const QString& name) {
     const int i = indexOf(name);
     if (i < 0) {
-        return;
+        return true;
     }
+    const QList<Preset> before = m_presets;
+    const QString lastUsedBefore = m_lastUsed;
     m_presets.removeAt(i);
     if (m_lastUsed == name) {
         m_lastUsed.clear(); // a fresh dialog must not chase a deleted preset
     }
-    persist();
+    if (!persist()) {
+        m_presets = before;
+        m_lastUsed = lastUsedBefore;
+        return false;
+    }
     emit patternsChanged();
+    return true;
 }
 
-void NamedPatternStore::setLastUsed(const QString& name) {
+bool NamedPatternStore::setLastUsed(const QString& name) {
     const QString trimmed = name.trimmed();
     if (trimmed.isEmpty() || trimmed == m_lastUsed) {
-        return;
+        return true;
     }
+    const QString before = m_lastUsed;
     m_lastUsed = trimmed;
-    persist();
+    if (!persist()) {
+        m_lastUsed = before;
+        return false;
+    }
+    return true;
 }
 
 int NamedPatternStore::indexOf(const QString& name) const {
@@ -175,7 +192,7 @@ int NamedPatternStore::indexOf(const QString& name) const {
     return -1;
 }
 
-void NamedPatternStore::persist() {
+bool NamedPatternStore::persist() {
     // A sequence under a top-level `patterns:` key, preserving user order.
     YAML::Emitter out;
     out << YAML::BeginMap;
@@ -199,7 +216,9 @@ void NamedPatternStore::persist() {
     if (!yamlfile::writeAtomically(m_path, content)) {
         emit persistFailed(QStringLiteral("Could not save the %1 to %2")
                                .arg(m_presetNoun, m_path));
+        return false;
     }
+    return true;
 }
 
 } // namespace rawform

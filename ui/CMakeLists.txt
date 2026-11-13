@@ -986,6 +986,33 @@ if(RAWFORM_BUILD_TESTS)
             rawform_audio
     )
     rawform_add_ui_test(read_only_open rawform_read_open_test)
+
+    # -----------------------------------------------------------------------
+    # The preset store with its writes refused: a read-only config folder and
+    # a regular file in the folder's place, under a QTemporaryDir named by
+    # XDG_CONFIG_HOME. Both subclasses, Qt6::Qml for the QML_ELEMENT headers;
+    # Qt-Quick-free.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_preset_store_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/NamedPatternStoreTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/presets/NamedPatternStore.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/presets/NamedPatternStore.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenamePatternStore.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/rename/RenamePatternStore.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/SearchPresetStore.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/search/SearchPresetStore.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/paths/Paths.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/YamlFile.cpp
+    )
+    target_include_directories(rawform_preset_store_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    target_link_libraries(rawform_preset_store_test PRIVATE
+            Qt6::Core
+            Qt6::Qml
+            yaml-cpp::yaml-cpp
+    )
+    rawform_add_ui_test(named_pattern_store rawform_preset_store_test)
 endif()
 
 # ---------------------------------------------------------------------------
