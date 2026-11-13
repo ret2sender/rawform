@@ -26,8 +26,10 @@
 // itself: it binds `pattern` to that field's text (what Save stores) and
 // applies `loaded` to it (what Load produced); the row never reaches into the
 // dialog. Status messages for the dialog's own status line arrive through
-// `flash`, with the same wording in both dialogs; a store write that failed
-// flashes the store's message instead of the success line.
+// `flash`, with the same wording in both dialogs. A success line follows only
+// a call that reports its write landed; a failed write flashes the store's
+// message, and the store has already undone the change, so the box keeps the
+// typed name for a retry.
 //
 // Programmatic text changes go through setName, which writes BOTH the combo's
 // editText and the editor's text: the content item's declarative text binding
@@ -64,10 +66,6 @@ RowLayout {
     signal loaded(string pattern)
     /// A one-line status for the dialog's status line.
     signal flash(string message)
-
-    // The failure the store reported during the last Save or Delete, if any;
-    // the button's own success line yields to it.
-    property string _persistFailure: ""
 
     spacing: 8
 
@@ -124,7 +122,6 @@ RowLayout {
         Connections {
             target: root.store
             function onPersistFailed(message) {
-                root._persistFailure = message
                 root.flash(message)
             }
             function onPatternsChanged() {
@@ -162,12 +159,12 @@ RowLayout {
         enabled: !root.busy
                  && combo.editText.trim().length > 0
                  && root.pattern.length > 0
+        // The last-used write runs only after the preset is on disk: after a
+        // refused save it would only fail again and repeat the message.
         onClicked: {
-            root._persistFailure = ""
-            root.store.save(combo.editText, root.pattern)
-            root.store.setLastUsed(combo.editText)
-            if (root._persistFailure.length === 0)
-                root.flash("Saved preset '" + combo.editText.trim() + "'")
+            var name = combo.editText
+            if (root.store.save(name, root.pattern) && root.store.setLastUsed(name))
+                root.flash("Saved preset '" + name.trim() + "'")
         }
     }
     ToolDialogButton {
@@ -179,14 +176,14 @@ RowLayout {
                  && root.store.patternFor(combo.editText).length > 0
         onClicked: {
             var name = combo.editText
-            root._persistFailure = ""
-            root.store.remove(name)
+            // A refused delete leaves the preset listed, so its name stays.
+            if (!root.store.remove(name))
+                return
             // patternsChanged already cleared the box (the name no longer
             // resolves); this is the belt to that brace.
             combo.currentIndex = -1
             root.setName("")
-            if (root._persistFailure.length === 0)
-                root.flash("Deleted preset '" + name + "'")
+            root.flash("Deleted preset '" + name + "'")
         }
     }
 }

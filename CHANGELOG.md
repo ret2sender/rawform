@@ -138,6 +138,9 @@ that ships.
 
 ### Fixed
 
+- A preset that could not be saved in the Rename Files or Find dialog no
+  longer reports success when Save is clicked again; the preset is not listed
+  until its file is written.
 - Scanning a library, reading properties and loading embedded art no longer
   open audio files for writing. Each read made a write-open that sync clients
   and media servers could take for a change, and two opens per file on a
