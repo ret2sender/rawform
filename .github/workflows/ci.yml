@@ -207,7 +207,14 @@ jobs:
   tsan-engine:
     name: Engine under TSan (Linux)
     runs-on: ubuntu-latest
-    container: fedora:42
+    # TSan re-executes each test with address randomization off, through
+    # personality(ADDR_NO_RANDOMIZE), when the host kernel randomizes more than
+    # its shadow memory layout allows. Docker's default seccomp profile refuses
+    # that call, and TSan then aborts at start-up, so this one container runs
+    # without the profile.
+    container:
+      image: fedora:42
+      options: --security-opt seccomp=unconfined
     timeout-minutes: 60
     steps:
       # Engine-only dependency set; audio/ needs no Qt, TagLib, or yaml-cpp.
