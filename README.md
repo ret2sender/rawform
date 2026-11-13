@@ -335,7 +335,7 @@ cmake -S audio -B build/core -DCMAKE_BUILD_TYPE=Release
 cmake --build build/core
 ctest --test-dir build/core
 
-# UI unit tests (opt-in; eight console binaries, no display needed). The
+# UI unit tests (opt-in; twelve console binaries, no display needed). The
 # engine's nine tests are registered in this tree too but not built by it,
 # hence the label.
 cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
