@@ -566,6 +566,18 @@ void AudioController::setScopeSource(int source) {
     m_engine.setScopeSource(s);
 }
 
+void AudioController::holdPositionNotify(bool hold) {
+    if (hold) {
+        m_positionGate.hold();
+    } else {
+        emitPositionNotify(m_positionGate.release());
+    }
+}
+
+void AudioController::flushPositionNotify() {
+    emitPositionNotify(m_positionGate.flush());
+}
+
 // ===========================================================================
 // Property reads with logic
 // ===========================================================================
@@ -856,7 +868,6 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
 
 void AudioController::applyPosition(double seconds, int liveBitrateKbps) {
     m_positionSeconds = seconds;
-    emit positionChanged();
 
     // The keyboard-seek landing: the committed target has been reached and no
     // further commit is owed, so the next step may measure from the live
@@ -869,8 +880,19 @@ void AudioController::applyPosition(double seconds, int liveBitrateKbps) {
 
     // Refresh the format line only when the live figure actually moves,
     // so a steady CBR/PCM stream does not re-evaluate the binding every tick.
-    if (liveBitrateKbps != m_liveBitrateKbps) {
-        m_liveBitrateKbps = liveBitrateKbps;
+    const bool bitrateMoved = liveBitrateKbps != m_liveBitrateKbps;
+    m_liveBitrateKbps = liveBitrateKbps;
+
+    // The state above is current at once; only the redraw waits for the
+    // spectrum clock when it holds the gate.
+    emitPositionNotify(m_positionGate.report(bitrateMoved));
+}
+
+void AudioController::emitPositionNotify(PositionNotifyGate::Emit owed) {
+    if (owed.position) {
+        emit positionChanged();
+    }
+    if (owed.bitrate) {
         emit formatSummaryChanged();
     }
 }

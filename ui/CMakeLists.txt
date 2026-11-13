@@ -946,6 +946,20 @@ if(RAWFORM_BUILD_TESTS)
     rawform_add_ui_test(future_release rawform_future_test)
 
     # -----------------------------------------------------------------------
+    # The position-notify gate: while the spectrum clock holds it, the
+    # position tick's notifications wait for the clock's flush and go out
+    # once; a release sends what is owed. Header-only and Qt-free.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_position_gate_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PositionNotifyGateTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PositionNotifyGate.h
+    )
+    target_include_directories(rawform_position_gate_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    rawform_add_ui_test(position_notify_gate rawform_position_gate_test)
+
+    # -----------------------------------------------------------------------
     # The open mode of the read paths: an inotify watch on a fixture in a
     # writable directory proves readTrack and the embedded-art read never
     # ask for write access. Touches the filesystem and needs TagLib, the

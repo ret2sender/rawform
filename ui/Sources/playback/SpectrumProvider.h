@@ -42,6 +42,9 @@
 // none of those frames for an unexposed window, so the work would be for
 // nobody. The window is handed in through setDisplayWindow; an expose restarts
 // the tick at once while playing, or lets the bars finish settling otherwise.
+// While the timer runs it holds AudioController's position notifications and
+// releases them on each tick, so the seek bar moves in the bars' frame instead
+// of drawing one of its own between two ticks (PositionNotifyGate.h).
 // The analyzer is reconfigured whenever the playing track's sample rate changes
 // (the band-to-bin mapping depends on it), which AudioController surfaces through
 // its sampleRateHz / trackChanged.
@@ -188,6 +191,8 @@ private:
     void onTrackChanged();      ///< reconfigure the analyzer on a sample-rate change
     void reconfigureFor(std::uint32_t sampleRate);  ///< (re)size analyzer + scratch
     void updateTimer();         ///< run iff (playing or settling) and the window is exposed
+    void setClockRunning(bool run);  ///< start/stop the timer with its position hold
+    void flushPosition();       ///< release the position notifications owed this tick
     void applyRefreshHz();      ///< the clock interval and the per-tick decay for m_refreshHz
     [[nodiscard]] bool anyBarAlive() const;  ///< a bar is still above flat
 

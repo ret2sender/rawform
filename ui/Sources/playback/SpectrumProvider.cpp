@@ -120,7 +120,11 @@ SpectrumProvider::SpectrumProvider(AudioController* controller, QObject* parent)
     updateTimer();
 }
 
-SpectrumProvider::~SpectrumProvider() = default;
+// The controller outlives the provider, so a running clock gives its hold back
+// rather than leave the position notifications held for good.
+SpectrumProvider::~SpectrumProvider() {
+    setClockRunning(false);
+}
 
 // ---------------------------------------------------------------------------
 int SpectrumProvider::sourceDefault() const { return Output; }
@@ -167,10 +171,22 @@ bool SpectrumProvider::eventFilter(QObject* watched, QEvent* event) {
 void SpectrumProvider::updateTimer() {
     const bool playing = m_controller && m_controller->isPlaying();
     const bool wanted  = (playing || anyBarAlive()) && m_exposed;
-    if (wanted && !m_timer.isActive()) {
+    setClockRunning(wanted);
+}
+
+// The position hold lives exactly as long as the timer runs: a tick is what
+// releases each held notification, so a stopped clock must not keep the hold.
+void SpectrumProvider::setClockRunning(bool run) {
+    if (run == m_timer.isActive()) {
+        return;
+    }
+    if (run) {
         m_timer.start();
-    } else if (!wanted && m_timer.isActive()) {
+    } else {
         m_timer.stop();
+    }
+    if (m_controller) {
+        m_controller->holdPositionNotify(run);
     }
 }
 
@@ -258,6 +274,7 @@ void SpectrumProvider::onTick() {
             m_bars[i] = std::max(target, decayed);
         }
         emit barsChanged();
+        flushPosition();
         return;
     }
 
@@ -275,8 +292,17 @@ void SpectrumProvider::onTick() {
         m_bars[i] = v;
     }
     emit barsChanged();
+    flushPosition();
     if (!anyAlive) {
-        m_timer.stop();
+        setClockRunning(false);
+    }
+}
+
+// The position change owed since the last tick goes out in this pass, beside
+// barsChanged, so both land in the one frame this tick already costs.
+void SpectrumProvider::flushPosition() {
+    if (m_controller) {
+        m_controller->flushPositionNotify();
     }
 }
 

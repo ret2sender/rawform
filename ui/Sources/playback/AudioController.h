@@ -93,6 +93,7 @@
 // pointer in no Q_PROPERTY, stays forward-declared below.)
 #include "media/ReplayGainTags.h"  // replaygain::Values member (the playing track's RG snapshot)
 #include "playback/PlaybackQueue.h" // PlaybackQueue::Origin in a private signature
+#include "playback/PositionNotifyGate.h" // value member: the held position notifications
 #include "playlist/PlaylistModel.h"
 #include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
@@ -368,6 +369,14 @@ public:
     [[nodiscard]] std::size_t copyScopeMono(float* out, std::size_t frames) const;
     void                      setScopeSource(int source);
 
+    /// The spectrum clock's hold on the position-tick notifications (see
+    /// PositionNotifyGate.h): while held, positionChanged and the live-bitrate
+    /// formatSummaryChanged wait for flushPositionNotify, so they redraw in the
+    /// clock's frame instead of one of their own. Releasing sends anything owed.
+    /// The values the getters return are never held.
+    void holdPositionNotify(bool hold);
+    void flushPositionNotify();
+
 public slots:
     // --- transport (invokable from QML) ------------------------------------
 
@@ -559,6 +568,7 @@ private:
     void applyState(int state);
     void applyTrack(const EngineTrackFacts& facts);
     void applyPosition(double seconds, int liveBitrateKbps);
+    void emitPositionNotify(PositionNotifyGate::Emit owed);  ///< send what the gate freed
     void applyError(const QString& message);
     void applyInfo(const QString& message);
     void applyOutputDevices(const QVariantList& devices);
@@ -714,6 +724,7 @@ private:
     QString m_codecName;
     int     m_bitrateKbps      = 0;   ///< nominal/average, fixed at track open
     int     m_liveBitrateKbps  = 0;   ///< moment-to-moment, 0 == use nominal
+    PositionNotifyGate m_positionGate;  ///< held by the spectrum clock while it runs
     int     m_sampleRateHz     = 0;
     int     m_channels         = 0;
     QString m_path;
