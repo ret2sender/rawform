@@ -125,7 +125,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../audio
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Concurrent Core Gui Quick QuickControls2 Svg)
+find_package(Qt6 REQUIRED COMPONENTS Concurrent Core Gui Network Quick QuickControls2 Svg)
 
 # ---------------------------------------------------------------------------
 # yaml-cpp: the format of every per-user store under userConfigDir()
@@ -214,6 +214,10 @@ set(APP_SOURCES
         # Drops a finished QFutureWatcher's result store without re-entering
         # its finished handler; header-only template.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FutureRelease.h
+        # One instance per configuration directory: the lock file, and the
+        # local socket a later launch hands its files over.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.cpp
         # Baked-in sanitizer default suppressions (TSan races, LSan leaks);
         # empty TU in non-sanitizer builds.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp
@@ -576,6 +580,9 @@ target_link_libraries(rawform PRIVATE
         Qt6::Quick
         Qt6::QuickControls2
         Qt6::Concurrent
+        # QLocalServer and QLocalSocket, for the single-instance hand-off. Qt
+        # Qml loads the module anyway, so the deployed set does not grow.
+        Qt6::Network
         # Qt6::Svg is not called by any translation unit; it is linked so the
         # deployment tools (windeployqt, macdeployqt) treat the module as used
         # and ship the qsvgicon imageformat plugin, which the window-icon
@@ -1013,6 +1020,27 @@ if(RAWFORM_BUILD_TESTS)
             yaml-cpp::yaml-cpp
     )
     rawform_add_ui_test(named_pattern_store rawform_preset_store_test)
+
+    # -----------------------------------------------------------------------
+    # The single-instance guard over a real lock file and a real local
+    # socket in a QTemporaryDir: holder, hand-off, abandoned and live locks,
+    # a configuration directory that is missing or refuses the lock. Qt Core
+    # and Qt Network only. It needs AF_UNIX sockets and fails where the
+    # system refuses them (a seccomp sandbox), rather than skip the hand-off.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_single_instance_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/SingleInstanceTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.h
+    )
+    target_include_directories(rawform_single_instance_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    target_link_libraries(rawform_single_instance_test PRIVATE
+            Qt6::Core
+            Qt6::Network
+    )
+    rawform_add_ui_test(single_instance rawform_single_instance_test)
 endif()
 
 # ---------------------------------------------------------------------------
