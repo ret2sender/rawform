@@ -1612,8 +1612,8 @@ void AudioController::setOutputDeviceId(const QString& id) {
     }
     m_outputDeviceId = id;
     // Capture the friendly name from the enumeration the picker showed. A
-    // stale intent applied without the device present keeps the previously
-    // remembered name (better than degrading to the raw id); the empty pin
+    // stale intent applied without the device present keeps the name it last
+    // stored (better than degrading to the raw id); the empty pin
     // clears it.
     if (id.isEmpty()) {
         m_outputDeviceName.clear();

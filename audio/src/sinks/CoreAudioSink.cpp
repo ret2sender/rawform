@@ -136,12 +136,12 @@
 
 #include <atomic>
 #include <chrono>
-#include <cmath>  // NOLINT: std::fabs, std::lround, etc.
+#include <cmath>  // IWYU pragma: keep (std::fabs, std::lround, etc.)
 #include <condition_variable>
 #include <cstddef>  // offsetof for the variable-length channel layout
-#include <cstdint>  // NOLINT: std::uintN_t
+#include <cstdint>  // IWYU pragma: keep (std::uintN_t)
 #include <cstdio>
-#include <cstring>  // NOLINT: std::memset in renderCallback
+#include <cstring>  // IWYU pragma: keep (std::memset in renderCallback)
 #include <mutex>
 #include <optional>  // the session's debt, when it owes one
 #include <span>  // the channel position table's view

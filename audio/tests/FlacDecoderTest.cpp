@@ -59,7 +59,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>  // NOLINT: std::int*_t
+#include <cstdint>  // IWYU pragma: keep (std::int*_t)
 #include <cstdio>
 #include <fstream>  // the damage test rewrites bytes in place
 #include <memory>

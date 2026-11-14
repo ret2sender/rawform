@@ -220,7 +220,7 @@ public:
     void enqueue(std::string path);
 
     /// Make `path` the current track immediately and play it. From Stopped
-    /// this plays THAT path with no transient blip of a previously remembered track:
+    /// this plays THAT path with no transient blip of the remembered track:
     /// it opens and starts `path` directly, where play() from Stopped would instead
     /// replay the remembered currentPath. While Playing or Paused it CUTS to `path`
     /// using the same hold-or-reconfigure machinery as next() (a click-free swap

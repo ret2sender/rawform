@@ -787,13 +787,13 @@ if(RAWFORM_BUILD_TESTS)
     )
     rawform_add_ui_test(playlist_search_filter rawform_search_test)
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # The .rwfpl playlist-format test: round-trip fidelity, the full
     # PlaylistIoError taxonomy, unknown-chunk and short-chunk tolerance,
     # and truncation/bit-flip sweeps over a real written file (run it
     # under ASan/UBSan and the sweeps double as a cheap fuzz of the
     # bounds checks). Filesystem via QTemporaryDir; still Qt-Quick-free.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     add_executable(rawform_playlist_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaylistFileTest.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistFile.cpp
@@ -826,7 +826,7 @@ if(RAWFORM_BUILD_TESTS)
     )
     rawform_add_ui_test(rate_ledger_file rawform_rate_ledger_test)
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # The playback-queue test: the origin sidecar's alignment with the
     # queue model through enqueue, enqueue-next, source edits (persistent
     # index self-healing), reorder, cull, foreign inserts, and resets, plus
@@ -834,7 +834,7 @@ if(RAWFORM_BUILD_TESTS)
     # one links the real model and its spine (schema, pattern evaluator,
     # custom-column registry with yaml-cpp, no file read) and Qt6::Qml for
     # the QML_ELEMENT headers. Still Qt-Quick-free and filesystem-free.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     add_executable(rawform_queue_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaybackQueueTest.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/PlaybackQueue.cpp
@@ -862,13 +862,13 @@ if(RAWFORM_BUILD_TESTS)
     )
     rawform_add_ui_test(playback_queue rawform_queue_test)
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # The Properties apply-sequencer test: every phase of an Apply / OK
     # and of Tools > Reload info, driven by stand-ins for the two editors
     # and the reloader (the ApplyPorts bases) that touch no file, over the
     # real pane models and PlaylistModel. Same spine as the queue test;
     # Qt-Quick-free, filesystem-free, no TagLib.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     add_executable(rawform_apply_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PropertiesApplyControllerTest.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/metadata/ApplyPorts.h
@@ -903,7 +903,7 @@ if(RAWFORM_BUILD_TESTS)
     )
     rawform_add_ui_test(properties_apply rawform_apply_test)
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # The playlist-model test: row removals (the per-run and the one-pass
     # compaction paths) and block moves as the view sees them, through the
     # tab's filter proxy with a selection model bound and with a search in
@@ -911,7 +911,7 @@ if(RAWFORM_BUILD_TESTS)
     # proxy and the search (Qt6::Concurrent for its off-thread haystack
     # build); a QCoreApplication for the search's timer. Qt-Quick-free,
     # filesystem-free.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     add_executable(rawform_model_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/PlaylistModelTest.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playlist/PlaylistModel.cpp
@@ -943,14 +943,14 @@ if(RAWFORM_BUILD_TESTS)
     )
     rawform_add_ui_test(playlist_model rawform_model_test)
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # The future-release test: utils/FutureRelease.h must drop a watcher's
     # finished future from inside its own finished handler without the
     # watcher ever reporting on the empty future it then holds (the
     # replayed finished() re-entered the scanner's handler and read a result
     # that did not exist). Qt6::Concurrent for the mapped pass it drives;
     # Qt-Quick-free, filesystem-free.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     add_executable(rawform_future_test
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/FutureReleaseTest.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FutureRelease.h

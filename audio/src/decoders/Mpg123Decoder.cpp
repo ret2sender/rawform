@@ -56,7 +56,7 @@
 #include <sys/types.h>  // off_t, the width mpg123_length/seek speak in
 
 #include <cstddef>
-#include <cstdint>  // NOLINT: std::uintN_t
+#include <cstdint>  // IWYU pragma: keep (std::uintN_t)
 #include <cstdio>  // SEEK_SET
 #include <memory>
 #include <mutex>

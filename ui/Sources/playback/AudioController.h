@@ -58,8 +58,8 @@
 // advances INTO the queue (applyTrack sees the queue head's path with no
 // explicit start pending) the entry is culled (cull on start: nothing in the
 // queue is ever "playing") and the cursor moves to the entry's ORIGIN, the
-// row it was queued from, so once the queue drains playback continues after
-// that row in that playlist, the foobar2000 rule. An origin that is gone
+// row it was queued from, so once the queue drains, playback continues after
+// that row in that playlist. An origin that is gone
 // (tab closed, row deleted, or an entry that never had one) falls back to a
 // path lookup in the origin model and then in every open playlist, and
 // failing that the cursor detaches: the remaining queue still plays (the

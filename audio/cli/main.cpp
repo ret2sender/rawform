@@ -75,7 +75,8 @@
 #endif
 #include <atomic>
 #include <chrono>
-#include <signal.h>  // NOLINT: sigaction/SA_RESTART are POSIX, not in <csignal>
+// NOLINTNEXTLINE(modernize-deprecated-headers): the POSIX header, on purpose
+#include <signal.h>  // sigaction/SA_RESTART are POSIX, not in <csignal>
 #include <stdlib.h>  // setenv is POSIX, not in <cstdlib>
 #include <iostream>
 #include <mutex>
@@ -332,12 +333,16 @@ int runInfo(const std::string& inputPath, const std::string& dumpPath) {
 
     std::printf("Decoded:     %llu frames (%llu samples)\n",
                 static_cast<unsigned long long>(framesDecoded),
-                static_cast<unsigned long long>(framesDecoded * ch));  // NOLINT(bugprone-misplaced-widening-cast)
+                // The product is already 64-bit; the cast only matches %llu.
+                // NOLINTNEXTLINE(bugprone-misplaced-widening-cast)
+                static_cast<unsigned long long>(framesDecoded * ch));
     std::printf("FNV-1a64:    0x%016llx\n",
                 static_cast<unsigned long long>(hash));
     if (!dumpPath.empty()) {
         std::printf("Dumped float32 PCM to %s (%llu bytes)\n", dumpPath.c_str(),
-                    static_cast<unsigned long long>(framesDecoded * ch *  // NOLINT(bugprone-misplaced-widening-cast)
+                    // The product is already 64-bit; the cast only matches %llu.
+                    // NOLINTNEXTLINE(bugprone-misplaced-widening-cast)
+                    static_cast<unsigned long long>(framesDecoded * ch *
                                                     sizeof(float)));
     }
     return 0;

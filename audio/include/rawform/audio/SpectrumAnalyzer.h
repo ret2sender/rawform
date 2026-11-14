@@ -22,7 +22,7 @@
 //
 // The DSP half of the spectrum viewer: a pure, zero-Qt transform that turns a
 // block of mono float samples into a small set of bar magnitudes ready to draw.
-// It is the visual analogue of ReplayGainScanner: a self-contained measurement
+// It is the visual analog of ReplayGainScanner: a self-contained measurement
 // class in the rawform_audio engine library, the same tier as the decoders and
 // the Engine, with no Qt above it. It is placed in the PUBLIC include (and built
 // into the library) so the Qt UI that drives it on a timer can include it, and so

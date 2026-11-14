@@ -376,7 +376,7 @@ Item {
 
     // Hand keyboard focus to this pane's key surface. The host window calls
     // it on every tab switch INTO this tab and on window open; without the
-    // handoff the previously focused pane keeps receiving shortcuts (Ctrl+A
+    // handoff the pane that had focus keeps receiving shortcuts (Ctrl+A
     // landed on the hidden tab). Mirrors ReplayGainPropertiesPane.focusKeys().
     function focusKeys() { rowList.forceActiveFocus() }
 
