@@ -52,6 +52,33 @@
     <control>keyboard</control>
   </supports>
   <!--
+    The types the desktop entry's MimeType= line declares, in the same order;
+    the two lists change together.
+  -->
+  <provides>
+    <mediatype>audio/flac</mediatype>
+    <mediatype>audio/mpeg</mediatype>
+    <mediatype>audio/mp4</mediatype>
+    <mediatype>audio/x-mpegurl</mediatype>
+    <mediatype>audio/ogg</mediatype>
+    <mediatype>audio/x-vorbis+ogg</mediatype>
+    <mediatype>audio/x-flac+ogg</mediatype>
+    <mediatype>audio/x-opus+ogg</mediatype>
+    <mediatype>audio/x-speex+ogg</mediatype>
+    <mediatype>audio/x-speex</mediatype>
+    <mediatype>audio/vnd.wave</mediatype>
+    <mediatype>audio/x-wav</mediatype>
+    <mediatype>audio/aac</mediatype>
+    <mediatype>audio/x-wavpack</mediatype>
+    <mediatype>audio/x-ape</mediatype>
+    <mediatype>audio/x-ms-wma</mediatype>
+    <mediatype>audio/x-aiff</mediatype>
+    <mediatype>audio/x-musepack</mediatype>
+    <mediatype>audio/x-tta</mediatype>
+    <mediatype>audio/ac3</mediatype>
+    <mediatype>audio/vnd.dts</mediatype>
+  </provides>
+  <!--
     Screenshot URLs must be reachable by catalog builders, so they point at
     raw.githubusercontent.com rather than the repository tree. The path is
     pinned to a release tag, not main, so renaming or replacing the image

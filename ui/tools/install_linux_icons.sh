@@ -115,10 +115,10 @@ mkdir -p "${DESKTOP_DIR}"
 # (theme-name Icon=, Keywords, StartupNotify, SingleMainWindow). Only Exec=
 # is substituted here: the committed file carries the plain "rawform" the
 # Flatpak exporter rewrites, while a dev install needs the actual binary
-# path for launcher-menu starts. No field code follows the path: the
-# application does not read its command line, so the entry advertises no
-# file arguments.
-sed "s|^Exec=.*|Exec=${EXEC_PATH}|" "${REPO_DESKTOP}" > "${DESKTOP_FILE}"
+# path for launcher-menu starts. The %F field code is kept after the path:
+# it is what lets a file manager's Open With, or a drop on the launcher
+# icon, pass the chosen files to rawform.
+sed "s|^Exec=.*|Exec=${EXEC_PATH} %F|" "${REPO_DESKTOP}" > "${DESKTOP_FILE}"
 chmod 644 "${DESKTOP_FILE}"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then

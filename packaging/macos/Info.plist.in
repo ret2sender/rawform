@@ -67,5 +67,48 @@
     <string>rawform reads the music files you add from external drives.</string>
     <key>NSNetworkVolumesUsageDescription</key>
     <string>rawform reads the music files you add from network volumes.</string>
+
+    <!--
+      The files Finder and the Dock may hand to rawform. System-declared
+      types only: a type rawform plays that macOS does not know by itself
+      would need a declaration of its own. Rank Alternate, so rawform is
+      offered under Open With and never becomes the default handler by
+      installation alone.
+    -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio file</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>org.xiph.flac</string>
+                <string>public.mp3</string>
+                <string>public.aiff-audio</string>
+                <string>public.aifc-audio</string>
+                <string>com.microsoft.waveform-audio</string>
+                <string>public.mpeg-4-audio</string>
+                <string>public.aac-audio</string>
+                <string>org.xiph.ogg-audio</string>
+                <string>org.xiph.opus</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Playlist</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.m3u-playlist</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
