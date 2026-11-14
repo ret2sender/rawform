@@ -813,6 +813,31 @@ int PlaylistTabs::dropUrlsIntoNewTab(const QList<QUrl>& urls, bool proactiveTabO
     return static_cast<int>(urls.size());
 }
 
+int PlaylistTabs::openExternalUrls(const QList<QUrl>& urls) {
+    QList<QUrl> playlists;
+    QList<QUrl> rest;
+    rest.reserve(urls.size());
+    for (const QUrl& u : urls) {
+        if (isRwfplUrl(u)) {
+            playlists << u;
+        } else {
+            rest << u;
+        }
+    }
+    // The scan goes first: scanIntoActive captures its target at the call,
+    // and every openInNewTab below changes which tab is active.
+    if (!rest.isEmpty()) {
+        if (activeIsQueue() || !activeModel()) {
+            newPlaylist(suggestTabName(rest));
+        }
+        scanIntoActive(rest, -1);
+    }
+    for (const QUrl& u : playlists) {
+        openInNewTab(u);
+    }
+    return static_cast<int>(urls.size());
+}
+
 QString PlaylistTabs::suggestTabName(const QList<QUrl>& urls) const {
     // Smart naming only for a single, unambiguous source. Anything else (loose
     // files, multiple items, mixed) returns "" -> caller uses a generic name.

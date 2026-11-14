@@ -53,10 +53,11 @@ namespace {
 constexpr QByteArrayView kHeader("rawform-open 1");
 constexpr QByteArrayView kAck("ok\n");
 
-/// A batch larger than this is refused unread: nothing a launcher passes on
-/// a command line comes close, and the holder must not buffer without bound
-/// for whatever connects to its socket.
-constexpr qsizetype kMaxBatchBytes = 1024 * 1024;
+/// A batch larger than this is refused: the holder must not buffer without
+/// bound for whatever connects to its socket. Sized above what a command
+/// line can carry, a couple of megabytes of arguments that percent-encoding
+/// can triple, so a second launch never drops what a first one would open.
+constexpr qsizetype kMaxBatchBytes = 8 * 1024 * 1024;
 
 /// The pause between two attempts at the lock and the socket.
 constexpr std::chrono::milliseconds kRetryStep = 100ms;

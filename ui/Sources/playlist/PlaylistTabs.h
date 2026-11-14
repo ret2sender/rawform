@@ -302,6 +302,17 @@ public:
     /// Returns the total URL count, for the caller's status-log line.
     Q_INVOKABLE int dropUrlsIntoNewTab(const QList<QUrl>& urls, bool proactiveTabOpen);
 
+    /// Files handed to the application from outside its window: a command
+    /// line, a second launch, Open With, a launcher or Dock drop. Everything
+    /// that is not a .rwfpl is appended to the ACTIVE playlist through the
+    /// scanner; when the active tab is the Playback Queue, or there is none,
+    /// it goes to a fresh tab named by suggestTabName() instead, since the
+    /// queue is not a place files are added to from outside. Each .rwfpl then
+    /// opens in its own tab (openInNewTab), after the scan has captured its
+    /// target, so the playlists opening do not move where the files land.
+    /// Nothing starts playing. Returns the total URL count.
+    Q_INVOKABLE int openExternalUrls(const QList<QUrl>& urls);
+
     /// Suggest a tab name for a drop/Add-Folder, by this precedence:
     ///   single .m3u/.m3u8        -> that file's base name
     ///   single directory         -> first top-level .m3u/.m3u8 inside, else dir name
