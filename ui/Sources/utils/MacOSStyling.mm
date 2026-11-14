@@ -69,6 +69,8 @@
 #import <AppKit/AppKit.h>
 
 #include <QDebug>
+#include <QGuiApplication>
+#include <QLatin1StringView>
 #include <QQuickWindow>
 #include <QString>
 
@@ -260,8 +262,18 @@ void applyMacOSStyling(QQuickWindow* window) {
         return;
     }
 
-    // On macOS, winId() returns a pointer-sized integer whose value is the
-    // address of the content NSView backing the QQuickWindow.
+    // Other platform plugins (offscreen, minimal) back the window with no
+    // NSView, so there is nothing to style and QML keeps its declared
+    // defaults. A headless run is expected, not a fault, hence debug level.
+    const QString platform = QGuiApplication::platformName();
+    if (platform != QLatin1StringView("cocoa")) {
+        qDebug().noquote() << "applyMacOSStyling: skipped on platform" << platform;
+        return;
+    }
+
+    // On the Cocoa platform, and only there, winId() returns a pointer-sized
+    // integer whose value is the address of the content NSView backing the
+    // QQuickWindow.
     auto nsView = reinterpret_cast<NSView*>(window->winId());
     if (!nsView) {
         qWarning().noquote() << "applyMacOSStyling: could not obtain NSView";

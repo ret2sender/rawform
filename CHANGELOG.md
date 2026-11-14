@@ -138,6 +138,8 @@ that ships.
 
 ### Fixed
 
+- The macOS build no longer crashes at startup when run without the Cocoa
+  platform plugin, for example with `QT_QPA_PLATFORM=offscreen`.
 - A preset that could not be saved in the Rename Files or Find dialog no
   longer reports success when Save is clicked again; the preset is not listed
   until its file is written.
