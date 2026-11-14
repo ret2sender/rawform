@@ -4,11 +4,21 @@
 #
 # ---------------------------------------------------------------------------
 # Release: build the two distribution artifacts and attach them to a DRAFT
-# GitHub Release. Triggered by pushing a version tag (v*); nothing else
-# fires it, so the tag push is the deliberate release action.
+# GitHub Release. Started by hand (Actions > Release > Run workflow) with
+# the tag to release as its input; pushing a tag starts nothing, so tags
+# stay plain markers and the dispatch is the deliberate release action.
 #
 # Job design notes:
-#   - A preflight job checks the pushed tag against ui/VERSION.txt before
+#   - The workflow definition comes from the branch chosen in "Use workflow
+#     from", the code from the tag: every checkout is pinned to
+#     refs/tags/<input>, so a tag that does not exist fails at the preflight
+#     checkout, before either build. The preflight refuses any branch but
+#     main, so only the definition on main can publish. GitHub shows the
+#     Run workflow button only once this file is on the default branch.
+#   - One run per tag at a time: a second dispatch on the same tag waits
+#     instead of racing the first to the publish step. GitHub keeps one
+#     pending run per group, so a third dispatch replaces the waiting one.
+#   - A preflight job checks the dispatched tag against ui/VERSION.txt before
 #     either build starts: every artifact and the release notes are named
 #     from VERSION.txt, so a tag pushed before the bump would publish a
 #     draft titled after the tag and filled with the previous version. A
@@ -60,11 +70,12 @@
 #     third-party surface, and the runner ships gh preinstalled.
 #
 # Dry-run protocol: push a throwaway pre-release tag (e.g. vX.Y.Z-rc1, with
-# X.Y.Z equal to ui/VERSION.txt so preflight accepts it) to exercise the
-# whole workflow end to end, inspect the draft's assets, then delete both
-# the tag and the draft. Artifact names derive from ui/VERSION.txt, not the
-# tag, so a dry run on an rc tag still emits files named after the release
-# version; fine for something being thrown away.
+# X.Y.Z equal to ui/VERSION.txt so preflight accepts it), run the workflow
+# from main with that tag to exercise every job end to end, inspect the
+# draft's assets, then delete both the tag and the draft. Artifact names
+# derive from ui/VERSION.txt, not the tag, so a dry run on an rc tag still
+# emits files named after the release version; fine for something being
+# thrown away.
 # `gh release create` fails if a release for the tag already exists, so
 # delete the previous draft before re-running a failed publish on the same
 # tag.
@@ -73,12 +84,26 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (vX.Y.Z, or vX.Y.Z-rcN for a dry run)'
+        required: true
+        type: string
 
 # Required to create the release and upload its assets.
 permissions:
   contents: write
+
+# Scripts read the tag from here, never from an expression inside a run
+# block, where a crafted input would be spliced into the shell source.
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+# One run per tag at a time (header note).
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   preflight:
@@ -86,22 +111,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Before the checkout, so a bad dispatch fails without fetching
+      # anything. The v prefix is the tag filter a dispatch input cannot
+      # carry; main is the one branch whose definition may publish.
+      - name: Check the dispatch
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *)
+              echo "error: tag $RELEASE_TAG does not start with v" >&2
+              exit 1 ;;
+          esac
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "error: run from $GITHUB_REF; releases run from refs/heads/main" >&2
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       # The tag minus its leading v must equal VERSION.txt exactly, or be
       # VERSION.txt followed by a hyphenated pre-release suffix.
       - name: Compare the tag with ui/VERSION.txt
         run: |
           VERSION="$(tr -d '[:space:]' < ui/VERSION.txt)"
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${RELEASE_TAG#v}"
           case "$TAG" in
             "$VERSION")
-              echo "tag $GITHUB_REF_NAME matches ui/VERSION.txt ($VERSION)" ;;
+              echo "tag $RELEASE_TAG matches ui/VERSION.txt ($VERSION)" ;;
             "$VERSION"-*)
-              echo "pre-release tag $GITHUB_REF_NAME for version $VERSION (dry run)" ;;
+              echo "pre-release tag $RELEASE_TAG for version $VERSION (dry run)" ;;
             *)
-              echo "error: tag $GITHUB_REF_NAME does not match ui/VERSION.txt ($VERSION)" >&2
+              echo "error: tag $RELEASE_TAG does not match ui/VERSION.txt ($VERSION)" >&2
               exit 1 ;;
           esac
 
@@ -114,6 +157,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       # Same dependency set as the CI macos job. FFmpeg is included on
       # purpose: the distributed build ships the long-tail fallback.
@@ -153,6 +198,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       - name: Install flatpak-builder
         run: |
@@ -265,6 +312,8 @@ jobs:
       # Needed for CHANGELOG.md and ui/VERSION.txt, not for building.
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -301,9 +350,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             --draft \
             --verify-tag \
-            --title "rawform $GITHUB_REF_NAME" \
+            --title "rawform $RELEASE_TAG" \
             --notes-file notes.md \
             dist/*
