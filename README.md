@@ -43,6 +43,14 @@ depends on what you drop:
 - **`.rwfpl` files** (rawform's own playlist format) each open in their own
   new tab.
 
+Files can also be opened from outside the window: with Open With in Finder
+or your file manager, by dropping them on rawform's Dock or launcher icon,
+or by naming files or folders on the command line. They are appended to the
+active playlist, or to a new tab when the Playback Queue is showing;
+`.rwfpl` files open in their own tabs. One rawform runs per configuration
+directory: a second launch hands its files to the running window and exits.
+On Wayland the window flashes in the task bar instead of coming forward.
+
 Playlists live in tabs. Each tab is continuously persisted, so quitting and
 relaunching restores every tab, in order, with the active tab selected; the
 focus row is written with the next edit, when you switch tabs, and at quit.
@@ -171,10 +179,16 @@ the Flatpak sandbox the same paths resolve to
 | `live_playlist/*.rwfpl` | One live copy per open playlist tab |
 | `live_playlist/.session` | Tab order, active tab, and the Playback Queue tab's position when shown |
 | `rate_ledger.yaml` | CoreAudio rate-debt ledger, one entry per device. Exists only on macOS while a device sits at a rate rawform switched it to, including a device unplugged before its rate could be restored; a crash, or a quit with that device still away, leaves it behind and the next launch restores the device rates from it. Never appears on Linux. |
+| `instance.lock` | Held while rawform runs, so a second launch hands its files to the running window. A stale one, left by a crash, is taken over at the next launch. |
+
+The hand-off socket lives outside the config directory: in
+`$XDG_RUNTIME_DIR/rawform/` (`$XDG_RUNTIME_DIR/app/com.rawform.app/` inside
+the Flatpak), or in the per-user temporary directory on macOS when
+`XDG_RUNTIME_DIR` is unset.
 
 `.rwfpl` and `.rwftp` are binary formats (Qt `QDataStream`); the YAML files
-are plain text. All writes are atomic (`QSaveFile`). Deleting the directory
-resets the application to first-run state.
+are plain text. All writes are atomic (`QSaveFile`), except the lock.
+Deleting the directory resets the application to first-run state.
 
 ## Supported formats
 

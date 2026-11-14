@@ -47,6 +47,10 @@ that ships.
   volume bar and the mute readout take keyboard focus. Controls carry
   accessibility roles and names (buttons, radio groups, page tabs, sliders).
 - File > Quit (Ctrl+Q) on Linux and Windows.
+- Open audio files in rawform from a file manager or a launcher (Open With,
+  a drop on the launcher icon), and from Finder and the Dock on macOS.
+- A second launch hands its files to the running window instead of starting
+  another player.
 - Settings > Spectrum view > Refresh rate: 60 Hz (the default) or 30 Hz,
   which halves the frames the window draws while a track plays; the bars
   settle at the same speed at both. Stored as `refresh_hz` in
@@ -116,9 +120,9 @@ that ships.
   Music category, a copyright string, and folder-access prompts that say
   what rawform wants with the folder; the release image is built on a
   pinned macOS 15 runner so the bundled libraries honor that floor.
-- The desktop entry no longer advertises file arguments (`Exec=rawform`):
-  rawform does not read its command line yet, and the entry said otherwise.
-  It gains launcher keywords and startup notification.
+- The desktop entry takes file arguments (`Exec=rawform %F`), declares the
+  audio types rawform plays, and gains launcher keywords and startup
+  notification.
 - Flatpak: the sandbox can read the per-user GVFS tree (`xdg-run/gvfs`), so
   a file dropped from an `smb://` or `sftp://` location in GNOME or KDE
   opens; both release builds now require FFmpeg at configure time instead
@@ -190,6 +194,8 @@ that ships.
   activates the wrong tab.
 - After a Playback Queue entry started and left the queue, the current-row
   outline could sit on the wrong row (or on no row) until the next click.
+- Two copies sharing one configuration directory no longer overwrite each
+  other's live playlists.
 - The metainfo dated the 1.0.0 release 2026-09-02; the tag is dated
   2026-09-12, as this file already said.
 - The 1.0.0 entry below described Properties tools, a pane and a shortcut
