@@ -42,8 +42,8 @@
 #include "decoders/FfmpegDuration.h"
 
 extern "C" {
-#include <libavcodec/avcodec.h>          // AVCodecParameters, avcodec_get_name, descriptors
-#include <libavformat/avformat.h>        // AVFormatContext, av_find_best_stream, avio_size
+#include <libavcodec/avcodec.h>          // AVCodecParameters, codec names, descriptors
+#include <libavformat/avformat.h>        // AVFormatContext, best-stream lookup, avio_size
 #include <libavutil/channel_layout.h>    // ch_layout.nb_channels
 #include <libavutil/dict.h>              // av_dict_get, AVDictionaryEntry
 #include <libavutil/error.h>             // av_strerror

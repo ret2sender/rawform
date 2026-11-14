@@ -232,10 +232,14 @@ public:
 
     // ----- observers: the engine thread (position also the controlling thread) -
 
-    [[nodiscard]] bool inputExhausted() const noexcept;  ///< producer's own flag, for control flow
-    [[nodiscard]] bool finished() const noexcept;  ///< set by pull() at true end of stream
-    [[nodiscard]] std::uint64_t underrunFrames() const noexcept;  ///< mid-stream starvation tally
-    [[nodiscard]] bool configured() const noexcept;  ///< a ring exists (a track is loaded)
+    /// The producer's own flag, for control flow.
+    [[nodiscard]] bool inputExhausted() const noexcept;
+    /// Set by pull() at true end of stream.
+    [[nodiscard]] bool finished() const noexcept;
+    /// Mid-stream starvation tally.
+    [[nodiscard]] std::uint64_t underrunFrames() const noexcept;
+    /// A ring exists (a track is loaded).
+    [[nodiscard]] bool configured() const noexcept;
 
     /// Monotonic count of frames written into the current ring (since the last
     /// reconfigure/reset). The engine snaps this at a track's end to record the
@@ -270,8 +274,10 @@ private:
     /// sits on its own cache line to avoid false sharing, mirroring the
     /// false-sharing guard on RingBuffer's read/write positions. 64 is hardcoded
     /// for the same toolchain-portability reason RingBuffer hardcodes it.
-    alignas(64) std::atomic<std::uint64_t> m_totalWritten{0};   ///< W: engine(producer) R: engine
-    alignas(64) std::atomic<std::uint64_t> m_totalConsumed{0};  ///< W: RT R: engine + controlling
+    /// W: engine (producer)  R: engine
+    alignas(64) std::atomic<std::uint64_t> m_totalWritten{0};
+    /// W: RT  R: engine + controlling
+    alignas(64) std::atomic<std::uint64_t> m_totalConsumed{0};
 
     /// The parked-thread edge (file header): released at the end of every
     /// pull(), acquired at the start of reconfigure/reset/setPlayhead. RT-written
@@ -285,7 +291,8 @@ private:
     /// makes rebasePositionAtSeam race-free with the RT thread advancing
     /// m_totalConsumed concurrently. Signed so the seam rebase can store
     /// -threshold; the reader clamps the sum at 0.
-    alignas(64) std::atomic<std::int64_t> m_playheadOffset{0};  ///< W: engine R: engine + controlling
+    /// W: engine  R: engine + controlling
+    alignas(64) std::atomic<std::int64_t> m_playheadOffset{0};
 
     /// The linear master gain. Written by the controlling thread via
     /// setGain, read once per pull on the RT thread. Defaults to 1.0f so a build
@@ -307,7 +314,8 @@ private:
     /// cache line. Defaults to PostGain, so a build that never sets a source shows
     /// the signal as heard.
     ScopeTap                 m_scopeTap;                       ///< W: RT  R: GUI
-    std::atomic<ScopeSource> m_scopeSource{ScopeSource::PostGain};  ///< W: controlling R: RT
+    /// W: controlling  R: RT
+    std::atomic<ScopeSource> m_scopeSource{ScopeSource::PostGain};
 };
 
 }  // namespace rawform::audio

@@ -415,8 +415,10 @@ struct Command {
 // the RT thread never touches it (which is why it lives here and not in the
 // RT-shared EngineRingSource).
 struct SeamMarker {
-    std::uint64_t thresholdFrame = 0;  // consumed-frame value at which `info` becomes audible
-    TrackInfo     info;                // snapshot taken when this track's decoder was opened
+    // Consumed-frame value at which `info` becomes audible.
+    std::uint64_t thresholdFrame = 0;
+    // Snapshot taken when this track's decoder was opened.
+    TrackInfo     info;
 };
 
 // How a fresh start differs from the default "frame 0, Playing". The
@@ -543,8 +545,10 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     // ----- injected configuration ---------------------------------------------
     std::unique_ptr<IAudioSink> sink;                  // engine-thread-only after set
     DecoderFactory              defaultFactory;        // the format-dispatching opener
-    IDecoderFactory*            factory = nullptr;     // -> defaultFactory unless overridden
-    std::atomic<Engine::Listener*> listener{nullptr};  // any-thread set, engine-thread call
+    // -> defaultFactory unless overridden
+    IDecoderFactory*            factory = nullptr;
+    // Any-thread set, engine-thread call.
+    std::atomic<Engine::Listener*> listener{nullptr};
 
     // ----- rate policy ----------------------------------------------------
     RateManager            rateManager;
@@ -588,10 +592,13 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     bool gaplessEnabled = true;
 
     // ----- engine-thread-private playback state -------------------------------
-    std::unique_ptr<IDecoder> decoder;       // the producer-logical current; live while Playing/Paused
-    std::string               currentPath;   // REMEMBERED across stop (rewind); "" == none
+    // The producer-logical current; live while Playing/Paused.
+    std::unique_ptr<IDecoder> decoder;
+    // REMEMBERED across stop (rewind); "" == none.
+    std::string               currentPath;
     std::deque<std::string>   pending;       // the play queue
-    AudioFormat               format{};      // the current track's format (== a stitched track's, by the gate)
+    // The current track's format (== a stitched track's, by the gate).
+    AudioFormat               format{};
     std::size_t               channels = 0;  // = format.channels, for indexing
     std::vector<float>        staging;       // producer scratch, one decode block
 
@@ -719,7 +726,8 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
                            std::uint32_t originalRateHz, std::uint32_t borrowedRateHz);
     void doOutputFailed(const std::string& reason);      // error, teardown, Stopped
     void doOutputAlterationsChanged();                   // re-read the sink, republish
-    void reopenAtPosition();                             // the shared audible-change boundary
+    // The shared audible-change boundary.
+    void reopenAtPosition();
 
     // ----- ISinkEventListener ------------------------------------
     // Fired by the sink from ARBITRARY platform threads (see the interface
@@ -751,18 +759,26 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
                     const StartOptions& options = {});  // configure ring, open sink, play
     bool openAndStart(const std::string& path,
                       const StartOptions& options = {});  // factory open then startTrack
-    bool cutOrStartTo(std::unique_ptr<IDecoder> dec, const std::string& path); // HOLD-CUT or reconfigure to an opened decoder
-    void advanceToPendingOrStop();                       // pop next openable, else Stopped
+    // HOLD-CUT or reconfigure to an opened decoder.
+    bool cutOrStartTo(std::unique_ptr<IDecoder> dec, const std::string& path);
+    // Pop next openable, else Stopped.
+    void advanceToPendingOrStop();
     bool startSink();                                    // re-anchor, then sink->start()
-    void teardownCurrent();                              // stop + CLOSE sink, then flush (stop/error/shutdown paths)
-    void parkForTransition();                            // stop sink, KEEP device open, then flush (transition boundaries)
-    void flushEngineState();                             // the shared post-park flush (ring, decoder, seams, readouts)
+    // Stop + CLOSE sink, then flush (stop/error/shutdown paths).
+    void teardownCurrent();
+    // Stop sink, KEEP device open, then flush (transition boundaries).
+    void parkForTransition();
+    // The shared post-park flush (ring, decoder, seams, readouts).
+    void flushEngineState();
     std::size_t produceOneStep();                        // one decode/write granule
     void primeUpTo(std::size_t thresholdFrames);         // pre-buffer before start
-    void handleProducerEos();                            // Stitch next track gaplessly, or mark exhausted
+    // Stitch next track gaplessly, or mark exhausted.
+    void handleProducerEos();
     void reportDecoderOutcome();                         // onError for a retiring decoder
-    void publishUnderruns();                             // onInfo + total of new underruns
-    void crossSeam(const SeamMarker& marker);            // Fire onTrackChanged + position rebase at a boundary
+    // onInfo + total of new underruns.
+    void publishUnderruns();
+    // Fire onTrackChanged + position rebase at a boundary.
+    void crossSeam(const SeamMarker& marker);
 
     // --- the engine thread's wait and consumer tracking ---
     std::chrono::milliseconds playingWait() const;       // adaptive bound while Playing
@@ -771,7 +787,8 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
 
     // --- publication / notification (engine thread) ---
     void      setState(State s);
-    void      enterStopped();                            // clear the gate origin + go Stopped
+    // Clear the gate origin + go Stopped.
+    void      enterStopped();
     void      publishFormat(const AudioFormat& f);
     /// The device outcome word (see outcomeBits). publishOutcome composes the
     /// whole word for a rate the caller resolved; refreshOutcomeFlags keeps the
@@ -781,7 +798,8 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
     void      publishOutcome(std::uint32_t outRate, bool rateMatched);
     bool      refreshOutcomeFlags();
     void      notifyDeviceOutcome() const;               // Listener push of the word
-    void      announceTrack(const TrackInfo& info);      // Publish observers + notify listener
+    // Publish observers + notify listener.
+    void      announceTrack(const TrackInfo& info);
     void      notifyTrackChanged(const TrackInfo& info) const;
     void      notifyError(const std::string& message) const;
     void      notifyInfo(const std::string& message) const;   // Listener::onInfo forward
@@ -803,7 +821,8 @@ void Engine::Impl::post(Command c) {
 
 void Engine::Impl::start() {
     factory        = &defaultFactory;
-    gaplessEnabled = gaplessEnabledFromEnv(); // Read the A/B knob once, before the thread runs
+    // Read the A/B knob once, before the thread runs.
+    gaplessEnabled = gaplessEnabledFromEnv();
     outputStallMs  = outputStallMsFromEnv();  // Likewise the watchdog threshold
     thread         = std::thread(&Engine::Impl::run, this);
 }
@@ -922,7 +941,8 @@ void Engine::Impl::run() {
         // loop.
         if (st == State::Playing && seams.empty() &&
             ringSource.inputExhausted() && ringSource.finished()) {
-            parkForTransition();  // keep the device for the next track's reconfigure offer
+            // Keep the device for the next track's reconfigure offer.
+            parkForTransition();
             advanceToPendingOrStop();
         }
 
@@ -1044,7 +1064,8 @@ void Engine::Impl::doStop() {
     if (stateAtomic.load(std::memory_order_relaxed) == State::Stopped) {
         return;
     }
-    teardownCurrent();  // closes the sink (restores rate), flushes ring, drops decoder, clears seams
+    // Closes the sink (restores rate), flushes ring, drops decoder, clears seams.
+    teardownCurrent();
     // currentPath intentionally retained.
     enterStopped();
 }
@@ -1358,7 +1379,8 @@ bool Engine::Impl::cutOrStartTo(std::unique_ptr<IDecoder> dec,
         // RateManager / sink->open round trip.
         sink->stop();        // joins the RT thread; ring + device otherwise untouched
         publishUnderruns();  // the outgoing track's tally, before the reset drops it
-        ringSource.reset();  // RT parked: flush, clear EOS flags, counters + position origin to 0
+        // RT parked: flush, clear EOS flags, counters + position origin to 0.
+        ringSource.reset();
 
         decoder     = std::move(dec);
         currentPath = path;
@@ -1369,7 +1391,8 @@ bool Engine::Impl::cutOrStartTo(std::unique_ptr<IDecoder> dec,
         pendingFinalBlock       = false;
         framesProducedThisTrack = 0;
 
-        const std::size_t capacity = ringSource.writableFrames();  // empty ring: exact capacity
+        // Empty ring: exact capacity.
+        const std::size_t capacity = ringSource.writableFrames();
         // Snapshot before priming for the same reason as startTrack: a held track
         // shorter than the prime threshold can stitch the next track during the
         // prime, reassigning decoder/currentPath.
@@ -1545,7 +1568,8 @@ bool Engine::Impl::startTrack(std::unique_ptr<IDecoder> dec,
 
     const std::size_t capacity =
         computeCapacityFrames(format.sampleRate, kTargetLatencyMs, kBlockFrames);
-    ringSource.reconfigure(capacity, format.channels);  // fresh ring, flags + counters + origin cleared
+    // Fresh ring, flags + counters + origin cleared.
+    ringSource.reconfigure(capacity, format.channels);
     publishFormat(format);
 
     // A start position: reposition the fresh decoder BEFORE the prime fills
@@ -1843,18 +1867,23 @@ std::chrono::milliseconds Engine::Impl::playingWait() const {
 // position() reads 0 once the format goes invalid.
 void Engine::Impl::flushEngineState() {
     publishUnderruns();  // the session total keeps what the reset is about to drop
-    ringSource.reset();  // RT parked: safe to flush, clear the EOS flags, reset counters/origin
+    // RT parked: safe to flush, clear the EOS flags, reset counters/origin.
+    ringSource.reset();
     decoder.reset();
     seams.clear();       // Any pending gapless stitch state is void after a teardown
 
     stagedFrames      = 0;
     stagedOffset      = 0;
     pendingFinalBlock = false;
-    publishFormat(AudioFormat{});  // currentFormat() / position() read invalid while not loaded
-    totalFramesAtomic.store(0, std::memory_order_release);  // duration() reads 0 while not loaded
-    currentInfo.reset();           // currentTrackInfo() reads an empty TrackInfo while Stopped
+    // currentFormat() / position() read invalid while not loaded.
+    publishFormat(AudioFormat{});
+    // duration() reads 0 while not loaded.
+    totalFramesAtomic.store(0, std::memory_order_release);
+    // currentTrackInfo() reads an empty TrackInfo while Stopped.
+    currentInfo.reset();
     currentNominalKbps = 0;
-    liveBitrateAtomic.store(0, std::memory_order_release);  // liveBitrateKbps() reads 0 while Stopped
+    // liveBitrateKbps() reads 0 while Stopped.
+    liveBitrateAtomic.store(0, std::memory_order_release);
 }
 
 // One decode/write granule. Returns the frames written into the ring this call.

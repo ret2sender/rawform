@@ -70,7 +70,8 @@ namespace {
 SinkCapabilities broadDefaultCapabilities() {
     SinkCapabilities c;
     c.deviceName    = "NullSink";
-    c.rates.push_back(RateRange{.min = 8000, .max = 768000});  // one wide span covers all common rates
+    // One wide span covers all common rates.
+    c.rates.push_back(RateRange{.min = 8000, .max = 768000});
     c.currentRate   = 48000;
     c.canSwitchRate = true;
     return c;

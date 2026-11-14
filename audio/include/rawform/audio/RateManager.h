@@ -133,7 +133,7 @@ struct SinkCapabilities {
     std::string            deviceName;          ///< for logging; ignored by the policy
     std::vector<RateRange> rates;               ///< advertised nominal-rate spans
     std::uint32_t          currentRate   = 0;   ///< the device's current nominal rate
-    bool                   canSwitchRate = false;  ///< device permits a rate change at all
+    bool                   canSwitchRate = false;  ///< device permits any rate change
 
     /// Does any advertised span cover `rate`? A plain membership query: the
     /// exact-match test BitPerfectWhenAvailable tries first, and the probe the

@@ -190,10 +190,12 @@ private:
     void onStateChanged();      ///< playback state moved: re-decide the clock
     void onTrackChanged();      ///< reconfigure the analyzer on a sample-rate change
     void reconfigureFor(std::uint32_t sampleRate);  ///< (re)size analyzer + scratch
-    void updateTimer();         ///< run iff (playing or settling) and the window is exposed
+    /// Run iff (playing or settling) and the window is exposed.
+    void updateTimer();
     void setClockRunning(bool run);  ///< start/stop the timer with its position hold
     void flushPosition();       ///< release the position notifications owed this tick
-    void applyRefreshHz();      ///< the clock interval and the per-tick decay for m_refreshHz
+    /// The clock interval and the per-tick decay for m_refreshHz.
+    void applyRefreshHz();
     [[nodiscard]] bool anyBarAlive() const;  ///< a bar is still above flat
 
     // --- persistence -------------------------------------------------------
@@ -204,16 +206,21 @@ private:
 
     QTimer                    m_timer;       ///< the visualizer clock (refreshHz)
     audio::SpectrumAnalyzer   m_analyzer;    ///< the DSP transform (GUI-thread only)
-    std::vector<float>        m_scratch;     ///< mono window copied from the tap, fftSize long
-    std::uint32_t             m_configuredRate = 0;  ///< the rate the analyzer is built for
+    /// Mono window copied from the tap, fftSize long.
+    std::vector<float>        m_scratch;
+    /// The rate the analyzer is built for.
+    std::uint32_t             m_configuredRate = 0;
 
     QList<qreal>              m_bars;        ///< the published, smoothed bar values
-    int                       m_source = Output;  ///< applied analyzer source (default Output)
+    /// Applied analyzer source (default Output).
+    int                       m_source = Output;
     int                       m_refreshHz = 60;   ///< applied refresh rate (default 60)
-    float                     m_decay = 0.0f;     ///< per-tick fall multiplier for m_refreshHz
+    /// Per-tick fall multiplier for m_refreshHz.
+    float                     m_decay = 0.0f;
 
     QPointer<QWindow>         m_window;           ///< the display window, once handed in
-    bool                      m_exposed = true;   ///< its expose state (true with no window)
+    /// The window's expose state (true with no window).
+    bool                      m_exposed = true;
 };
 
 /// The SpectrumProvider QML singleton: the one instance main.cpp builds, handed to the

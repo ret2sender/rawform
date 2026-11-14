@@ -364,10 +364,14 @@ struct PipeWireSinkImpl {
 
 namespace {
 
-constexpr int kSyncTimeoutSec     = 2;  // metadata round trips, same 2 s ceiling as the Mac's rate wait
-constexpr int kConnectTimeoutSec  = 5;  // stream negotiation involves the session manager; give it headroom
-constexpr int kRateConfirmTimeoutMs = 2000;  // graph reclock confirmation, mirroring the Mac's rate wait
-constexpr int kRateReadTimeoutMs    = 300;   // expectation check when NOT commanding a reclock: a read, not a wait
+// Metadata round trips, same 2 s ceiling as the Mac's rate wait.
+constexpr int kSyncTimeoutSec     = 2;
+// Stream negotiation involves the session manager; give it headroom.
+constexpr int kConnectTimeoutSec  = 5;
+// Graph reclock confirmation, mirroring the Mac's rate wait.
+constexpr int kRateConfirmTimeoutMs = 2000;
+// Expectation check when NOT commanding a reclock: a read, not a wait.
+constexpr int kRateReadTimeoutMs    = 300;
 
 // Parse a metadata value string as a rate. Metadata sends plain decimal
 // strings ("48000"); a null value means the key was removed, which reads as 0
@@ -2248,7 +2252,8 @@ void PipeWireSink::close() {
         // against this device's final format.
         disarmDriverFormatWatchLocked(m_impl.get());
         pw_stream_disconnect(m_impl->stream);
-        pw_stream_destroy(m_impl->stream);  // removes its listeners; no callbacks after this
+        // Destroying the stream removes its listeners; no callbacks after this.
+        pw_stream_destroy(m_impl->stream);
         m_impl->stream = nullptr;
         m_impl->position.store(nullptr, std::memory_order_relaxed);
         pw_thread_loop_unlock(m_impl->loop);

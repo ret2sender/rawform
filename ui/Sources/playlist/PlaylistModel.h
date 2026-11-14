@@ -68,7 +68,8 @@
 
 namespace rawform {
 
-class CustomColumnRegistry; // owns the user-defined custom columns (injected, read-only here)
+// Owns the user-defined custom columns (injected, read-only here).
+class CustomColumnRegistry;
 
 class PlaylistModel : public QAbstractTableModel {
     Q_OBJECT
@@ -88,8 +89,10 @@ public:
     /// the extras let a delegate query whole-row state without re-deriving it.
     enum Roles {
         DisplayRole = Qt::DisplayRole,
-        RowIndexRole = Qt::UserRole + 1, ///< source-row index (int), for striping/selection
-        RowAvailableRole = Qt::UserRole + 2, ///< bool: backing file present/readable (grays missing rows)
+        /// Source-row index (int), for striping/selection.
+        RowIndexRole = Qt::UserRole + 1,
+        /// bool: backing file present/readable (grays missing rows).
+        RowAvailableRole = Qt::UserRole + 2,
         /// int Qt::Alignment for the COLUMN (same value for every row and for
         /// the header section). Exists so header cells take alignment as an
         /// injected role refreshed by headerDataChanged, the same channel that

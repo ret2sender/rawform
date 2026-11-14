@@ -209,8 +209,8 @@ struct CoreAudioSinkImpl {
     bool                overloadListener   = false;  // per-open IO overload listener
     bool                failureReported    = false;  // one onOutputFailed per open
     bool                followingDefault   = false;  // this open resolved the default
-    std::string         deviceUidStr;                // bound device's UID, for debt events
-    std::string         deviceNameStr;               // bound device's name, for failure text
+    std::string         deviceUidStr;                // bound device UID, for debt events
+    std::string         deviceNameStr;               // bound device name, for failures
 };
 
 namespace {

@@ -138,7 +138,8 @@ private:
     QList<TrackData>      m_buffer;         ///< drained-but-not-yet-emitted results
     QList<PendingRequest> m_queue;          ///< requests waiting behind the active one
     int                   m_nextEmit = 0;   ///< next result index to drain (in-order)
-    int                   m_total = 0;      ///< enumerated file count (0 until phase 1 ends)
+    /// Enumerated file count (0 until phase 1 ends).
+    int                   m_total = 0;
     int                   m_requestedAt = -1; ///< echoed via scanStarted
     int                   m_added = 0;      ///< valid tracks emitted this request
     int                   m_skipped = 0;    ///< files dropped this request

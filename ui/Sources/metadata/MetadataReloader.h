@@ -101,7 +101,8 @@ struct ReloadItem {
 /// otherwise: a result store holds one of these per row for the whole pass, and
 /// the common UnchangedPresent verdict should not cost a TrackData each.
 enum class ReloadVerdict {
-    UnchangedPresent, ///< present, mtime+size match: re-reads nothing, clears any stale "missing" flag
+    /// Present, mtime+size match: re-reads nothing, clears any stale "missing" flag.
+    UnchangedPresent,
     Changed,          ///< re-read produced fresh, valid data
     Missing,          ///< file gone, or present but unreadable
 };

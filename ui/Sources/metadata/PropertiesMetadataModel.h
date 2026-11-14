@@ -93,7 +93,8 @@ public:
 
     enum Roles {
         DisplayRole = Qt::DisplayRole,
-        ValueRole = Qt::UserRole + 1,     ///< column-1 value as a role (ListView reads col 0)
+        /// Column-1 value as a role (ListView reads col 0).
+        ValueRole = Qt::UserRole + 1,
         IsSectionRole,                    ///< bool: the single "Metadata" header row
         IsAddRole,                        ///< bool: the trailing "+ add new" row
         IsCustomRole,                     ///< bool: a "<KEY>" custom-tag row

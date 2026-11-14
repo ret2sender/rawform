@@ -526,7 +526,8 @@ Item {
                         else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
                             e.accepted = true
                             if (root._suppressReopen)
-                                root._suppressReopen = false   // swallow the commit's own Enter
+                                // Swallow the commit's own Enter.
+                                root._suppressReopen = false
                             else if (root._selCount() === 1)   // Edit is single-row only
                                 root._openEditor(root.currentRow)
                         } else if (e.key === Qt.Key_F2) {
@@ -617,7 +618,8 @@ Item {
                                 hoverEnabled: true
                                 onClicked: {
                                     root.commitOpenEditor()
-                                    root._openEditor(rdel.index) // routes to addFieldRequested
+                                    // Routes to addFieldRequested.
+                                    root._openEditor(rdel.index)
                                 }
                             }
                         }
@@ -708,7 +710,8 @@ Item {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onPressed: function (mouse) {
-                                    root.commitOpenEditor()   // commit an edit open elsewhere
+                                    // Commit an edit open elsewhere.
+                                    root.commitOpenEditor()
                                     rowList.forceActiveFocus()
                                     if (mouse.button === Qt.RightButton) {
                                         // Right-click acts on the selection; if this row
