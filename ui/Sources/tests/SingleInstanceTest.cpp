@@ -290,7 +290,7 @@ void testRefusedBatches() {
     CHECK(received.batches == 0);
 
     const QByteArray oversized =
-        QByteArrayLiteral("rawform-open 1\n") + QByteArray(1024 * 1024 + 4096, 'x');
+        QByteArrayLiteral("rawform-open 1\n") + QByteArray(8 * 1024 * 1024 + 4096, 'x');
     CHECK(closedUnanswered(holder.socketPath(), oversized));
     CHECK(received.batches == 0);
 

@@ -70,13 +70,16 @@
 
 #include <QAbstractProxyModel>
 #include <QDebug>
+#include <QDir>  // the working directory relative file arguments resolve against
 #include <QIcon>
 #include <QItemSelection>
 #include <QItemSelectionModel>
+#include <QList>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlError>
 #include <QQuickStyle>
+#include <QUrl>
 #include <QVariantMap>
 #include <QWindow>  // the root window handed to the spectrum provider's expose gate
 
@@ -92,12 +95,15 @@
 #include "playlist/PlaylistTabs.h"
 #include "media/TrackData.h"
 #include "media/TrackScanner.h"
+#include "paths/Paths.h"
 #include "playback/AudioController.h"
 #include "playback/PlaybackQueue.h"
 #include "playback/SpectrumProvider.h"
 #include "settings/SettingsStore.h"
+#include "utils/FileOpenFilter.h"
 #include "utils/MacOSStyling.h"
 #include "utils/QmlSingletonInstance.h"
+#include "utils/SingleInstance.h"
 #include "window/WindowGeometryStore.h"
 
 #if defined(Q_OS_MACOS)
@@ -152,6 +158,27 @@ int main(int argc, char* argv[]) {
     // fail the desktop-entry lookup and fall back to the window-icon pixels
     // supplied below, so this costs nothing.
     QGuiApplication::setDesktopFileName(QStringLiteral("com.rawform.app"));
+
+    // -----------------------------------------------------------------------
+    // One rawform per configuration directory.
+    // -----------------------------------------------------------------------
+    // Two processes on one directory would each rewrite the live playlists
+    // the other is showing. The first launch holds the lock; a later one
+    // hands its file arguments to it and ends here, before any configuration
+    // is read and before a window can flash. Declared ahead of every store,
+    // so the lock is released only after their last save.
+    const QList<QUrl> startupFiles = rawform::fileUrlsFromArguments(
+        QCoreApplication::arguments().mid(1), QDir::currentPath());
+    rawform::SingleInstance instance(rawform::userConfigDir(),
+                                     rawform::defaultSocketDir());
+    switch (instance.start(startupFiles)) {
+    case rawform::SingleInstance::Role::Holder:
+        break;
+    case rawform::SingleInstance::Role::Forwarded:
+        return 0;
+    case rawform::SingleInstance::Role::Failed:
+        return 1;
+    }
 
     // -----------------------------------------------------------------------
     // Window icon (Linux/Windows only).
@@ -421,6 +448,17 @@ int main(int argc, char* argv[]) {
     // The root type is named through the module, so the engine resolves it
     // from the generated qmldir rather than from a resource path spelled here.
     QQmlComponent component(&engine, "com.rawform.app", "MainWindow");
+
+    // Files the system asks the application to open (Finder, the Dock and
+    // `open -a` on macOS; no other platform sends the event). Listening before
+    // the root is created so no early event is missed, and queued so each one
+    // is opened from the event loop, once the window exists. No raise here:
+    // the system brings the application forward itself.
+    rawform::FileOpenFilter fileOpenFilter;
+    app.installEventFilter(&fileOpenFilter);
+    QObject::connect(&fileOpenFilter, &rawform::FileOpenFilter::filesRequested, &tabs,
+                     &rawform::PlaylistTabs::openExternalUrls, Qt::QueuedConnection);
+
     std::unique_ptr<QObject> rootWindow(component.create());
     if (component.isError() || !rootWindow) {
         const QList<QQmlError> errors = component.errors();
@@ -428,6 +466,28 @@ int main(int argc, char* argv[]) {
             qWarning().noquote() << e.toString();
         return -1;
     }
+
+    // The files this launch was given, then those later launches hand over.
+    // A hand-over also asks for the window: the person who launched rawform
+    // again is looking for it. On Wayland the compositor decides, and without
+    // the launcher's activation token it answers with a task-bar highlight.
+    if (!startupFiles.isEmpty()) {
+        tabs.openExternalUrls(startupFiles);
+    }
+    QObject::connect(&instance, &rawform::SingleInstance::filesReceived, &tabs,
+                     [&tabs, window = qobject_cast<QWindow*>(rootWindow.get())](
+                         const QList<QUrl>& files) {
+                         tabs.openExternalUrls(files);
+                         if (window == nullptr) {
+                             return;
+                         }
+                         if (window->windowStates().testFlag(Qt::WindowMinimized)) {
+                             window->setWindowStates(window->windowStates()
+                                                     & ~Qt::WindowMinimized);
+                         }
+                         window->raise();
+                         window->requestActivate();
+                     });
 
     // The spectrum tick parks while this window is not exposed (minimized,
     // hidden, covered on a compositor that stops frame callbacks); the

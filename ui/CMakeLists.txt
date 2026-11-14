@@ -218,6 +218,10 @@ set(APP_SOURCES
         # local socket a later launch hands its files over.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SingleInstance.cpp
+        # The macOS file-open event (Finder, the Dock, `open -a`) as a signal;
+        # compiled everywhere, sent by no other platform.
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FileOpenFilter.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/FileOpenFilter.cpp
         # Baked-in sanitizer default suppressions (TSan races, LSan leaks);
         # empty TU in non-sanitizer builds.
         ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp
