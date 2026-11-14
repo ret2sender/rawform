@@ -712,10 +712,18 @@ if(RAWFORM_BUILD_TESTS)
     # thread pool (rawform_future_test's QtConcurrent harness) meets the same
     # uninstrumented-Qt choreography the app does and fails on exit code 66
     # with a passing check count unless it has the floor; the one
-    # registration path is what keeps a new test from forgetting it.
+    # registration path is what keeps a new test from forgetting it. The same
+    # path gives every test the app's warnings (errors in Debug builds only),
+    # so test sources meet the bar the app sources already do.
     function(rawform_add_ui_test name target)
         target_sources(${target} PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/Sources/utils/SanitizerSuppressions.cpp)
+        target_compile_options(${target} PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
+                -Wall -Wextra -Wpedantic
+                $<$<CONFIG:Debug>:-Werror>
+                >
+        )
         add_test(NAME ${name} COMMAND ${target})
         set_tests_properties(${name} PROPERTIES LABELS ui)
     endfunction()
