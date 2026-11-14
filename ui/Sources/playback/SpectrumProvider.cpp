@@ -316,7 +316,8 @@ void SpectrumProvider::setSource(int source) {
     }
     m_source = clamped;
     if (m_controller) {
-        m_controller->setScopeSource(m_source);  // push the tap-position switch to the engine
+        // Push the tap-position switch to the engine.
+        m_controller->setScopeSource(m_source);
     }
     persistSettings();
     emit sourceChanged();

@@ -76,8 +76,8 @@ public:
     /// band layout without duplicating the numbers.
     static constexpr std::size_t kDefaultFftSize  = 2048;   ///< power of two
     static constexpr std::size_t kDefaultBarCount = 20;     ///< matches the UI frame
-    static constexpr double      kDefaultMinHz    = 40.0;   ///< low edge of the lowest bar
-    static constexpr double      kDefaultMaxHz    = 18000.0;  ///< high edge of the top bar
+    static constexpr double      kDefaultMinHz    = 40.0;   ///< lowest bar's low edge
+    static constexpr double      kDefaultMaxHz    = 18000.0;  ///< top bar's high edge
     static constexpr double      kDefaultFloorDb  = -70.0;  ///< maps to 0.0 (silence)
     static constexpr double      kDefaultCeilDb   = -12.0;  ///< maps to 1.0 (full bar)
 

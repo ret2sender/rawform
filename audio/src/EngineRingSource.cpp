@@ -168,7 +168,8 @@ void EngineRingSource::reconfigure(std::size_t  capacityFrames,
     m_totalWritten.store(0, std::memory_order_relaxed);
     m_totalConsumed.store(0, std::memory_order_relaxed);
     m_playheadOffset.store(0, std::memory_order_relaxed);  // new track begins at frame 0
-    m_scopeTap.reset();  // a new track: drop the previous track's tail from the visualizer
+    // A new track: drop the previous track's tail from the visualizer.
+    m_scopeTap.reset();
 }
 
 void EngineRingSource::reset() noexcept {
@@ -181,8 +182,10 @@ void EngineRingSource::reset() noexcept {
     m_underrunFrames.store(0, std::memory_order_relaxed);
     m_totalWritten.store(0, std::memory_order_relaxed);
     m_totalConsumed.store(0, std::memory_order_relaxed);
-    m_playheadOffset.store(0, std::memory_order_relaxed);  // a fresh ring starts at frame 0
-    m_scopeTap.reset();  // a seek or a fresh ring: drop stale pre-seek audio from the visualizer
+    // A fresh ring starts at frame 0.
+    m_playheadOffset.store(0, std::memory_order_relaxed);
+    // A seek or a fresh ring: drop stale pre-seek audio from the visualizer.
+    m_scopeTap.reset();
 }
 
 void EngineRingSource::setPlayhead(std::uint64_t frame) noexcept {

@@ -291,7 +291,8 @@ private:
     QList<TrackData> m_selection;  ///< current selected tracks (values source)
     QHash<FieldId, QString> m_valueCache;    ///< aggregated value per field
     QHash<FieldId, int>     m_distinctCount;  ///< path fields only; saturates at 2
-    bool m_detailsMode = false;    ///< true = Location + General only (no Metadata, no Items Selected)
+    /// true = Location + General only (no Metadata, no Items Selected).
+    bool m_detailsMode = false;
 };
 
 /// The metadata pane's model, as the MetadataPaneModel QML singleton: the one

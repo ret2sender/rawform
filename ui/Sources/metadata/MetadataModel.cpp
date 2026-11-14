@@ -40,8 +40,10 @@ namespace rawform {
 MetadataModel::MetadataModel(QObject* parent)
     : QAbstractTableModel(parent) {
     buildTemplate();
-    rebuildValueCache();    // empty selection: every field aggregates to ""
-    m_rows = visibleRows(); // so conditional / single-only rows are hidden until a selection
+    // Empty selection: every field aggregates to "", so conditional /
+    // single-only rows are hidden until a selection.
+    rebuildValueCache();
+    m_rows = visibleRows();
 }
 
 void MetadataModel::buildTemplate() {
@@ -95,14 +97,15 @@ void MetadataModel::buildTemplate() {
     // already reads "Properties - N items"), so it is omitted there.
     if (!m_detailsMode)
         field(QStringLiteral("Items Selected"), FieldId::ItemsSelected);
-    field(QStringLiteral("Duration"),          FieldId::Length); // numeric aggregate (sum)
+    // Numeric aggregate (sum).
+    field(QStringLiteral("Duration"),          FieldId::Length);
     field(QStringLiteral("Sample rate"),       FieldId::SampleRate);
     field(QStringLiteral("Channels"),          FieldId::Channels);
-    field(QStringLiteral("Bits per sample"),   FieldId::BitsPerSample, /*conditional=*/true);
+    field(QStringLiteral("Bits per sample"),   FieldId::BitsPerSample, /*cond=*/true);
     field(QStringLiteral("Bitrate"),           FieldId::Bitrate, /*cond=*/false,
           QStringLiteral("Avg. bitrate")); // numeric aggregate (duration-weighted mean)
     field(QStringLiteral("Codec"),             FieldId::Codec);
-    field(QStringLiteral("Codec Profile"),     FieldId::CodecProfile, /*conditional=*/true);
+    field(QStringLiteral("Codec Profile"),     FieldId::CodecProfile, /*cond=*/true);
     field(QStringLiteral("Encoding"),          FieldId::Encoding);
     field(QStringLiteral("Tool"),              FieldId::Tool);
     field(QStringLiteral("Tag Type"),          FieldId::TagType, /*conditional=*/true);

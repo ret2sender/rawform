@@ -1100,11 +1100,15 @@ QVariantList PropertiesMetadataModel::collectEdits() const {
     // on-disk spelling written is TRACKTOTAL / DISCTOTAL, with the schema spelling
     // cleared so the two cannot coexist.
     static const QString kTrackNo   = QStringLiteral("TRACKNUMBER");
-    static const QString kTrackTot  = QStringLiteral("TOTALTRACKS"); // schema key; cleared on write
-    static const QString kTrackTotW = QStringLiteral("TRACKTOTAL");  // spelling written to disk
+    // Schema key; cleared on write.
+    static const QString kTrackTot  = QStringLiteral("TOTALTRACKS");
+    // Spelling written to disk.
+    static const QString kTrackTotW = QStringLiteral("TRACKTOTAL");
     static const QString kDiscNo    = QStringLiteral("DISCNUMBER");
-    static const QString kDiscTot   = QStringLiteral("TOTALDISCS");  // schema key; cleared on write
-    static const QString kDiscTotW  = QStringLiteral("DISCTOTAL");   // spelling written to disk
+    // Schema key; cleared on write.
+    static const QString kDiscTot   = QStringLiteral("TOTALDISCS");
+    // Spelling written to disk.
+    static const QString kDiscTotW  = QStringLiteral("DISCTOTAL");
 
     const bool trackPair = m_staged.contains(kTrackNo) || m_staged.contains(kTrackTot);
     const bool discPair  = m_staged.contains(kDiscNo)  || m_staged.contains(kDiscTot);
@@ -1122,13 +1126,15 @@ QVariantList PropertiesMetadataModel::collectEdits() const {
         if (trackPair &&
             (eff(kTrackNo, i) != orig(kTrackNo, i) || eff(kTrackTot, i) != orig(kTrackTot, i))) {
             pushKey(path, kTrackNo, i);
-            pushAs(path, kTrackTotW, kTrackTot, i); // write TRACKTOTAL from the schema value
+            // Write TRACKTOTAL from the schema value.
+            pushAs(path, kTrackTotW, kTrackTot, i);
             push(path, kTrackTot, QStringList{});   // clear the TOTALTRACKS spelling
         }
         if (discPair &&
             (eff(kDiscNo, i) != orig(kDiscNo, i) || eff(kDiscTot, i) != orig(kDiscTot, i))) {
             pushKey(path, kDiscNo, i);
-            pushAs(path, kDiscTotW, kDiscTot, i);   // write DISCTOTAL from the schema value
+            // Write DISCTOTAL from the schema value.
+            pushAs(path, kDiscTotW, kDiscTot, i);
             push(path, kDiscTot, QStringList{});    // clear the TOTALDISCS spelling
         }
 
@@ -1163,8 +1169,9 @@ void PropertiesMetadataModel::adoptEdits(const QStringList& failedPaths) {
     for (const QString& key : keys) {
         const QStringList staged = m_staged.value(key);
         QStringList folded = m_original.value(key);
+        // Defensive; both lists are built per selection.
         if (folded.size() != n)
-            folded = QStringList(n, QString()); // defensive; both lists are built per selection
+            folded = QStringList(n, QString());
         for (int i = 0; i < n && i < staged.size(); ++i) {
             if (!failed.contains(m_selection.at(i).filePath))
                 folded[i] = staged.at(i);

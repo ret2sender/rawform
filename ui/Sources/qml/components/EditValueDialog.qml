@@ -376,7 +376,8 @@ Item {
                         cursorPosition = p
                     }
                     dlg._keyText = up
-                    dlg.keyError = ""   // clear the inline error as soon as the key changes
+                    // Clear the inline error as soon as the key changes.
+                    dlg.keyError = ""
                 }
                 Keys.onReturnPressed: dlg._ok()
                 Keys.onEnterPressed: dlg._ok()
@@ -764,7 +765,7 @@ Item {
                                     }
                                     Keys.onEscapePressed: function (event) {
                                         cell.editing = false   // discard; model untouched
-                                        event.accepted = true  // do not also cancel the dialog
+                                        event.accepted = true  // keep the dialog open
                                     }
                                     onActiveFocusChanged: {
                                         if (activeFocus) dlg._focusedCell = cell.index

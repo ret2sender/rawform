@@ -463,7 +463,8 @@ void runBattery(const Fixture& fx) {
         if (fx.expectedCodec == Codec::Opus) {
             CHECK(fRewind > 0);
             const std::uint64_t d = fRewind > f0 ? fRewind - f0 : f0 - fRewind;
-            CHECK(d <= fx.rate / 10);   // <= 100 ms; preskip is a few ms, so this is generous
+            // <= 100 ms; preskip is a few ms, so this is generous.
+            CHECK(d <= fx.rate / 10);
         } else {
             CHECK(fRewind == f0);
         }

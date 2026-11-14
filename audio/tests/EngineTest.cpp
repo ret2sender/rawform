@@ -620,7 +620,8 @@ public:
         return caps;
     }
     bool open(const AudioFormat&, const RateDecision&, IPullSource*) override {
-        return false;  // device unavailable: the engine must treat this as a start failure
+        // Device unavailable: the engine must treat this as a start failure.
+        return false;
     }
     bool        start() override { return false; }  // never open, so never started
     void        stop()  override {}
@@ -1571,7 +1572,8 @@ void testReconfigureDeclinedFallsBackToCloseOpen() {
 
     CHECK(sinkPtr->recordedDecisions().size() == 3);   // one genuine open per track
     CHECK(sinkPtr->recordedReconfigures().empty());    // every offer declined
-    CHECK(sinkPtr->closeCount() == 3);                 // two boundary closes + the final release
+    // Two boundary closes + the final release.
+    CHECK(sinkPtr->closeCount() == 3);
     CHECK(listener.trackPaths().size() == 3);
     CHECK(listener.errors() == 0);
 }
@@ -2799,7 +2801,8 @@ void testGaplessFreeRunSoak() {
 
     constexpr int kTracks = 8;
     for (int i = 0; i < kTracks; ++i) {
-        engine.enqueue("ramp:44100:2:40000");  // identical source format: every advance stitches
+        // Identical source format: every advance stitches.
+        engine.enqueue("ramp:44100:2:40000");
     }
     engine.play();
 
@@ -2949,13 +2952,15 @@ void testRateModeChangeReconfiguresOnManualCut() {
     engine.setRateMode(RateMode::AlwaysResample);
     engine.setSink(std::move(sink));
 
-    const std::string a = "ramp:44100:2:1048576:1048576";  // long: still playing at the cut
+    // Long: still playing at the cut.
+    const std::string a = "ramp:44100:2:1048576:1048576";
     const std::string b = "ramp:44100:2:4000:4194304";
     engine.playNow(a);
     CHECK(waitForState(engine, State::Playing));
 
     engine.setRateMode(RateMode::BitPerfectWhenAvailable);  // the mid-run flip
-    engine.playNow(b);                                      // same format: the old HOLD-CUT bait
+    // Same format: the old HOLD-CUT bait.
+    engine.playNow(b);
 
     CHECK(waitForCompletion(engine));
     settle();
@@ -3149,7 +3154,8 @@ void testPlayNowCutsWhilePlaying() {
     engine.setRateMode(RateMode::BitPerfectWhenAvailable);
     engine.setSink(std::move(sink));
 
-    const std::string a = "ramp:44100:2:5000000:1048576";  // long; cut away from it. band 0x100000
+    // Long; cut away from it. band 0x100000
+    const std::string a = "ramp:44100:2:5000000:1048576";
     const std::string b = "ramp:44100:2:4000:2097152";     // band 0x200000
     const std::string c = "ramp:44100:2:6000:3145728";     // band 0x300000
 
@@ -3159,7 +3165,8 @@ void testPlayNowCutsWhilePlaying() {
     settle(20);
 
     engine.setQueue(std::vector<std::string>{c});  // what plays after the cut target
-    engine.playNow(b);                             // cut to B now, same format -> HOLD-CUT
+    // Cut to B now, same format -> HOLD-CUT.
+    engine.playNow(b);
 
     CHECK(waitForCompletion(engine));
     settle();

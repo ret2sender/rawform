@@ -736,7 +736,7 @@ private:
     std::atomic<bool>          m_liveReadout{false};
     std::atomic<std::uint64_t> m_durationFrames{0};
     std::atomic<std::uint32_t> m_rate{0};
-    PlaylistState*             m_playlist = nullptr;  // interactive only; null in one-shot play
+    PlaylistState*             m_playlist = nullptr;  // null in one-shot play
     const Engine*              m_engine   = nullptr;  // for the live bitrate readout
 };
 
@@ -888,7 +888,7 @@ int runInteractive(PlayRateFlag rateFlag) {
             tail.push_back(playlist.at(k));
         }
         engine.setQueue(std::move(tail));  // what plays AFTER j (gapless if same format)
-        engine.playNow(playlist.at(j));    // cut/start to j now; no remembered-replay blip
+        engine.playNow(playlist.at(j));    // cut/start to j; no remembered-replay blip
         playlist.setCursor(j);             // optimistic; onTrackChanged confirms it
     };
 

@@ -104,7 +104,8 @@ protected:
 private:
     QList<qreal> m_values;
     int          m_count        = 20;
-    QColor       m_color        = QColor(0xBD, 0xB2, 0xFF);  // Theme.accentSoft; the view binds it
+    // Theme.accentSoft; the view binds it.
+    QColor       m_color        = QColor(0xBD, 0xB2, 0xFF);
     qreal        m_gap          = 2.0;
     qreal        m_minBarHeight = 2.0;
 };

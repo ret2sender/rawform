@@ -278,7 +278,7 @@ private:
     std::vector<RateDecision> m_reconfigures;
     int                       m_closeCount = 0;
     int                       m_startCount = 0;
-    std::uint32_t             m_originalRate = 0;  ///< session baseline; close() restores it
+    std::uint32_t             m_originalRate = 0;  ///< baseline; close() restores it
 
     /// First-pull capture: armed by start(), consumed by the pump on its first
     /// pull with real frames. Atomics because the pump thread writes what the

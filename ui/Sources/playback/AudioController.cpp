@@ -862,7 +862,8 @@ void AudioController::applyTrack(const EngineTrackFacts& f) {
     }
 
     emit trackChanged();
-    emit formatSummaryChanged();  // format line's NOTIFY is now separate from trackChanged
+    // The format line's NOTIFY is separate from trackChanged.
+    emit formatSummaryChanged();
     emit positionChanged();  // progress depends on the new duration; reset
 }
 

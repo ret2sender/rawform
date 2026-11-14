@@ -91,7 +91,8 @@
 // type is COMPLETE at that point, so a forward declaration is not enough here:
 // the full definition must be visible. (PlaylistTabs, used only as a plain
 // pointer in no Q_PROPERTY, stays forward-declared below.)
-#include "media/ReplayGainTags.h"  // replaygain::Values member (the playing track's RG snapshot)
+// replaygain::Values member (the playing track's RG snapshot)
+#include "media/ReplayGainTags.h"
 #include "playback/PlaybackQueue.h" // PlaybackQueue::Origin in a private signature
 #include "playback/PositionNotifyGate.h" // value member: the held position notifications
 #include "playlist/PlaylistModel.h"
@@ -576,11 +577,16 @@ private:
                             int outputDepthBits);
 
     // --- cursor / organic advance ------------------------------------------
-    void setPlayingModel(rawform::PlaylistModel* model);  ///< swap source + rewire signals
-    void setCursorRow(int row);                           ///< set cursor + refresh highlight/meta
-    void resolveCursorForPath(const QString& path);       ///< predict-then-verify on advance
-    void recomputeLookahead();                            ///< setQueue(prefix ++ organic tail)
-    void refreshNowPlayingMeta();                         ///< title/artist from the cursor row
+    /// Swap source + rewire signals.
+    void setPlayingModel(rawform::PlaylistModel* model);
+    /// Set cursor + refresh highlight/meta.
+    void setCursorRow(int row);
+    /// Predict-then-verify on advance.
+    void resolveCursorForPath(const QString& path);
+    /// setQueue(prefix ++ organic tail).
+    void recomputeLookahead();
+    /// Title/artist from the cursor row.
+    void refreshNowPlayingMeta();
 
     // --- transport body / queue -------------------------------------------
     /// The start every transport verb shares: make @p model the playing

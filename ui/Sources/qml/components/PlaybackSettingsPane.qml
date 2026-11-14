@@ -192,7 +192,8 @@ Item {
                     // instead of escaping: cap the width to the pane and let
                     // the text run to as many lines as it needs.
                     width: Math.min(implicitWidth, pane.width - 16)
-                    x: deviceCombo.width - width  // right-align to the box, staying in-window
+                    // Right-align to the box, staying in-window.
+                    x: deviceCombo.width - width
                     y: deviceCombo.height + 4
                     contentItem: Text {
                         color: Theme.textPrimary

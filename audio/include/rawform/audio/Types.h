@@ -215,7 +215,8 @@ enum class DecoderKind : std::uint8_t {
 struct SourceInfo {
     Codec         codec         = Codec::Unknown;
     std::uint16_t bitsPerSample = 0;  ///< source container depth; 0 when unknown
-    std::uint32_t bitrateKbps   = 0;  ///< exact for PCM; stream/container-derived for compressed
+    /// Exact for PCM; stream- or container-derived for compressed codecs.
+    std::uint32_t bitrateKbps   = 0;
     /// Which concrete decoder produced this source. Provenance, not source
     /// content: it records HOW the file was decoded, not WHAT it is. It rides up
     /// to the UI the same way codec does, so the player can show, for example,

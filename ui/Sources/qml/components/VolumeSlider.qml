@@ -84,7 +84,8 @@ Item {
     property color trackColor: Theme.border
     property color fillColor: Theme.accentSoft
     property color mutedFillColor: "#5A5668"  // the fill, grayed, while muted
-    property color playheadColor: Theme.textPrimary   // the hover/drag pipe, as on the SeekBar
+    // The hover/drag pipe, as on the SeekBar.
+    property color playheadColor: Theme.textPrimary
     property color bubbleColor: Theme.surfaceRaised
     property color bubbleTextColor: Theme.textPrimary
     property real  barHeight: 8

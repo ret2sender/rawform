@@ -174,7 +174,8 @@ struct DefaultColumn {
 /// PatternEvaluator::evaluatePattern, the alignment by the model + QML delegates.
 struct CustomColumn {
     QString       id;                       ///< stable generated identity ("custom:<id>")
-    QString       name;                     ///< header label (display only; freely renamable)
+    /// Header label (display only; freely renamable).
+    QString       name;
     Qt::Alignment alignment = Qt::AlignLeft; ///< Left / HCenter / Right
     QString       pattern;                  ///< %token% + literal expression
 };
