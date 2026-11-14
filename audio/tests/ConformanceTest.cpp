@@ -81,7 +81,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>  // NOLINT: std::int*_t
+#include <cstdint>  // IWYU pragma: keep (std::int*_t)
 #include <cstdio>
 #include <memory>
 #include <optional>

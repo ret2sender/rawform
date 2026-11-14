@@ -45,7 +45,7 @@ extern "C" {
 #include <libavutil/rational.h>     // AVRational
 }
 
-#include <cstdint>  // NOLINT: std::uintN_t
+#include <cstdint>  // IWYU pragma: keep (std::uintN_t)
 
 namespace rawform::audio::detail {
 

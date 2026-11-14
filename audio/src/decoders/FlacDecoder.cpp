@@ -66,7 +66,7 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>  // NOLINT: std::uintN_t
+#include <cstdint>  // IWYU pragma: keep (std::uintN_t)
 #include <fstream>
 #include <memory>
 #include <string>

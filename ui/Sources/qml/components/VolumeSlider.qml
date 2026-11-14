@@ -226,7 +226,7 @@ Item {
     }
 
     // -----------------------------------------------------------------------
-    // The dB bubble, the volume analogue of the SeekBar's time bubble: a small
+    // The dB bubble, the volume analog of the SeekBar's time bubble: a small
     // mono readout above the bar showing the dB at the cursor, shown only while
     // the pointer is engaged (hover or drag). Clamped so it never runs off either
     // end of the bar. Drawn above the track; no ancestor clips it.

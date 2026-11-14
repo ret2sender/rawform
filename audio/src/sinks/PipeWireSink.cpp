@@ -166,7 +166,7 @@
 #include <cerrno>   // EIO: onCoreError's expected-first-arm squelch
 #include <chrono>
 #include <cstddef>
-#include <cstdint>  // NOLINT: std::int*_t
+#include <cstdint>  // IWYU pragma: keep (std::int*_t)
 #include <cstdio>
 #include <cstdlib>  // strtoul for metadata value parsing
 #include <cstring>
@@ -1605,17 +1605,16 @@ PipeWireSink::~PipeWireSink() {
 // ---------------------------------------------------------------------------
 // Read the graph's capabilities, fresh: the session rendezvous (syncSession)
 // so any in-flight settings or default-device change has landed, then resolve
-// the TARGET SINK NODE (the pinned node when one is set, else the one the "default" metadata
-// names; the registry inventory locates it) and query its EnumFormat params
-// for the rate spans the hardware genuinely advertises. canSwitchRate is true
-// once a target node resolved, because node.force-rate can clock the graph to
-// any advertised rate regardless of clock.allowed-rates. When no node resolves
-// (headless session manager, exotic setup), fall back to the follow-the-graph
-// shape: the graph's effective clock as a single span, no switching, which
-// keeps every decision executable. A sink that
-// never reached the daemon reports an unusable device, which the RateManager
-// reads as "cannot switch, resample at the (unknown) current rate", the safe
-// interpretation.
+// the TARGET SINK NODE (the pinned node when one is set, else the one the
+// "default" metadata names; the registry inventory locates it) and query its
+// EnumFormat params for the rate spans the hardware genuinely advertises.
+// canSwitchRate is true once a target node resolved, because node.force-rate
+// can clock the graph to any advertised rate regardless of clock.allowed-rates.
+// When no node resolves (headless session manager, exotic setup), fall back to
+// the follow-the-graph shape: the graph's effective clock as a single span, no
+// switching, which keeps every decision executable. A sink that never reached
+// the daemon reports an unusable device, which the RateManager reads as "cannot
+// switch, resample at the (unknown) current rate", the safe interpretation.
 SinkCapabilities PipeWireSink::capabilities() const {
     SinkCapabilities caps;
     if (!m_impl->connected || m_impl->daemonLost.load(std::memory_order_acquire)) {

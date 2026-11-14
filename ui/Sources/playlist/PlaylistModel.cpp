@@ -42,6 +42,7 @@
 #include <QtGlobal> // qWarning
 
 #include <algorithm> // std::ranges::sort / unique / rotate / lower_bound, std::max
+#include <cstddef> // std::size_t
 #include <utility> // std::move
 #include <vector>  // the compaction's row map
 
@@ -641,7 +642,7 @@ void PlaylistModel::removeRowsAscending(const QList<int>& rows) {
         // must be in the list that gets remapped.
         const QModelIndexList from = persistentIndexList();
 
-        std::vector<int> newRow(static_cast<size_t>(n), -1);
+        std::vector<int> newRow(static_cast<std::size_t>(n), -1);
         qsizetype nextRemoved = 0;
         int write = 0;
         for (int read = 0; read < n; ++read) {
@@ -651,7 +652,7 @@ void PlaylistModel::removeRowsAscending(const QList<int>& rows) {
             }
             if (write != read)
                 m_tracks[write] = std::move(m_tracks[read]);
-            newRow[static_cast<size_t>(read)] = write;
+            newRow[static_cast<std::size_t>(read)] = write;
             ++write;
         }
         m_tracks.resize(write);
@@ -659,7 +660,7 @@ void PlaylistModel::removeRowsAscending(const QList<int>& rows) {
         QModelIndexList to;
         to.reserve(from.size());
         for (const QModelIndex& old : from) {
-            const int r = newRow[static_cast<size_t>(old.row())];
+            const int r = newRow[static_cast<std::size_t>(old.row())];
             to.append(r >= 0 ? index(r, old.column()) : QModelIndex());
         }
         changePersistentIndexList(from, to);

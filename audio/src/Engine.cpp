@@ -2191,7 +2191,7 @@ void Engine::Impl::notifyOutputDevices(
 // ILogOutput: the sink's diagnostic lines arrive here on
 // the engine thread and go straight out as onInfo. No buffering, no filtering:
 // the sink already decided the line was worth printing, and the listener side
-// (the Qt bridge) owns any marshalling.
+// (the Qt bridge) owns any marshaling.
 void Engine::Impl::logLine(const std::string& line) {
     notifyInfo(line);
 }

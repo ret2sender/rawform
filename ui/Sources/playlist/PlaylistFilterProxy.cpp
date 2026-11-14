@@ -33,6 +33,7 @@
 #include <QVariant>
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -304,21 +305,21 @@ QList<int> PlaylistFilterProxy::selectedRowList(QItemSelectionModel* sel) const 
         return out;
     }
     const int n = rowCount();
-    std::vector<bool> mark(static_cast<size_t>(n), false);
+    std::vector<bool> mark(static_cast<std::size_t>(n), false);
     int selected = 0;
     for (const QItemSelectionRange& r : ranges) {
         const int top    = std::max(0, r.top());
         const int bottom = std::min(n - 1, r.bottom());
         for (int i = top; i <= bottom; ++i) {
-            if (!mark[static_cast<size_t>(i)]) {
-                mark[static_cast<size_t>(i)] = true;
+            if (!mark[static_cast<std::size_t>(i)]) {
+                mark[static_cast<std::size_t>(i)] = true;
                 ++selected;
             }
         }
     }
     out.reserve(selected);
     for (int i = 0; i < n; ++i) {
-        if (mark[static_cast<size_t>(i)]) {
+        if (mark[static_cast<std::size_t>(i)]) {
             out.push_back(i);
         }
     }
