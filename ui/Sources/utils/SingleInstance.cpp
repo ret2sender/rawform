@@ -31,9 +31,9 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
+#include <QIODevice>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QLockFile>
 #include <QOperatingSystemVersion>
 #include <QPointer>
 #include <QStandardPaths>
@@ -41,8 +41,14 @@
 #include <QtGlobal> // qEnvironmentVariable, qWarning
 
 #include <algorithm>
+#include <cerrno>
+#include <cstddef>
+#include <system_error>
 
-#include <sys/un.h> // sockaddr_un, for the length a socket path may have
+#include <fcntl.h>    // open and its flags
+#include <sys/file.h> // flock
+#include <sys/un.h>   // sockaddr_un, for the length a socket path may have
+#include <unistd.h>   // close, ftruncate, getpid, write
 
 using namespace std::chrono_literals;
 
@@ -88,18 +94,16 @@ qsizetype socketPathBytes(const QString& path) {
     return QFile::encodeName(path).size();
 }
 
-const char* describe(QLockFile::LockError error) {
-    switch (error) {
-    case QLockFile::NoError:
-        return "no error";
-    case QLockFile::LockFailedError:
-        return "held by another process";
-    case QLockFile::PermissionError:
-        return "permission denied";
-    case QLockFile::UnknownError:
-        return "the directory cannot hold it";
+/// The process id the holder wrote into its lock file, 0 when none can be
+/// read. Good for a message and for nothing else.
+qint64 holderPid(const QString& lockPath) {
+    QFile file(lockPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return 0;
     }
-    return "";
+    bool         ok = false;
+    const qint64 pid = file.readLine(32).trimmed().toLongLong(&ok);
+    return ok && pid > 0 ? pid : 0;
 }
 
 } // namespace
@@ -180,26 +184,22 @@ SingleInstance::Role SingleInstance::start(const QList<QUrl>& files) {
     ensureDirectories();
     m_socketPath = deriveSocketPath(m_lockDir, m_socketDir);
 
-    m_lock = std::make_unique<QLockFile>(lockPath());
-    // The lock is held for as long as the application runs, so its age says
-    // nothing. Staleness is decided below, by whether the file can be removed.
-    m_lock->setStaleLockTime(0ms);
-
     // The lock and the socket are tried together for the whole window. A
     // holder that is quitting still owns both for a moment and answers
     // neither: going back to the lock is what lets this launch take its
-    // place instead of giving up on it.
+    // place instead of giving up on it. A launch that lost the lock to one
+    // started with it is served by the same loop: the winner listens a
+    // moment later.
     const QDeadlineTimer window(m_timeouts.connectWindow);
     bool retry = true;
     while (retry) {
-        if (m_lock->tryLock(0ms)) {
+        switch (tryLock()) {
+        case LockAttempt::Taken:
             return becomeHolder();
-        }
-        if (m_lock->error() != QLockFile::LockFailedError) {
-            qWarning("rawform: cannot take the instance lock %s (%s); starting without "
-                     "the single-instance guard",
-                     qUtf8Printable(lockPath()), describe(m_lock->error()));
+        case LockAttempt::Refused:
             return Role::Holder;
+        case LockAttempt::Held:
+            break;
         }
         switch (forward(files)) {
         case Attempt::Acked:
@@ -217,23 +217,66 @@ SingleInstance::Role SingleInstance::start(const QList<QUrl>& files) {
         }
     }
 
-    // Nobody answered. Removing the lock file succeeds only when no live
-    // process holds it, whatever process id it names, so a live holder is
-    // never displaced and a dead one never blocks the launch.
-    if (m_lock->removeStaleLockFile() && m_lock->tryLock(0ms)) {
-        return becomeHolder();
-    }
-
-    qint64  pid = 0;
-    QString host;
-    QString program;
-    if (m_lock->getLockInfo(&pid, &host, &program) && pid > 0) {
+    // A live process held the lock at every attempt, and nobody answered.
+    const qint64 pid = holderPid(lockPath());
+    if (pid > 0) {
         qWarning("rawform is already running (pid %lld) and does not answer",
                  static_cast<long long>(pid));
     } else {
         qWarning("rawform is already running and does not answer");
     }
     return Role::Failed;
+}
+
+void SingleInstance::LockDescriptor::reset(int descriptor) {
+    if (m_descriptor >= 0) {
+        ::close(m_descriptor);
+    }
+    m_descriptor = descriptor;
+}
+
+SingleInstance::LockAttempt SingleInstance::tryLock() {
+    const QByteArray path = QFile::encodeName(lockPath());
+    int              error = 0;
+
+    // No O_EXCL and no removal, ever: every launch opens the one file the path
+    // names and competes for the lock on it.
+    int descriptor = -1;
+    do {
+        descriptor = ::open(path.constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+        error = errno;
+    } else {
+        int locked = -1;
+        do {
+            locked = ::flock(descriptor, LOCK_EX | LOCK_NB);
+        } while (locked != 0 && errno == EINTR);
+        if (locked != 0) {
+            error = errno;
+            ::close(descriptor);
+            if (error == EWOULDBLOCK) {
+                return LockAttempt::Held;
+            }
+        }
+    }
+    if (error != 0) {
+        qWarning("rawform: cannot take the instance lock %s (%s); starting without "
+                 "the single-instance guard",
+                 path.constData(), std::generic_category().message(error).c_str());
+        return LockAttempt::Refused;
+    }
+    m_lock.reset(descriptor);
+
+    // What the file says is for a newcomer's message only, so a write that
+    // fails costs that message its number and nothing else.
+    const QByteArray pid = QByteArray::number(static_cast<qint64>(::getpid())) + '\n';
+    if (::ftruncate(descriptor, 0) != 0
+        || ::write(descriptor, pid.constData(), static_cast<std::size_t>(pid.size()))
+               != pid.size()) {
+        qWarning("rawform: cannot write the process id into %s", path.constData());
+    }
+    return LockAttempt::Taken;
 }
 
 void SingleInstance::ensureDirectories() const {

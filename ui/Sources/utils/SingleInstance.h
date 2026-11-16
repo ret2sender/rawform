@@ -20,7 +20,7 @@
 
 // SingleInstance.h
 //
-// One rawform per configuration directory. The first process to take the lock
+// One rawform per configuration directory. The first process to lock the lock
 // file in that directory is the holder: it listens on a local socket and
 // receives the files later launches were asked to open. A later launch, the
 // newcomer, hands its files to the holder over that socket and exits.
@@ -31,11 +31,15 @@
 // derived from the lock directory. Two configurations therefore never share a
 // socket, and every instance on one configuration finds the same one.
 //
-// Who owns a lock is decided by the lock file itself, never by a process id.
-// QLockFile keeps an advisory lock on the file while it holds it, and removing
-// the file requires that lock; a process id means nothing to a process in
-// another PID namespace (two Flatpak sandboxes), where the newcomer can carry
-// the very number a dead holder left behind.
+// Who holds the lock is the kernel's answer, never a process id's. The lock is
+// an advisory flock() on the lock file, and the file stays in place between
+// runs. The kernel grants the lock to one open file at a time and releases it
+// when its holder ends, however it ends: a crash leaves a file and no lock,
+// nothing ever has to remove one, and launches started together cannot both
+// win. A process id would not do: it means nothing to a process in another
+// PID namespace (two Flatpak sandboxes), where the newcomer can carry the very
+// number a dead holder left behind. The holder writes its id into the file all
+// the same, for the message a newcomer prints about a holder that stays mute.
 //
 // Wire format, UTF-8 lines:
 //     rawform-open 1
@@ -44,7 +48,8 @@
 // The holder answers "ok" and a newline, then closes. A wrong header or an
 // oversized batch is closed without an answer.
 //
-// No GUI dependency: Qt Core, plus Qt Network for the local socket.
+// No GUI dependency: Qt Core, Qt Network for the local socket, and POSIX file
+// locking, the same calls on Linux and macOS.
 
 #pragma once
 
@@ -61,7 +66,6 @@
 
 class QLocalServer;
 class QLocalSocket;
-class QLockFile;
 
 namespace rawform {
 
@@ -146,6 +150,28 @@ private:
         Mute,        ///< Connected, and no answer within the ack wait.
     };
 
+    enum class LockAttempt {
+        Taken,    ///< This guard holds the lock.
+        Held,     ///< A live process holds it.
+        Refused,  ///< The file cannot be opened or locked; warned about.
+    };
+
+    /// Owns the descriptor the lock lives on: closing it releases the lock.
+    class LockDescriptor {
+    public:
+        LockDescriptor() = default;
+        ~LockDescriptor() { reset(); }
+
+        LockDescriptor(const LockDescriptor&) = delete;
+        LockDescriptor& operator=(const LockDescriptor&) = delete;
+
+        void reset(int descriptor = -1);
+
+    private:
+        int m_descriptor = -1;
+    };
+
+    [[nodiscard]] LockAttempt tryLock();
     [[nodiscard]] Role becomeHolder();
     [[nodiscard]] Attempt forward(const QList<QUrl>& files) const;
     void ensureDirectories() const;
@@ -161,7 +187,7 @@ private:
     // Declared in this order so the server goes first: its close removes the
     // socket file, and that must happen while the lock still keeps the next
     // holder (and its fresh socket of the same name) out.
-    std::unique_ptr<QLockFile>        m_lock;
+    LockDescriptor                    m_lock;
     QHash<QLocalSocket*, QByteArray>  m_pending;
     std::unique_ptr<QLocalServer>     m_server;
 };

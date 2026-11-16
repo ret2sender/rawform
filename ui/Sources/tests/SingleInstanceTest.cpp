@@ -22,15 +22,16 @@
 //
 // The single-instance guard over a real lock file and a real local socket in
 // a QTemporaryDir: who becomes the holder, what a newcomer hands over, which
-// lock files are taken over and which are left alone, and what happens when
-// the configuration directory is missing or refuses the lock.
+// lock files are taken and which are left alone, that launches started
+// together end with one holder, and what happens when the configuration
+// directory is missing or refuses the lock.
 //
 // One process plays every part. A holder answers from the event loop of the
 // main thread, as it does in the application, and a newcomer blocks in
 // start(), so each newcomer runs on a second thread while the main thread
-// spins the loop. A lock held by "another process" is a QLockFile the test
-// holds itself: Qt keeps a separate advisory lock per open file, so it
-// excludes a guard in the same process exactly as it would across processes.
+// spins the loop. A lock held by "another process" is a second guard in this
+// one: the kernel keeps an advisory lock per open file, so it excludes a
+// guard in the same process exactly as it would across processes.
 //
 // The socket cases need a real AF_UNIX socket and fail, on purpose, where
 // the system refuses to create one: a skipped hand-off would report a
@@ -64,10 +65,14 @@
 #include <QUrl>
 #include <QtGlobal> // qInstallMessageHandler
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 using rawform::SingleInstance;
 using Role = rawform::SingleInstance::Role;
@@ -194,8 +199,10 @@ Outcome launch(const QString& lockDir, const QString& socketDir,
     return {.role = role.load(), .elapsedMs = elapsedMs.load()};
 }
 
-/// The bytes Qt writes into a lock file for this process, taken from a real
-/// lock so the test knows nothing of the format beyond its first line.
+/// The bytes QLockFile writes for this process: a lock file that names a live
+/// process of this very name, the leftover a guard that trusted the content
+/// would never take. Taken from a real lock, so the test knows nothing of the
+/// format beyond its first line.
 QByteArray genuineLockBytes(const QString& lockPath) {
     QLockFile lock(lockPath);
     lock.setStaleLockTime(0ms);
@@ -212,7 +219,8 @@ QByteArray genuineLockBytes(const QString& lockPath) {
 }
 
 // The first guard on a configuration is the holder, with its lock file and
-// its socket in place for as long as it lives and gone afterwards.
+// its socket in place for as long as it lives. Afterwards the socket is gone
+// and the lock file stays, unlocked: the next guard is the holder in turn.
 void testFirstIsHolder() {
     const Scratch scratch;
     QString       lockPath;
@@ -227,8 +235,12 @@ void testFirstIsHolder() {
         CHECK(QFileInfo::exists(lockPath));
         CHECK(QFileInfo::exists(socketPath));
     }
-    CHECK(!QFileInfo::exists(lockPath));
+    CHECK(QFileInfo::exists(lockPath));
     CHECK(!QFileInfo::exists(socketPath));
+
+    SingleInstance next(scratch.lock(), scratch.run());
+    CHECK(next.start({}) == Role::Holder);
+    CHECK(QFileInfo::exists(socketPath));
 }
 
 // A second launch hands its files over and the holder receives exactly them,
@@ -299,10 +311,9 @@ void testRefusedBatches() {
     CHECK(received.batches == 1);
 }
 
-// A lock file nobody holds is taken over. One that names a dead process goes
-// at once, inside the lock attempt. One that names a live process of the
-// same name, which is what a crashed holder leaves to a launch in another
-// PID namespace, goes once the socket has stayed silent for the whole window.
+// A lock file nobody holds is taken at once, whatever it contains: the id of
+// a dead process, the id of a live process of the same name (what a crashed
+// holder leaves to a launch in another PID namespace), or nothing at all.
 void testAbandonedLocks() {
     const Scratch scratch;
     CHECK(QDir().mkpath(scratch.lock()));
@@ -314,15 +325,137 @@ void testAbandonedLocks() {
     // No system hands out a process id this large.
     const QByteArray dead =
         QByteArrayLiteral("2000000000") + genuine.mid(genuine.indexOf('\n'));
-    CHECK(writeFile(lockPath, dead));
-    Outcome outcome = launch(scratch.lock(), scratch.run(), {}, kQuick);
-    CHECK(outcome.role == Role::Holder);
-    CHECK(outcome.elapsedMs < kQuick.connectWindow.count());
+    for (const QByteArray& leftover : {dead, genuine, QByteArray()}) {
+        CHECK(writeFile(lockPath, leftover));
+        const Outcome outcome = launch(scratch.lock(), scratch.run(), {}, kQuick);
+        CHECK(outcome.role == Role::Holder);
+        CHECK(outcome.elapsedMs < kQuick.connectWindow.count());
+    }
+}
 
-    CHECK(writeFile(lockPath, genuine));
-    outcome = launch(scratch.lock(), scratch.run(), {}, kQuick);
-    CHECK(outcome.role == Role::Holder);
-    CHECK(outcome.elapsedMs >= kQuick.connectWindow.count());
+/// How many launches start together, and how many times over: which of them
+/// wins is a matter of interleaving, so one round proves little.
+constexpr int kTogether = 8;
+constexpr int kTogetherRounds = 5;
+
+/// What one launch among several came to. As the holder it also collects
+/// what the others handed it.
+struct Together {
+    Role        role = Role::Failed;
+    int         batches = 0;
+    QList<QUrl> received;
+};
+
+// Launches started together on a lock file nobody holds end with one holder
+// and every other launch handed over to it: no second holder, and no launch
+// that gives up while the winner is about to answer. Each launch runs on its
+// own thread, as in launch(), and the one that becomes the holder serves
+// from that thread's loop until the others have returned.
+void testLaunchesTogether() {
+    for (int round = 0; round < kTogetherRounds; ++round) {
+        const int     failuresBefore = g_failures;
+        const Scratch scratch;
+        const QString lockDir = scratch.lock();
+        const QString socketDir = scratch.run();
+        CHECK(QDir().mkpath(lockDir));
+        const QString    lockPath = lockFileIn(lockDir);
+        const QByteArray genuine = genuineLockBytes(lockPath);
+        CHECK(!genuine.isEmpty() && writeFile(lockPath, genuine));
+
+        QList<QUrl> files;
+        for (int i = 0; i < kTogether; ++i) {
+            files.append(
+                QUrl::fromLocalFile(scratch.path(QStringLiteral("%1.flac").arg(i))));
+        }
+
+        // A mutex, not the join, orders the results for the reader: a thread
+        // sanitizer follows the first and cannot see inside QThread::wait().
+        std::mutex            mutex;
+        std::vector<Together> launches(static_cast<std::size_t>(kTogether));
+        std::atomic<int>      ready{0};
+        std::atomic<int>      returned{0};
+        std::atomic<bool>     go{false};
+        std::atomic<bool>     release{false};
+
+        std::vector<std::unique_ptr<QThread>> workers;
+        for (int i = 0; i < kTogether; ++i) {
+            workers.emplace_back(QThread::create([&, i] {
+                SingleInstance guard(lockDir, socketDir);
+                Together&      mine = launches[static_cast<std::size_t>(i)];
+                QObject::connect(&guard, &SingleInstance::filesReceived, &guard,
+                                 [&](const QList<QUrl>& batch) {
+                                     const std::lock_guard lock(mutex);
+                                     ++mine.batches;
+                                     mine.received += batch;
+                                 });
+                ready.fetch_add(1);
+                while (!go.load()) {
+                    QThread::yieldCurrentThread();
+                }
+                const Role role = guard.start({files.at(i)});
+                {
+                    const std::lock_guard lock(mutex);
+                    mine.role = role;
+                }
+                returned.fetch_add(1);
+                while (role == Role::Holder && !release.load()) {
+                    spin(5);
+                }
+            }));
+            workers.back()->start();
+        }
+        while (ready.load() < kTogether) {
+            QThread::msleep(1);
+        }
+        go.store(true);
+        while (returned.load() < kTogether) {
+            QThread::msleep(5);
+        }
+        release.store(true);
+        for (const std::unique_ptr<QThread>& worker : workers) {
+            worker->wait();
+        }
+
+        int         holders = 0;
+        int         forwarded = 0;
+        int         failed = 0;
+        int         batches = 0;
+        QList<QUrl> received;
+        QList<QUrl> expected;
+        {
+            const std::lock_guard lock(mutex);
+            for (int i = 0; i < kTogether; ++i) {
+                const Together& one = launches[static_cast<std::size_t>(i)];
+                switch (one.role) {
+                case Role::Holder:
+                    ++holders;
+                    batches += one.batches;
+                    received += one.received;
+                    break;
+                case Role::Forwarded:
+                    ++forwarded;
+                    expected.append(files.at(i));
+                    break;
+                case Role::Failed:
+                    ++failed;
+                    break;
+                }
+            }
+        }
+        std::ranges::sort(received);
+        std::ranges::sort(expected);
+        CHECK(holders == 1);
+        CHECK(forwarded == kTogether - 1);
+        CHECK(failed == 0);
+        CHECK(batches == forwarded);
+        CHECK(received == expected);
+        if (g_failures != failuresBefore) {
+            std::fprintf(stderr,
+                         "launches together: %d holder(s), %d forwarded, %d failed, "
+                         "%d batch(es)\n",
+                         holders, forwarded, failed, batches);
+        }
+    }
 }
 
 // A live holder keeps its lock whatever the file's age: a lock held for an
@@ -351,24 +484,22 @@ void testOldLockOfLiveHolder() {
 }
 
 // A live process that holds the lock and does not answer is never displaced:
-// the launch fails with one message and the lock stays where it is. Mute two
-// ways: nothing listens, or something accepts the connection and says nothing.
+// the launch fails with one message, and so does the next. Mute two ways:
+// nothing listens, or something accepts the connection and says nothing.
 void testMuteHolder() {
     const Scratch scratch;
-    CHECK(QDir().mkpath(scratch.lock()));
     CHECK(QDir().mkpath(scratch.run()));
     const QString lockPath = lockFileIn(scratch.lock());
 
-    QLockFile held(lockPath);
-    held.setStaleLockTime(0ms);
-    CHECK(held.tryLock(0ms));
+    // A guard without a socket directory holds the lock and listens nowhere.
+    SingleInstance held(scratch.lock(), QString());
+    CHECK(held.start({}) == Role::Holder);
 
     int     warningsBefore = g_warnings.load();
     Outcome outcome = launch(scratch.lock(), scratch.run(), {}, kQuick);
     CHECK(outcome.role == Role::Failed);
     CHECK(outcome.elapsedMs >= kQuick.connectWindow.count());
     CHECK(g_warnings.load() == warningsBefore + 1);
-    CHECK(held.isLocked());
     CHECK(QFileInfo::exists(lockPath));
 
     QLocalServer silent;
@@ -379,7 +510,6 @@ void testMuteHolder() {
     CHECK(outcome.elapsedMs >= kQuick.ackWait.count());
     CHECK(g_warnings.load() == warningsBefore + 1);
     CHECK(silent.hasPendingConnections());
-    CHECK(held.isLocked());
     CHECK(QFileInfo::exists(lockPath));
 }
 
@@ -540,6 +670,7 @@ int main(int argc, char** argv) {
     testForward();
     testRefusedBatches();
     testAbandonedLocks();
+    testLaunchesTogether();
     testOldLockOfLiveHolder();
     testMuteHolder();
     testCreatesItsDirectories();
