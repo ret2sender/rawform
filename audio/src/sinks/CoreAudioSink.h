@@ -61,10 +61,11 @@
 // is what keeps the built-in audio controller's cross-family clock churn (the
 // AppleMCA2 panic) out of the picture. A close() whose restore misses keeps
 // the debt for the device's return: the next open() of it carries the debt,
-// and settleRateDebts() and later closes repay it once the device is back and
-// idle. The ledger is published per device through the event channel so the
-// owner can persist it and repayStaleRateDebt() can settle it at the next
-// launch, or keep it as unpaid there when the device is still away.
+// and settleRateDebts() repays it once the device is back and idle. A close()
+// leaves other devices' debts alone, so a reopen onto one of them can carry.
+// The ledger is published per device through the event channel so the owner
+// can persist it and repayStaleRateDebt() can settle it at the next launch,
+// or keep it as unpaid there when the device is still away.
 //
 // The device surface: enumerateDevices() lists every output-capable device by
 // UID, and selectDevice() pins one; the pin redirects what capabilities(),
@@ -140,7 +141,8 @@ public:
         const std::string& deviceId, std::uint32_t originalRateHz,
         std::uint32_t borrowedRateHz) override;
     /// Repay the debts earlier closes could not, for devices that are back,
-    /// by the same rule; the device this sink is open on is skipped. Engine
+    /// by the same rule; the device this sink is open on is skipped, and so
+    /// is, once, a device whose restore has just failed in close(). Engine
     /// thread; each restore blocks for up to the switch's settle timeout.
     void                         settleRateDebts() override;
     bool             open(const AudioFormat&  sourceFormat,

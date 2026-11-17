@@ -149,7 +149,8 @@ struct IPullSource {
 ///     when it is following the default.
 ///   - onDeviceListChanged: the selectable device set, or its default-marking,
 ///     changed: a fresh enumeration would differ. The engine pushes one so
-///     pickers stay current, after settleRateDebts() while not Playing.
+///     pickers stay current, after settleRateDebts() when nothing is playing
+///     and no reopen is expected to follow (see settleRateDebts()).
 ///   - onRateDebtChanged: one device's entry in the restore ledger changed;
 ///     the engine forwards it for persistence (crash recovery). deviceId is
 ///     the device's persistent id and is never empty. originalRateHz 0 clears
@@ -261,10 +262,17 @@ public:
     /// refused the restore), for every such device that is present again and
     /// not open, by repayStaleRateDebt's rule: restored iff it still sits at
     /// the borrowed rate, dropped as moot if anyone moved it since, kept while
-    /// it is absent. Engine thread. The engine calls it on a device-list
-    /// change while not Playing, because a restore can block for a while and
-    /// a playing ring must not starve. Default no-op: a sink with nothing
-    /// unpaid has nothing to settle.
+    /// it is absent. Engine thread. The engine calls it where a session ends
+    /// (a stop, the end of the queue, an output failure, shutdown) and on a
+    /// device-list change while Stopped, or Paused on a pinned device. It
+    /// does not call it while Playing, because a restore can block for a
+    /// while and a playing ring must not starve; nor while Paused and
+    /// following the default, nor between the close and the open of a
+    /// reopen, because there the device owed may be the one about to be
+    /// opened, and an open carries its debt without a restore followed by a
+    /// new switch. For the same reason close() never settles other devices
+    /// itself. Default no-op: a sink with nothing unpaid has nothing to
+    /// settle.
     virtual void settleRateDebts() {}
 
     /// Negotiate the device for `sourceFormat` (the interleaved float32 stream the

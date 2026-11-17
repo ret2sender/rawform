@@ -111,6 +111,8 @@
 //   - stop / queue-exhaustion = sink.stop()+close() (repay any rate debt,
 //     release the device) + ring reset + drop the decoder + clear seams. stop
 //     REWINDS: it REMEMBERS the current path, so the next play() reopens it.
+//     Settling into Stopped then asks the sink to settleRateDebts(): the
+//     debts earlier closes could not repay, for devices that are back.
 //   - seek = sink.stop() (the pause primitive, NOT close) + ring reset + clear
 //     seams + decoder->seek(target) + position rebase + re-prime, then
 //     sink.start() iff the entry state was Playing. State is preserved.
@@ -128,7 +130,8 @@
 //   - output device selection, and a default-device change while following
 //     the default = full teardown (the outgoing device gets its restore) +
 //     reopen of the SAME track at the captured position, so the change is
-//     audible without losing the place.
+//     audible without losing the place. No settleRateDebts() in between: the
+//     open carries an unpaid debt on the device it lands on.
 //
 // Teardown order (the safety crux). On a stop and on shutdown the sink is
 // stopped/closed FIRST, which joins the RT thread (every sink's stop() returns
@@ -136,8 +139,9 @@
 // invariant); only THEN is the ring reset and the decoder dropped. ~Engine
 // signals shutdown and joins the engine thread; the engine thread runs that
 // same teardown before exiting, so the sink is closed and the RT thread gone
-// before anything else happens. It then drains the command queue once more,
-// relaying only the rate-debt changes the close published and dropping every
+// before anything else happens. It then asks the sink to settle its unpaid
+// rate debts and drains the command queue once more, relaying only the
+// rate-debt changes the close and the settle published and dropping every
 // other command. ~Engine then detaches the sink from the event
 // and log channels and DESTROYS it, still inside requestShutdownAndJoin, while
 // the command mutex and queue are alive: a platform thread (the PipeWire loop
@@ -965,10 +969,18 @@ void Engine::Impl::run() {
     // decoder, clear seams, so Impl's members destruct with nothing left running.
     teardownCurrent();
 
+    // The last chance in this run to repay a device an earlier close could
+    // not restore and that is back by now; before the drain below, so what
+    // the settle publishes is relayed with the close's.
+    if (sink) {
+        sink->settleRateDebts();
+    }
+
     // The close above is where a sink repays its rate debt, and it publishes
-    // that as an event posted behind the loop's last drain. Relay it, or the
-    // listener's crash ledger keeps claiming a debt the close just repaid.
-    // Every other command is moot once the session is over.
+    // that as an event posted behind the loop's last drain; the settle does
+    // the same. Relay them, or the listener's crash ledger keeps claiming a
+    // debt that was just repaid. Every other command is moot once the session
+    // is over.
     std::deque<Command> late;
     {
         std::lock_guard<std::mutex> lock(mtx);
@@ -1212,7 +1224,9 @@ void Engine::Impl::doSelectOutputDevice(const std::string& deviceId) {
 // The shared audible-change boundary (factored from device selection
 // and reused by the default-device reaction): capture the position, full
 // teardown (the outgoing device gets its restore), reopen the SAME track AT
-// that position, Paused again if that is where we were. The position travels
+// that position, Paused again if that is where we were. Nothing settles other
+// devices' unpaid rate debts in between: the device being opened may be one
+// of them, and the open carries its debt. The position travels
 // as a StartOptions into the fresh start, so the new decoder is positioned
 // before the ring is primed and the device started once: nothing from the
 // track head reaches the device, and the UI sees one announcement at the kept
@@ -1299,12 +1313,17 @@ void Engine::Impl::doDefaultDeviceChanged() {
 // The selectable set changed (hot-plug, profile flip): push a fresh
 // enumeration so any open picker tracks it live. A device coming back may be
 // one a close could not restore, so the sink settles its unpaid rate debts
-// first, except while Playing: a restore can block the engine thread for up to
-// its settle timeout, longer than the ring's runway. A debt passed over here
-// is repaid by the next close, the next session on that device, or the next
+// first, with two exceptions. While Playing: a restore can block the engine
+// thread for up to its settle timeout, longer than the ring's runway. While
+// Paused and following the default: a returning device usually becomes the
+// default again, the reopen that follows carries its debt, and a restore here
+// would only be undone by that open's switch. A debt passed over here is
+// repaid by the session's end, the next session on that device, or the next
 // launch.
 void Engine::Impl::doDeviceListChanged() {
-    if (sink && stateAtomic.load(std::memory_order_relaxed) != State::Playing) {
+    const State st            = stateAtomic.load(std::memory_order_relaxed);
+    const bool  reopenExpected = st == State::Paused && outputDeviceId.empty();
+    if (sink && st != State::Playing && !reopenExpected) {
         sink->settleRateDebts();
     }
     doRequestOutputDevices();
@@ -2128,6 +2147,15 @@ void Engine::Impl::enterStopped() {
     }
     outcomeBits.store(0, std::memory_order_release);  // device released: no outcome
     setState(State::Stopped);
+    // The session is over and no open follows, so this is where the sink
+    // repays the debts earlier closes could not, for devices that are back. A
+    // close does not do it itself: at a reopen the device owed may be the one
+    // about to be opened, and that open carries the debt without a restore
+    // followed by a new switch. After Stopped is published, because a restore
+    // can block for a while.
+    if (sink) {
+        sink->settleRateDebts();
+    }
 }
 
 void Engine::Impl::publishFormat(const AudioFormat& f) {
