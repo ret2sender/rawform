@@ -1463,7 +1463,8 @@ void CoreAudioSink::close() {
     // system audio, so this is mandatory, not etiquette. A restore that does
     // not reach the original (the device is gone, refused the set, or settled
     // elsewhere) is not reported as done: the debt moves to the unpaid list,
-    // stays published, and is repaid when the device is back.
+    // stays published, and is repaid when the device is back. A device with
+    // no persistent id cannot be kept that way, and the log says so.
     const bool    wasOpened     = m_impl->opened;
     bool          restoreNeeded = false;
     bool          restoreFailed = false;
@@ -1487,6 +1488,13 @@ void CoreAudioSink::close() {
         if (reached) {
             sinkLog(m_impl->logOut, "CoreAudioSink: restored device rate to %.0f Hz",
                     restored);
+        } else if (closedUid.empty()) {
+            // The unpaid list is keyed by the persistent id, the one name that
+            // still means this device after it has gone and come back.
+            sinkLog(m_impl->logOut,
+                    "CoreAudioSink: restore of device rate to %.0f Hz FAILED (%s); "
+                    "the device has no persistent id, so the debt is not kept",
+                    restoreTo, m_impl->deviceNameStr.c_str());
         } else {
             sinkLog(m_impl->logOut,
                     "CoreAudioSink: restore of device rate to %.0f Hz FAILED (%s); "
