@@ -179,7 +179,7 @@ the Flatpak sandbox the same paths resolve to
 | `live_playlist/*.rwfpl` | One live copy per open playlist tab |
 | `live_playlist/.session` | Tab order, active tab, and the Playback Queue tab's position when shown |
 | `rate_ledger.yaml` | CoreAudio rate-debt ledger, one entry per device. Exists only on macOS while a device sits at a rate rawform switched it to, including a device unplugged before its rate could be restored; a crash, or a quit with that device still away, leaves it behind and the next launch restores the device rates from it. Never appears on Linux. |
-| `instance.lock` | Held while rawform runs, so a second launch hands its files to the running window. A stale one, left by a crash, is taken over at the next launch. |
+| `instance.lock` | Locked while rawform runs, so a second launch hands its files to the running window. The file stays when rawform exits; the lock on it is what counts, and the system drops it when rawform ends, a crash included. |
 
 The hand-off socket lives outside the config directory: in
 `$XDG_RUNTIME_DIR/rawform/` (`$XDG_RUNTIME_DIR/app/com.rawform.app/` inside
