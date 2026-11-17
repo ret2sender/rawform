@@ -154,7 +154,9 @@ bool write(const QString& path, const std::vector<Entry>& entries) {
     content += "# goes when its debt is repaid or forgiven, and the file goes with\n";
     content += "# the last one. Found at launch, it means a previous session ended\n";
     content += "# without repaying: rawform restores each original rate if the\n";
-    content += "# device still sits at the borrowed one.\n";
+    content += "# device still sits at the borrowed one. An entry whose device is\n";
+    content += "# not connected waits here until the device is back; deleting this\n";
+    content += "# file while rawform is closed drops every entry.\n";
     content += out.c_str();
     content += '\n';
 

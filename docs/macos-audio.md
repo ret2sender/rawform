@@ -80,12 +80,15 @@ whose close restores it. The same applies to a device that refuses the
 restore.
 
 On the next launch, a ledger left behind (by a crash, or by a device that
-was still unplugged at quit) is read before the first open: for each
+was still unplugged at quit) is read before the first open. For each
 device still at the borrowed rate, the original is set back, and the
-console says so; a device that has since moved, or is gone, is left alone.
-The launch deletes the file in every case. A rate changed by another
-application while rawform held it is treated as that application's choice
-and is not undone. Linux never writes this file; the PipeWire backend's
+console says so. A device that has since moved is left alone and its entry
+is dropped. A device that is not connected keeps its entry: the file stays,
+and the device is restored when it comes back, in that run or a later one,
+by the rules above. An entry for a device that never returns stays in the
+file and changes nothing; deleting `rate_ledger.yaml` while rawform is
+closed drops it. A rate changed by another application while rawform held
+it is treated as that application's choice and is not undone. Linux never writes this file; the PipeWire backend's
 rate force lifts with the stream.
 
 ## Diagnostics

@@ -27,7 +27,8 @@
 // calls the CoreAudio sink makes (session open, own change begun and ended,
 // notification, close) and checks what the final close would restore. The
 // second half covers the debts a close could not repay: kept per device,
-// carried by a later session, settled, and published one device at a time.
+// carried by a later session, settled, and published one device at a time,
+// and the debts adopted from the owner's file at launch.
 // Same hand-rolled CHECK harness as the rest of the suite; main returns
 // non-zero on any failure.
 
@@ -301,6 +302,71 @@ void testTwoDevicesIndependent() {
     CHECK(book.unpaid().size() == 1);
 }
 
+// A debt read back from the owner's file for a device that is away: the owner
+// already holds it, so adopting it publishes nothing, and the owner hears of
+// it again only when it is repaid.
+void testAdoptedDebtIsAlreadyPublished() {
+    RateDebtBook book;
+    book.adoptPersisted(debt("hp", 96000, 44100));
+    CHECK(book.unpaid().size() == 1);
+    CHECK(book.publish(std::nullopt).empty());
+
+    CHECK(book.takeUnpaid("hp").has_value());  // the device returned and was restored
+    const std::vector<Entry> events = book.publish(std::nullopt);
+    CHECK(events.size() == 1);
+    CHECK(!events.empty() && events[0] == debt("hp", 0, 0));
+    CHECK(book.publish(std::nullopt).empty());
+
+    book.adoptPersisted(debt("", 96000, 44100));  // no device: ignored
+    book.adoptPersisted(debt("hp", 0, 44100));    // no original: ignored
+    CHECK(book.unpaid().empty());
+    CHECK(book.publish(std::nullopt).empty());
+}
+
+// The adopted debt's device returns under a new session. At the borrowed rate
+// the session carries it and the owner's entry stands unchanged; at another
+// rate the debt is moot and the owner gets the device's clear.
+void testAdoptedDebtCarriesOrGoesMoot() {
+    RateLedger   ledger;
+    RateDebtBook book;
+    book.adoptPersisted(debt("hp", 96000, 44100));
+    const std::optional<Entry> carried = book.takeUnpaid("hp");
+    ledger.beginSession(44100.0);
+    CHECK(carried && ledger.carry(carried->originalHz, carried->borrowedHz));
+    CHECK(ledger.owes());
+    CHECK(book.publish(sessionDebt(ledger, "hp")).empty());  // same entry stands
+
+    ledger.settle();  // the session's close repaid it
+    const std::vector<Entry> closed = book.publish(sessionDebt(ledger, "hp"));
+    CHECK(closed.size() == 1);
+    CHECK(!closed.empty() && closed[0] == debt("hp", 0, 0));
+
+    RateLedger   moved;
+    RateDebtBook book2;
+    book2.adoptPersisted(debt("hp", 96000, 44100));
+    const std::optional<Entry> stale = book2.takeUnpaid("hp");
+    moved.beginSession(48000.0);
+    CHECK(stale && !moved.carry(stale->originalHz, stale->borrowedHz));
+    CHECK(!moved.owes());
+    const std::vector<Entry> cleared = book2.publish(sessionDebt(moved, "hp"));
+    CHECK(cleared.size() == 1);
+    CHECK(!cleared.empty() && cleared[0] == debt("hp", 0, 0));
+}
+
+// A launch restore that left the device on a third rate: the unpaid entry
+// records where the device sits, the owner still holds the entry as it was
+// read, and the next publication corrects the owner once.
+void testAdoptedDebtLandedElsewhere() {
+    RateDebtBook book;
+    book.adoptPersisted(debt("hp", 96000, 44100));
+    book.keepUnpaid(debt("hp", 96000, 48000));
+    CHECK(book.unpaid().size() == 1);
+    const std::vector<Entry> corrected = book.publish(std::nullopt);
+    CHECK(corrected.size() == 1);
+    CHECK(!corrected.empty() && corrected[0] == debt("hp", 96000, 48000));
+    CHECK(book.publish(std::nullopt).empty());
+}
+
 }  // namespace
 
 int main() {
@@ -315,6 +381,9 @@ int main() {
     testLaterSessionCarriesDebt();
     testSettleRestoresAndClears();
     testTwoDevicesIndependent();
+    testAdoptedDebtIsAlreadyPublished();
+    testAdoptedDebtCarriesOrGoesMoot();
+    testAdoptedDebtLandedElsewhere();
 
     if (g_failures == 0) {
         std::puts("RateLedgerTest: all checks passed");
