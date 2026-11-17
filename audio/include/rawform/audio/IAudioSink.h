@@ -57,9 +57,11 @@
 // close()+open(). Any nominal-rate debt a sink accumulates by switching the
 // device is repaid at close(); a sink that keeps a ledger publishes it through
 // the event channel so the owner can persist it, and repayStaleRateDebt()
-// settles a persisted debt left by a crashed session before the sink is ever
-// opened. A debt close() could not repay stays published and is repaid when
-// its device is back: by the next session on it, or by settleRateDebts().
+// takes each persisted debt an earlier run left behind, before the sink is
+// ever opened: repaid at once when its device is there, kept when it is away.
+// A debt close() could not repay, like one kept at launch, stays published
+// and is repaid when its device is back: by the next session on it, or by
+// settleRateDebts().
 //
 // The device surface. enumerateDevices() lists the selectable outputs by
 // persistent id (AudioDeviceInfo in Types.h) and selectDevice() pins one; the
@@ -179,6 +181,13 @@ struct ISinkEventListener {
     virtual void onOutputAlterationsChanged() {}
 };
 
+/// What repayStaleRateDebt() did with one persisted debt.
+enum class StaleDebtOutcome {
+    Repaid,     ///< the device sat at the borrowed rate and has its original back
+    Kept,       ///< not repayable yet: the sink holds the debt and repays it later
+    Discarded,  ///< nothing to repay: the device moved since, or the entry is unusable
+};
+
 /// A platform output device, configured for one interleaved float32 stream.
 /// open() negotiates the device for a given source format and rate decision and
 /// wires it to a source; reconfigure() retunes the already-open device for the
@@ -231,17 +240,21 @@ public:
     /// injected into an engine and before any open(), with the triple a
     /// previous session persisted from onRateDebtChanged: resolve the device by
     /// its persistent id and, IFF it still sits at the borrowed rate, restore
-    /// the original; a device that is absent or has since been moved by anyone
-    /// is left alone (the debt is moot or overridden). Returns whether a
-    /// restore was performed. Default false: a sink that never emits debt
-    /// (structural repayment) has nothing to repay.
-    virtual bool repayStaleRateDebt(const std::string& deviceId,
-                                    std::uint32_t originalRateHz,
-                                    std::uint32_t borrowedRateHz) {
+    /// the original (Repaid). A device anyone has moved since is left alone
+    /// and its debt is moot (Discarded). A device that is away, or whose
+    /// restore did not reach the original, keeps its debt (Kept): the sink
+    /// holds it as unpaid and already published, and repays it like a debt a
+    /// close() could not. The owner therefore keeps persisting exactly the
+    /// Kept entries, and every later onRateDebtChanged applies to that set.
+    /// Default Discarded: a sink that never emits debt (structural repayment)
+    /// has nothing to repay.
+    [[nodiscard]] virtual StaleDebtOutcome repayStaleRateDebt(
+        const std::string& deviceId, std::uint32_t originalRateHz,
+        std::uint32_t borrowedRateHz) {
         (void)deviceId;
         (void)originalRateHz;
         (void)borrowedRateHz;
-        return false;
+        return StaleDebtOutcome::Discarded;
     }
 
     /// Repay the debts an earlier close() could not (the device vanished or

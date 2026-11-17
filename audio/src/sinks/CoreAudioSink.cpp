@@ -67,7 +67,7 @@
 // sit anywhere other than the rate it opened at", so a switch that lands on a
 // third rate is a debt too. It is published on change through
 // ISinkEventListener::onRateDebtChanged so the owner can persist it, and
-// repayStaleRateDebt() settles a persisted debt from a crashed session before
+// repayStaleRateDebt() takes each debt an earlier run left persisted, before
 // the sink is ever opened. An external nominal-rate change on the bound device
 // (the user or another program asserting ownership) FORGIVES the debt: the
 // asserted rate becomes the new baseline, and the measurement follows. Our own
@@ -85,7 +85,8 @@
 // as the session's original, adding no rate transition; settleRateDebts() (the
 // engine calls it on a device-list change while not Playing) and every close
 // restore the unpaid debts of devices that are back and idle, by the
-// crash-recovery rule; and the next launch repays whatever is still persisted.
+// crash-recovery rule; and the next launch repays whatever is still persisted,
+// or takes it into the unpaid list again while its device is away.
 //
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
@@ -780,8 +781,8 @@ void publishDebt(CoreAudioSinkImpl* impl) {
 // the crash-recovery one: a device still at the borrowed rate is restored, one
 // moved since is dropped as moot (someone else chose that rate), an absent one
 // waits. Engine thread; each restore blocks, so stateMtx is held only around
-// the bookkeeping. The engine thread is the only one that changes the unpaid
-// list, so the copy taken here stays current.
+// the bookkeeping. Once the sink is injected, the engine thread is the only
+// one that changes the unpaid list, so the copy taken here stays current.
 void settleUnpaid(CoreAudioSinkImpl* impl, const std::string& skipUid) {
     std::vector<RateDebtBook::Entry> unpaid;
     {
@@ -1447,39 +1448,67 @@ bool CoreAudioSink::bitPerfect() const noexcept {
 // stale rate.
 // The crash-recovery restore. Runs pre-injection with no logger
 // installed, so diagnostics go to stderr; the owner narrates to its own
-// console. Conservative by design: an absent device or one that anyone has
-// since moved is left exactly as found.
-bool CoreAudioSink::repayStaleRateDebt(const std::string& deviceId,
-                                       std::uint32_t originalRateHz,
-                                       std::uint32_t borrowedRateHz) {
+// console. Conservative by design: a device that anyone has since moved is
+// left exactly as found. A device that is away, or whose restore missed, keeps
+// its debt: it joins the unpaid list as already published, because the
+// owner's record holds it, so the carry and settle paths repay it and the
+// owner hears only what changes from here.
+StaleDebtOutcome CoreAudioSink::repayStaleRateDebt(const std::string& deviceId,
+                                                   std::uint32_t originalRateHz,
+                                                   std::uint32_t borrowedRateHz) {
     if (deviceId.empty() || originalRateHz == 0 || borrowedRateHz == 0) {
-        return false;
+        return StaleDebtOutcome::Discarded;
     }
-    const AudioDeviceID dev = deviceByUid(deviceId);
-    if (dev == kAudioObjectUnknown) {
-        std::fprintf(stderr,
-                     "CoreAudioSink: stale rate ledger names an absent device "
-                     "('%s'); nothing to repay\n",
-                     deviceId.c_str());
-        return false;
-    }
-    const double current = deviceNominalRate(dev);
-    if (!ratesEqual(current, static_cast<double>(borrowedRateHz))) {
-        std::fprintf(stderr,
-                     "CoreAudioSink: stale rate ledger for '%s' is moot "
-                     "(device at %.0f Hz, not the borrowed %u); leaving it\n",
-                     deviceId.c_str(), current, borrowedRateHz);
-        return false;
+    RateDebtBook::Entry debt{.deviceId   = deviceId,
+                             .originalHz = originalRateHz,
+                             .borrowedHz = borrowedRateHz};
+    const AudioDeviceID dev     = deviceByUid(deviceId);
+    const double        current =
+        (dev != kAudioObjectUnknown) ? deviceNominalRate(dev) : 0.0;
+    switch (RateDebtBook::settlement(debt, current)) {
+        case RateDebtBook::Settlement::Keep: {
+            std::fprintf(stderr,
+                         "CoreAudioSink: stale rate ledger names %s ('%s'); its "
+                         "debt is kept until it returns\n",
+                         dev == kAudioObjectUnknown
+                             ? "an absent device"
+                             : "a device whose rate cannot be read",
+                         deviceId.c_str());
+            std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+            m_impl->debts.adoptPersisted(debt);
+            return StaleDebtOutcome::Kept;
+        }
+        case RateDebtBook::Settlement::Moot:
+            std::fprintf(stderr,
+                         "CoreAudioSink: stale rate ledger for '%s' is moot "
+                         "(device at %.0f Hz, not the borrowed %u); leaving it\n",
+                         deviceId.c_str(), current, borrowedRateHz);
+            return StaleDebtOutcome::Discarded;
+        case RateDebtBook::Settlement::Restore:
+            break;
     }
     double restored = 0.0;
-    const bool reached = setDeviceNominalRate(
-        dev, static_cast<double>(originalRateHz), &restored);
+    if (setDeviceNominalRate(dev, static_cast<double>(originalRateHz), &restored)) {
+        std::fprintf(stderr,
+                     "CoreAudioSink: repaid stale rate debt on '%s': %u -> %.0f Hz "
+                     "(restored)\n",
+                     deviceId.c_str(), borrowedRateHz, restored);
+        return StaleDebtOutcome::Repaid;
+    }
     std::fprintf(stderr,
-                 "CoreAudioSink: repaid stale rate debt on '%s': %u -> %.0f Hz "
-                 "(%s)\n",
-                 deviceId.c_str(), borrowedRateHz, restored,
-                 reached ? "restored" : "restore NOT confirmed");
-    return reached;
+                 "CoreAudioSink: repay of stale rate debt on '%s' to %u Hz FAILED "
+                 "(device at %.0f Hz); the debt is kept\n",
+                 deviceId.c_str(), originalRateHz, restored);
+    std::lock_guard<std::mutex> lock(m_impl->stateMtx);
+    m_impl->debts.adoptPersisted(debt);
+    if (restored > 0.0 && !ratesEqual(restored, static_cast<double>(borrowedRateHz))) {
+        // It landed on a third rate: that is where a repay must find it. The
+        // published record keeps the rate the owner holds, so the next
+        // publication corrects the owner.
+        debt.borrowedHz = static_cast<std::uint32_t>(std::lround(restored));
+        m_impl->debts.keepUnpaid(debt);
+    }
+    return StaleDebtOutcome::Kept;
 }
 
 // The bound device is skipped: its debt, if it had one, was carried into the

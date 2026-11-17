@@ -174,7 +174,8 @@ that ships.
 - CoreAudio: a device unplugged while rawform held its sample rate gets its
   original rate back when it returns, instead of keeping the borrowed one.
   The failed restore is now reported as failed (it read "restored device
-  rate to 0 Hz") and its debt is kept until the device is back.
+  rate to 0 Hz") and its debt is kept until the device is back, across
+  quits and launches when the device stays away that long.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no

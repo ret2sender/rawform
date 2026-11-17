@@ -51,7 +51,9 @@
 // the device is back. A later session on that device carries it (carry()),
 // and a settle restores it while the device is idle. Either way the rule is
 // the crash-recovery one: repay only a device still sitting at the borrowed
-// rate, because a device moved since then was moved by someone else.
+// rate, because a device moved since then was moved by someone else. A debt
+// the owner persisted in an earlier run, whose device is away at launch, joins
+// the same list (adoptPersisted()) and is repaid the same way.
 //
 // rawform's CoreAudio sink is the one user; the classes themselves are portable.
 
@@ -145,6 +147,13 @@ public:
     /// Keep a debt a close could not repay; replaces an earlier one for the
     /// same device. An entry with no device id or no original is ignored.
     void keepUnpaid(const Entry& debt);
+
+    /// Take over a debt the owner already persists, read back at launch for a
+    /// device that cannot be repaid yet: it joins the unpaid list and counts
+    /// as published, so publish() reports only what changes from here and the
+    /// owner's record stays equal to the standing set. Ignores the same
+    /// entries as keepUnpaid().
+    void adoptPersisted(const Entry& debt);
 
     /// Remove and return the unpaid debt for deviceId, if any.
     [[nodiscard]] std::optional<Entry> takeUnpaid(const std::string& deviceId);

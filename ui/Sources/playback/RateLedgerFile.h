@@ -30,13 +30,16 @@
 //       borrowed_rate: <Hz the device was left at>
 //
 // A file found at launch means the previous session ended without repaying.
-// The reader also accepts the single top-level entry (device_id,
-// original_rate, borrowed_rate at the root) that older builds wrote.
+// An entry whose device is away at launch stays in the file until the device
+// is back and repaid, however many launches that takes. The reader also
+// accepts the single top-level entry (device_id, original_rate,
+// borrowed_rate at the root) that older builds wrote.
 //
-// Free functions with no state and no thread affinity: the controller writes
-// the file from the engine thread, where the sink publishes its debts, and
-// reads it on the GUI thread before the engine has a listener, so the two
-// never overlap.
+// Free functions with no state and no thread affinity: at launch the
+// controller reads the file on the GUI thread and rewrites it there to the
+// entries it keeps, before the engine has a listener; from then on it writes
+// from the engine thread, where the sink publishes its debts. The two never
+// overlap.
 
 #pragma once
 

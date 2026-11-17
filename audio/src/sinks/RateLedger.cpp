@@ -30,6 +30,21 @@
 
 namespace rawform::audio {
 
+namespace {
+
+// Set the entry for debt's device, replacing the one already there.
+void put(std::vector<RateDebtBook::Entry>& entries, const RateDebtBook::Entry& debt) {
+    const auto it =
+        std::ranges::find(entries, debt.deviceId, &RateDebtBook::Entry::deviceId);
+    if (it != entries.end()) {
+        *it = debt;
+    } else {
+        entries.push_back(debt);
+    }
+}
+
+}  // namespace
+
 bool RateLedger::ratesEqual(double a, double b) noexcept {
     return std::fabs(a - b) < 1.0;
 }
@@ -93,12 +108,15 @@ void RateDebtBook::keepUnpaid(const Entry& debt) {
     if (debt.deviceId.empty() || debt.originalHz == 0) {
         return;
     }
-    const auto it = std::ranges::find(m_unpaid, debt.deviceId, &Entry::deviceId);
-    if (it != m_unpaid.end()) {
-        *it = debt;
-    } else {
-        m_unpaid.push_back(debt);
+    put(m_unpaid, debt);
+}
+
+void RateDebtBook::adoptPersisted(const Entry& debt) {
+    if (debt.deviceId.empty() || debt.originalHz == 0) {
+        return;
     }
+    put(m_unpaid, debt);
+    put(m_published, debt);
 }
 
 std::optional<RateDebtBook::Entry> RateDebtBook::takeUnpaid(const std::string& deviceId) {
@@ -117,12 +135,7 @@ std::vector<RateDebtBook::Entry> RateDebtBook::publish(const std::optional<Entry
     // debt, since open() takes it, but the session is the fresher truth).
     std::vector<Entry> standing = m_unpaid;
     if (session && !session->deviceId.empty() && session->originalHz != 0) {
-        const auto it = std::ranges::find(standing, session->deviceId, &Entry::deviceId);
-        if (it != standing.end()) {
-            *it = *session;
-        } else {
-            standing.push_back(*session);
-        }
+        put(standing, *session);
     }
 
     std::vector<Entry> events;

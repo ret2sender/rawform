@@ -40,6 +40,7 @@
 #include "paths/Paths.h"  // userConfigDir() for playback.yaml
 #include "utils/PerfLog.h"  // the sink construction timing line
 
+#include "rawform/audio/IAudioSink.h"  // StaleDebtOutcome, the launch repay's result
 #include "rawform/audio/Types.h"
 
 // The platform sink. CoreAudio on macOS, PipeWire on Linux, and a silent
@@ -267,8 +268,11 @@ private:
 }  // namespace
 
 struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
-    EngineListenerBridge(AudioController* owner, QString ledgerPath)
-        : m_owner(owner), m_ledgerPath(std::move(ledgerPath)) {}
+    EngineListenerBridge(AudioController* owner, QString ledgerPath,
+                         std::vector<rateledger::Entry> debts)
+        : m_owner(owner),
+          m_ledgerPath(std::move(ledgerPath)),
+          m_debts(std::move(debts)) {}
 
     void onStateChanged(rawform::audio::State s) override {
         const int st = static_cast<int>(s);
@@ -331,8 +335,8 @@ struct EngineListenerBridge final : public rawform::audio::Engine::Listener {
     // clear comes from the close that the engine's shutdown runs, after the
     // GUI event loop has stopped, so a posted write would never happen and
     // the file would claim a debt the close had just repaid. The file has
-    // one writer, this thread; the launch read runs before the listener is
-    // installed.
+    // one writer, this thread; the launch read, and its write of the entries
+    // it keeps, run before the listener is installed.
     void onRateDebtChanged(const std::string& deviceId, std::uint32_t originalRateHz,
                            std::uint32_t borrowedRateHz) override {
         const rateledger::Entry change{.deviceId       = deviceId,
@@ -378,7 +382,9 @@ private:
 
     AudioController* m_owner;
     const QString    m_ledgerPath;  ///< resolved on the GUI thread at construction
-    std::vector<rateledger::Entry> m_debts;  ///< the file's content; engine thread only
+    /// The file's content, starting from the entries the launch kept. Engine
+    /// thread only once the listener is installed.
+    std::vector<rateledger::Entry> m_debts;
 };
 
 // ===========================================================================
@@ -416,12 +422,16 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
 
     // Crash recovery, BEFORE the sink is injected and before any open.
     // A rate_ledger.yaml on disk means a previous session ended holding rate
-    // debts; hand each to the fresh sink, which repays iff the device still
-    // sits at the borrowed rate, and delete the file either way (repaid,
-    // moot, or the device is gone: in every case the ledger is spent). The
-    // console lines are deferred one event-loop turn so the window wiring
-    // that routes infoOccurred exists by the time they fire.
-    const QString ledger = rateLedgerPath();
+    // debts; hand each to the fresh sink, which repays a device still at the
+    // borrowed rate, drops a debt whose device has moved since, and keeps one
+    // whose device is away or would not take the restore. The file is then
+    // rewritten to the kept entries (deleted when there are none) and the
+    // bridge starts from the same list, so the file, the bridge and the sink
+    // agree before the first debt event. The console lines are deferred one
+    // event-loop turn so the window wiring that routes infoOccurred exists by
+    // the time they fire.
+    const QString                  ledger = rateLedgerPath();
+    std::vector<rateledger::Entry> keptDebts;
     {
         const rateledger::ReadResult stale = rateledger::read(ledger);
         QStringList messages;
@@ -434,17 +444,32 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
                 break;
             case rateledger::ReadStatus::Ok:
                 for (const rateledger::Entry& debt : stale.entries) {
-                    const bool repaid = platformSink->repayStaleRateDebt(
-                        debt.deviceId, debt.originalRateHz, debt.borrowedRateHz);
-                    messages.push_back(
-                        repaid ? QStringLiteral(
-                                     "crash recovery: restored the output device to "
-                                     "%1 Hz (a previous session left it at %2 Hz)")
-                                     .arg(debt.originalRateHz)
-                                     .arg(debt.borrowedRateHz)
-                               : QStringLiteral(
-                                     "crash recovery: stale rate ledger entry discarded "
-                                     "(device absent, moved, or debt moot)"));
+                    switch (platformSink->repayStaleRateDebt(
+                        debt.deviceId, debt.originalRateHz, debt.borrowedRateHz)) {
+                        case rawform::audio::StaleDebtOutcome::Repaid:
+                            messages.push_back(
+                                QStringLiteral(
+                                    "crash recovery: restored the output device to "
+                                    "%1 Hz (a previous session left it at %2 Hz)")
+                                    .arg(debt.originalRateHz)
+                                    .arg(debt.borrowedRateHz));
+                            break;
+                        case rawform::audio::StaleDebtOutcome::Kept:
+                            keptDebts.push_back(debt);
+                            messages.push_back(
+                                QStringLiteral(
+                                    "crash recovery: an output device left at %2 Hz "
+                                    "is not connected or did not take %1 Hz back; "
+                                    "its rate ledger entry is kept")
+                                    .arg(debt.originalRateHz)
+                                    .arg(debt.borrowedRateHz));
+                            break;
+                        case rawform::audio::StaleDebtOutcome::Discarded:
+                            messages.push_back(QStringLiteral(
+                                "crash recovery: stale rate ledger entry discarded "
+                                "(device moved since, or entry unusable)"));
+                            break;
+                    }
                 }
                 if (stale.entries.empty()) {
                     messages.push_back(QStringLiteral(
@@ -453,7 +478,7 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
                 break;
         }
         if (stale.status != rateledger::ReadStatus::Absent) {
-            rateledger::write(ledger, {});
+            rateledger::write(ledger, keptDebts);
             QTimer::singleShot(0, this, [this, messages] {
                 for (const QString& msg : messages) {
                     emit infoOccurred(msg);
@@ -463,7 +488,8 @@ AudioController::AudioController(QObject* parent) : QObject(parent) {
     }
     m_engine.setSink(std::move(platformSink));
 
-    m_bridge = std::make_unique<EngineListenerBridge>(this, ledger);
+    m_bridge =
+        std::make_unique<EngineListenerBridge>(this, ledger, std::move(keptDebts));
     m_engine.setListener(m_bridge.get());
 
     // Lookahead rebuild coalescing (see the member comment). Zero-interval

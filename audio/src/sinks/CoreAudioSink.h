@@ -64,7 +64,7 @@
 // and settleRateDebts() and later closes repay it once the device is back and
 // idle. The ledger is published per device through the event channel so the
 // owner can persist it and repayStaleRateDebt() can settle it at the next
-// launch.
+// launch, or keep it as unpaid there when the device is still away.
 //
 // The device surface: enumerateDevices() lists every output-capable device by
 // UID, and selectDevice() pins one; the pin redirects what capabilities(),
@@ -133,10 +133,12 @@ public:
     /// mutex, so detaching the listener fences an in-flight call.
     void                         setEventListener(ISinkEventListener* listener) override;
     /// The crash-recovery restore; resolves by UID and repays iff the
-    /// device still sits at the borrowed rate. Pre-injection, pre-open.
-    bool                         repayStaleRateDebt(const std::string& deviceId,
-                                                    std::uint32_t originalRateHz,
-                                                    std::uint32_t borrowedRateHz) override;
+    /// device still sits at the borrowed rate. A device that is away, or
+    /// whose restore missed, keeps its debt in the unpaid list, to be repaid
+    /// like any other when the device is back. Pre-injection, pre-open.
+    [[nodiscard]] StaleDebtOutcome repayStaleRateDebt(
+        const std::string& deviceId, std::uint32_t originalRateHz,
+        std::uint32_t borrowedRateHz) override;
     /// Repay the debts earlier closes could not, for devices that are back,
     /// by the same rule; the device this sink is open on is skipped. Engine
     /// thread; each restore blocks for up to the switch's settle timeout.
