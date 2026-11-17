@@ -154,4 +154,19 @@ std::vector<RateDebtBook::Entry> RateDebtBook::publish(const std::optional<Entry
     return events;
 }
 
+// ---------------------------------------------------------------------------
+ScopeSettle::Step ScopeSettle::next(bool switched, double scopeRate, double deviceRate,
+                                    std::uint32_t waitedMs, bool reinitialized) noexcept {
+    if (!switched || deviceRate <= 0.0) {
+        return Step::Commit;
+    }
+    if (scopeRate > 0.0 && RateLedger::ratesEqual(scopeRate, deviceRate)) {
+        return Step::Commit;
+    }
+    if (reinitialized) {
+        return Step::Commit;
+    }
+    return waitedMs < kBoundMs ? Step::Wait : Step::Reinitialize;
+}
+
 }  // namespace rawform::audio

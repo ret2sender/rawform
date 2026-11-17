@@ -57,7 +57,11 @@
 //     prediction, because a device can accept a rate set, report success at
 //     every layer, then misclock with no programmatic signal. open() and
 //     reconfigure() log the device, the executed decision, and the measured
-//     outcome so the result is visible rather than inferred.
+//     outcome so the result is visible rather than inferred. Right after one
+//     of our own switches the scope can still report the device's previous
+//     rate, which would read as a misclock that is not one: such a read is
+//     held, re-read for a bounded time and then once across a re-initialize,
+//     before it is committed and before the unit starts (measureOutputScope).
 //
 // The rate ledger. Leaving a device at a rate its hardware cannot faithfully
 // clock corrupts all system audio, so a borrowed rate is a debt. The ledger
@@ -147,6 +151,7 @@
 #include <optional>  // the session's debt, when it owes one
 #include <span>  // the channel position table's view
 #include <string>
+#include <thread>  // std::this_thread::sleep_for, the measurement's re-read pause
 #include <vector>
 
 // kAudioObjectPropertyElementMain is the modern (macOS 12+) name for the
@@ -573,6 +578,66 @@ bool setDeviceNominalRate(AudioDeviceID dev, double targetRate, double* achieved
     const double settled = deviceNominalRate(dev);
     *achieved = (settled != 0.0 ? settled : current);
     return ratesEqual(*achieved, targetRate);
+}
+
+// The output-scope rate after AudioUnitInitialize, for open() and
+// reconfigure(). After a switch that call executed, the unit can still report
+// the rate the device ran at before; ScopeSettle (RateLedger.h) says how long
+// such a read is held and when the unit is re-initialized. switched and
+// deviceRate describe that switch: whether one ran, and the nominal rate it
+// left the device at. The unit is initialized and not started on entry, so
+// the engine thread waits here with nothing pulling. Writes the committed rate
+// to *measured; false only when the re-initialize failed, which leaves the
+// unit uninitialized. A read that had to be held is logged with how it ended,
+// the one record of how far a unit lags its device.
+bool measureOutputScope(AudioUnit unit, bool switched, double deviceRate,
+                        ILogOutput* out, double* measured) {
+    const double  first         = auhalScopeRate(unit, kAudioUnitScope_Output);
+    double        rate          = first;
+    std::uint32_t waitedMs      = 0;
+    bool          reinitialized = false;
+    for (;;) {
+        const ScopeSettle::Step step =
+            ScopeSettle::next(switched, rate, deviceRate, waitedMs, reinitialized);
+        if (step == ScopeSettle::Step::Commit) {
+            break;
+        }
+        if (step == ScopeSettle::Step::Wait) {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(ScopeSettle::kPollMs));
+            waitedMs += ScopeSettle::kPollMs;
+        } else {
+            reinitialized = true;
+            AudioUnitUninitialize(unit);
+            if (!osOk(AudioUnitInitialize(unit), "AudioUnitInitialize (re-measure)",
+                      out)) {
+                *measured = 0.0;
+                return false;
+            }
+        }
+        rate = auhalScopeRate(unit, kAudioUnitScope_Output);
+    }
+    *measured = rate;
+    if (waitedMs == 0 && !reinitialized) {
+        return true;  // the first read stood
+    }
+    if (!ratesEqual(rate, deviceRate)) {
+        sinkLog(out,
+                "CoreAudioSink: output scope read %.0f Hz after the switch to %.0f "
+                "Hz; still %.0f Hz after %u ms and a re-initialize",
+                first, deviceRate, rate, waitedMs);
+    } else if (reinitialized) {
+        sinkLog(out,
+                "CoreAudioSink: output scope read %.0f Hz after the switch to %.0f "
+                "Hz; %.0f Hz after a re-initialize",
+                first, deviceRate, rate);
+    } else {
+        sinkLog(out,
+                "CoreAudioSink: output scope read %.0f Hz after the switch to %.0f "
+                "Hz; %.0f Hz after %u ms",
+                first, deviceRate, rate, waitedMs);
+    }
+    return true;
 }
 
 // The AUHAL render callback: the consumer / real-time thread. Pulls from the
@@ -1106,6 +1171,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
     // too, even though it did not reach its target). No advertised-list gate
     // here: that reasoning is the RateManager's and is already folded into
     // decision.switchDevice / decision.deviceRate.
+    double switchedTo = 0.0;  // where our switch left the device, for step 6
     if (decision.switchDevice) {
         {
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
@@ -1121,6 +1187,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
             m_impl->ledger.endOwnChange(nowRate);
         }
+        switchedTo = nowRate;
         sinkLog(m_impl->logOut,
                 "CoreAudioSink: switch -> %u Hz %s (device now %.0f Hz)",
                 decision.deviceRate, reached ? "reached" : "NOT reached",
@@ -1162,11 +1229,17 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
     // 6. Honest device rate from the AUHAL output scope; decides MEASURED
     // bit-perfect, which can disagree with the decision's prediction if a
     // device accepted a switch but did not truly clock it. Read AFTER
-    // AudioUnitInitialize: initialize re-synchronizes the unit's cached
-    // device-side format, so the value is trustworthy immediately after a
-    // nominal-rate switch, whereas a read before initialize can still report
-    // the pre-switch rate in exactly the case the measurement exists to catch.
-    const double auhalDeviceRate = auhalScopeRate(m_impl->unit, kAudioUnitScope_Output);
+    // AudioUnitInitialize: a read before it can still report the pre-switch
+    // rate. After our own switch even this read can lag the device for a
+    // moment, so measureOutputScope holds one that disagrees with the switch
+    // until the unit has followed, and the measurement is committed, and the
+    // unit started, only then.
+    double auhalDeviceRate = 0.0;
+    if (!measureOutputScope(m_impl->unit, decision.switchDevice, switchedTo,
+                            m_impl->logOut, &auhalDeviceRate)) {
+        close();
+        return false;
+    }
     m_impl->deviceRate.store(auhalDeviceRate, std::memory_order_relaxed);
     const bool openBitPerfect =
         ratesEqual(auhalDeviceRate, sourceFormat.sampleRate);
@@ -1227,6 +1300,7 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
     // "does the device now sit anywhere other than that original", so a
     // transition landing back ON the original rate repays the debt by itself
     // and the final close then correctly restores nothing.
+    double switchedTo = 0.0;  // where our switch left the device, for step 5
     if (decision.switchDevice) {
         // Tell the ledger BEFORE the set, so the persistent nominal-rate
         // listener takes a notification delivered during the set as our own
@@ -1246,6 +1320,7 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
             std::lock_guard<std::mutex> lock(m_impl->stateMtx);
             m_impl->ledger.endOwnChange(nowRate);
         }
+        switchedTo = nowRate;
         sinkLog(m_impl->logOut,
                 "CoreAudioSink: reconfigure: switch -> %u Hz %s (device now "
                 "%.0f Hz)",
@@ -1286,11 +1361,15 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
     }
     m_impl->channels = static_cast<std::size_t>(sourceFormat.channels);
 
-    // 5. Honest measurement, the read-after-initialize discipline applied
-    // identically here: the output scope is trustworthy only after the
-    // initialize re-synchronized the unit's cached device-side format.
-    const double auhalDeviceRate =
-        auhalScopeRate(m_impl->unit, kAudioUnitScope_Output);
+    // 5. Honest measurement, the same discipline as open()'s: read after the
+    // initialize, and after our own switch held by measureOutputScope until
+    // the unit has followed the device. A re-initialize that fails there
+    // leaves the unit uninitialized, which the close+open fallback copes with.
+    double auhalDeviceRate = 0.0;
+    if (!measureOutputScope(m_impl->unit, decision.switchDevice, switchedTo,
+                            m_impl->logOut, &auhalDeviceRate)) {
+        return false;
+    }
     m_impl->deviceRate.store(auhalDeviceRate, std::memory_order_relaxed);
     const bool retunedBitPerfect =
         ratesEqual(auhalDeviceRate, sourceFormat.sampleRate);
