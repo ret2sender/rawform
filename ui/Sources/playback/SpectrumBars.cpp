@@ -78,11 +78,17 @@ SpectrumBars::SpectrumBars(QQuickItem* parent) : QQuickItem(parent) {
 }
 
 // ---------------------------------------------------------------------------
+// The setters, GUI thread. Each holds the lock across its assignment only: a
+// slot on the changed signal may call back into the item, and update() takes
+// Qt's own locks.
 void SpectrumBars::setValues(const QList<qreal>& values) {
     // No equality short-cut: the provider republishes a changed list on every
     // tick, and comparing twenty doubles to save a repaint that is needed
     // anyway would be the one wasted step.
-    m_values = values;
+    {
+        const std::scoped_lock lock(m_lock);
+        m_values = values;
+    }
     emit valuesChanged();
     update();
 }
@@ -92,7 +98,10 @@ void SpectrumBars::setCount(int count) {
     if (clamped == m_count) {
         return;
     }
-    m_count = clamped;
+    {
+        const std::scoped_lock lock(m_lock);
+        m_count = clamped;
+    }
     emit countChanged();
     update();
 }
@@ -101,7 +110,10 @@ void SpectrumBars::setColor(const QColor& color) {
     if (color == m_color) {
         return;
     }
-    m_color = color;
+    {
+        const std::scoped_lock lock(m_lock);
+        m_color = color;
+    }
     emit colorChanged();
     update();
 }
@@ -110,7 +122,10 @@ void SpectrumBars::setGap(qreal gap) {
     if (qFuzzyCompare(gap, m_gap)) {
         return;
     }
-    m_gap = gap;
+    {
+        const std::scoped_lock lock(m_lock);
+        m_gap = gap;
+    }
     emit gapChanged();
     update();
 }
@@ -119,16 +134,23 @@ void SpectrumBars::setMinBarHeight(qreal height) {
     if (qFuzzyCompare(height, m_minBarHeight)) {
         return;
     }
-    m_minBarHeight = height;
+    {
+        const std::scoped_lock lock(m_lock);
+        m_minBarHeight = height;
+    }
     emit minBarHeightChanged();
     update();
 }
 
 // ---------------------------------------------------------------------------
-// Render thread (the GUI thread is blocked for the duration, so the members
-// are safe to read). One geometry node for the whole plot; its vertex buffer
-// is resized when the bar count changes and rewritten every time.
+// Render thread, with the GUI thread blocked for the duration by Qt's sync, so
+// the members cannot change under the reads. The lock states that handoff in
+// a form a sanitizer runtime can see (the header says why) and is never
+// contended. One geometry node for the whole plot; its vertex buffer is
+// resized when the bar count changes and rewritten every time.
 QSGNode* SpectrumBars::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* /*data*/) {
+    const std::scoped_lock lock(m_lock);
+
     auto* node = static_cast<QSGGeometryNode*>(oldNode);
     const int vertexCount = m_count * kVerticesPerBar;
 

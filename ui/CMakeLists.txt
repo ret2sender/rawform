@@ -1053,6 +1053,30 @@ if(RAWFORM_BUILD_TESTS)
             Qt6::Network
     )
     rawform_add_ui_test(single_instance rawform_single_instance_test)
+
+    # -----------------------------------------------------------------------
+    # The spectrum bars under a threaded render loop: the item's setters write
+    # its members on the GUI thread and updatePaintNode reads them on the
+    # scene graph render thread, frame after frame. In a sanitizer profile a
+    # handoff the runtime cannot order fails the test. It stands up a
+    # QGuiApplication and a QQuickWindow on the offscreen platform with the
+    # software backend, both selected by the test itself, so it needs no
+    # display and no environment from its caller.
+    # -----------------------------------------------------------------------
+    add_executable(rawform_spectrum_bars_sync_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/tests/SpectrumBarsSyncTest.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumBars.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources/playback/SpectrumBars.h
+    )
+    target_include_directories(rawform_spectrum_bars_sync_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Sources
+    )
+    target_link_libraries(rawform_spectrum_bars_sync_test PRIVATE
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Quick
+    )
+    rawform_add_ui_test(spectrum_bars_sync rawform_spectrum_bars_sync_test)
 endif()
 
 # ---------------------------------------------------------------------------

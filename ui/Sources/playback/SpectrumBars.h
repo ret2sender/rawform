@@ -42,6 +42,18 @@
 // moves continuously, its partial pixel row drawn at the alpha of its coverage,
 // the way the antialiased Rectangle edge was; and the four corner pixels carry
 // the coverage a 1 px radius leaves them, so the bars keep their softened ends.
+//
+// THE LOCK. Qt calls updatePaintNode on the render thread with the GUI thread
+// blocked, so the setters and the paint never overlap. Qt orders the two with
+// its own mutex and wait condition, inside libraries a sanitizer runtime is
+// not built into, and ThreadSanitizer cannot always follow that handoff: a
+// sync the render thread picks up without having slept reaches the runtime as
+// a read with nothing ordering it after the write. The item therefore states
+// the same handoff with a std::mutex of its own, whose calls the runtime does
+// see: every setter holds it across its assignment, updatePaintNode across
+// its reads. It is never contended, and it keeps the paint path in the
+// sanitizer's sight with no suppression. The getters take no lock: they run
+// on the GUI thread, the only one that writes.
 
 #pragma once
 
@@ -49,6 +61,8 @@
 #include <QList>
 #include <QQmlEngine>  // QML_NAMED_ELEMENT
 #include <QQuickItem>
+
+#include <mutex>
 
 namespace rawform {
 
@@ -102,6 +116,9 @@ protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* data) override;
 
 private:
+    // Held by each setter across its assignment and by updatePaintNode across
+    // its reads of the members below.
+    std::mutex   m_lock;
     QList<qreal> m_values;
     int          m_count        = 20;
     // Theme.accentSoft; the view binds it.

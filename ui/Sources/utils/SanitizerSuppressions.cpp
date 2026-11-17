@@ -97,8 +97,9 @@ extern "C" const char* __tsan_default_suppressions() {
         // report with BOTH racing stacks in rawform frames, where the claimed
         // missing sync is a Qt handoff (QFuture result delivery, queued
         // signal), can still be a false positive. Reason about the actual
-        // handoff before treating it as ours; macOS agreement is the
-        // tiebreaker.
+        // handoff before treating it as ours; a clean macOS record is the
+        // tiebreaker; a macOS report is not one, because that runtime cannot
+        // see a QMutex either.
         // CONSTRAINT: each called_from_lib entry must match EXACTLY ONE
         // loaded library; on the second match the runtime Die()s at
         // library-load time, i.e. app startup (the scenario this prevents:
@@ -146,7 +147,7 @@ extern "C" const char* __tsan_default_suppressions() {
         // Qt, so every handoff reports as our-frame races (~20 per
         // session, observed). This is the documented exception to the
         // admission criteria, licensed by the tiebreaker: the identical
-        // paths run TSan-CLEAN on macOS, whose runtime sees Qt's locking.
+        // paths run TSan-CLEAN on macOS.
         // COST, stated plainly: a genuine Linux-only race involving these
         // two symbols would be masked here; macOS and the engine's own
         // instrumented tests remain the sighted coverage for them. Making
@@ -167,33 +168,35 @@ extern "C" const char* __tsan_default_suppressions() {
         // cannot cover it: both accesses are issued from the generated TU
         // compiled (instrumented) into this binary. Anchored on the generated
         // file name, which the runtime matches like a function name and which
-        // no hand-written rawform frame carries. Absent on macOS, whose
-        // runtime sees the join: the tiebreaker that licenses the entry.
+        // no hand-written rawform frame carries. Not reported on macOS in
+        // any run: the tiebreaker that licenses the entry.
         "race:rawform_qmlcache_loader.cpp\n"
 
-        // The scene graph's threaded render loop against QQuickItem
-        // subclasses compiled (instrumented) into this binary; SpectrumBars
-        // is the first, and the Rectangles it replaced did the same work
-        // inside libQt6Quick where the runtime could not see it. Two shapes:
+        // The scene graph's threaded render loop tearing down its nodes,
+        // against QQuickItem subclasses compiled (instrumented) into this
+        // binary; SpectrumBars is the one in the tree.
         // cleanupNodesOnShutdown reads every item's meta-object on the
-        // render thread while the GUI thread is blocked in the window
-        // teardown, and the item is deleted later on the main thread by the
-        // QML engine's root teardown, after that thread was joined (the
-        // report prints it as "finished"); updateDirtyNode calls
-        // updatePaintNode on the render thread during the sync phase, GUI
-        // thread blocked, reading members only the item's GUI-thread setters
-        // write. Both edges are the loop's QMutex/QWaitCondition, futex-based
-        // on Linux, so the happens-before that is really there never reaches
-        // the runtime. Anchored on the Qt frame that establishes the
-        // contract, so the entries cover every item subclass and never a
-        // thread rawform started; the stated exception to the criteria in
-        // tools/tsan.supp. COST: an updatePaintNode that read a member some
-        // worker thread writes would be masked by the second entry; the item
-        // rule (it draws whatever list it is given) keeps that case out, by
-        // review. Linux/GCC only, by the same mechanism as the entries above;
-        // the macOS run is the tiebreaker that confirms it.
+        // render thread while the GUI thread is blocked in the loop's
+        // release request, and the item is deleted later on the main thread
+        // by the QML engine's root teardown, after the loop has waited for
+        // that thread to finish and deleted it (the report prints it as
+        // "finished"). The ordering is carried by the loop's QMutex and
+        // QWaitCondition inside the uninstrumented Qt libraries and does not
+        // reach the Linux runtime; the happens-before is really there, read
+        // from the loop's source: the render thread answers the release
+        // request, then the GUI thread waits for it to finish. Anchored on
+        // the Qt frame that establishes the contract, so the entry covers
+        // every item subclass and never a thread rawform started; the stated
+        // exception to the criteria in tools/tsan.supp. COST: an item's
+        // invalidateSceneGraph slot, which this Qt frame invokes on the
+        // render thread, would be masked if it raced another thread; no item
+        // in the tree declares one. Linux/GCC only: the shape has not been
+        // reported in any macOS run.
+        // The sync phase has no entry. An item's updatePaintNode reads its
+        // members under a lock the item owns and its setters take
+        // (playback/SpectrumBars.h), so the runtime sees that handoff itself,
+        // on both platforms.
         "race:QQuickWindowPrivate::cleanupNodesOnShutdown\n"
-        "race:QQuickWindowPrivate::updateDirtyNode\n"
 #endif
         ;
 }
