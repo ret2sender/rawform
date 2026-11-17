@@ -73,11 +73,15 @@ is in force, so on a healthy machine it is rarely seen.
 
 A device unplugged while rawform holds its rate cannot be restored at that
 moment. The console says the restore failed and the debt is kept, and the
-entry stays in the ledger. When the device comes back, rawform restores it
-once it is idle: right away if nothing is playing, otherwise when playback
-next stops, or by carrying the debt into the next session on that device,
-whose close restores it. The same applies to a device that refuses the
-restore.
+entry stays in the ledger. What happens when the device comes back depends
+on where playback is. If playback moves onto it (it becomes the default
+again while rawform follows the system default, or you select it), that
+session takes the debt over without touching the rate, and its close
+restores the original. Otherwise rawform restores the device once it is
+idle: right away if playback is stopped, or paused on a device you selected
+yourself; when playback next stops if a track is playing, or is paused
+while following the system default. The same applies to a device that
+refuses the restore.
 
 On the next launch, a ledger left behind (by a crash, or by a device that
 was still unplugged at quit) is read before the first open. For each

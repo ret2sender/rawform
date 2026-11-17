@@ -180,6 +180,10 @@ that ships.
   switch while the device runs at the track's rate. The audio unit could
   still report the device's previous rate at that moment; rawform now waits
   for it to follow the switch before it measures and starts playback.
+- CoreAudio: plugging a device back in while rawform follows the system
+  default no longer restores its sample rate only to switch it again a
+  moment later. Playback moves onto the device at the rate it already has,
+  and its original rate comes back when the session ends.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no

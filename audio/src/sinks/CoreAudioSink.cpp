@@ -86,11 +86,15 @@
 // settled on another rate) keeps the debt instead of claiming success: it
 // moves to the unpaid list of the ledger's RateDebtBook, stays published, and
 // is repaid when the device is back. A later open of that device carries it
-// as the session's original, adding no rate transition; settleRateDebts() (the
-// engine calls it on a device-list change while not Playing) and every close
-// restore the unpaid debts of devices that are back and idle, by the
+// as the session's original, adding no rate transition; settleRateDebts()
+// restores the unpaid debts of devices that are back and idle, by the
 // crash-recovery rule; and the next launch repays whatever is still persisted,
-// or takes it into the unpaid list again while its device is away.
+// or takes it into the unpaid list again while its device is away. The engine
+// calls settleRateDebts() where a session ends and on a device-list change
+// that no reopen will follow. close() repays its own device only: a close can
+// be the first half of a reopen onto a device with an unpaid debt, and
+// restoring that device there would cost the two transitions (the restore,
+// then the open's switch) that carrying the debt avoids.
 //
 // Devices and events. The sink resolves its target device through a pin set by
 // selectDevice(), or the system default when no pin is set. Two system-wide
@@ -152,6 +156,7 @@
 #include <span>  // the channel position table's view
 #include <string>
 #include <thread>  // std::this_thread::sleep_for, the measurement's re-read pause
+#include <utility>  // std::move
 #include <vector>
 
 // kAudioObjectPropertyElementMain is the modern (macOS 12+) name for the
@@ -197,6 +202,10 @@ struct CoreAudioSinkImpl {
     // system default. Set by selectDevice() and read by every device
     // resolution below. Engine-thread only, like all non-RT state here.
     std::string   targetDeviceUid;
+
+    // The device whose restore failed in the latest close(), so the settle
+    // that follows that close does not retry it at once. Engine-thread only.
+    std::string   restoreJustFailedUid;
 
     // ----- sink event machinery ---------------------------------------------
     // stateMtx guards what BOTH the engine thread and CoreAudio's notification
@@ -842,12 +851,13 @@ void publishDebt(CoreAudioSinkImpl* impl) {
 }
 
 // Repay what earlier closes could not, for each device that is back, except
-// skipUid (the device this sink is bound to, or has just closed). The rule is
-// the crash-recovery one: a device still at the borrowed rate is restored, one
-// moved since is dropped as moot (someone else chose that rate), an absent one
-// waits. Engine thread; each restore blocks, so stateMtx is held only around
-// the bookkeeping. Once the sink is injected, the engine thread is the only
-// one that changes the unpaid list, so the copy taken here stays current.
+// skipUid (the device this sink is bound to, or the one whose restore has just
+// failed). The rule is the crash-recovery one: a device still at the borrowed
+// rate is restored, one moved since is dropped as moot (someone else chose
+// that rate), an absent one waits. Engine thread; each restore blocks, so
+// stateMtx is held only around the bookkeeping. Once the sink is injected,
+// the engine thread is the only one that changes the unpaid list, so the copy
+// taken here stays current.
 void settleUnpaid(CoreAudioSinkImpl* impl, const std::string& skipUid) {
     std::vector<RateDebtBook::Entry> unpaid;
     {
@@ -1456,6 +1466,7 @@ void CoreAudioSink::close() {
     // stays published, and is repaid when the device is back.
     const bool    wasOpened     = m_impl->opened;
     bool          restoreNeeded = false;
+    bool          restoreFailed = false;
     double        restoreTo     = 0.0;
     double        borrowed      = 0.0;
     AudioDeviceID restoreDev    = kAudioObjectUnknown;
@@ -1495,16 +1506,25 @@ void CoreAudioSink::close() {
             });
         }
         m_impl->ledger.settle();  // the session's own claim ends either way
+        restoreFailed = !reached;
     }
     publishDebt(m_impl.get()); // a repaid debt's clear; a kept one publishes nothing
 
+    // Other devices' unpaid debts are not settled here: the engine asks for
+    // that where a session ends (settleRateDebts()), because a close may be
+    // the first half of a reopen onto one of those devices, and that open
+    // carries the debt without a restore followed by a new switch. What this
+    // close leaves for that settle is the device not to retry at once: the
+    // one whose restore just failed. A session that closed without a failure
+    // ends the hold on an earlier one; a close that had no session leaves it.
+    if (restoreFailed) {
+        m_impl->restoreJustFailedUid = closedUid;
+    } else if (wasOpened) {
+        m_impl->restoreJustFailedUid.clear();
+    }
+
     m_impl->opened = false;
     m_impl->source = nullptr;
-
-    // Other devices an earlier close could not restore may be back by now.
-    if (wasOpened) {
-        settleUnpaid(m_impl.get(), closedUid);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1591,14 +1611,17 @@ StaleDebtOutcome CoreAudioSink::repayStaleRateDebt(const std::string& deviceId,
 }
 
 // The bound device is skipped: its debt, if it had one, was carried into the
-// session open on it, and that session's close repays it.
+// session open on it, and that session's close repays it. With no session
+// open, the device skipped is the one whose restore the latest close just saw
+// fail, once: retrying it a moment later would only block again.
 void CoreAudioSink::settleRateDebts() {
-    std::string bound;
+    std::string skip = std::move(m_impl->restoreJustFailedUid);
+    m_impl->restoreJustFailedUid.clear();
     if (m_impl->opened) {
         std::lock_guard<std::mutex> lock(m_impl->stateMtx);
-        bound = m_impl->deviceUidStr;
+        skip = m_impl->deviceUidStr;
     }
-    settleUnpaid(m_impl.get(), bound);
+    settleUnpaid(m_impl.get(), skip);
 }
 
 void CoreAudioSink::setEventListener(ISinkEventListener* listener) {

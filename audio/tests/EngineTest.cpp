@@ -675,12 +675,19 @@ private:
 // ---------------------------------------------------------------------------
 // A paced NullSink that counts settleRateDebts() calls, so a test can see
 // when the engine asks a sink to settle its unpaid debts. The wrapped
-// NullSink's fire* injectors drive the events.
+// NullSink's fire* injectors drive the events. A settle can also repay a
+// device, publishing its clear from inside the engine's call the way the
+// CoreAudio sink does: name the device with clearOnSettle() before the sink
+// is handed to the engine.
 class SettleCountingSink final : public IAudioSink {
 public:
     [[nodiscard]] NullSink& inner() noexcept { return m_inner; }
     [[nodiscard]] int settles() const noexcept {
         return m_settles.load(std::memory_order_acquire);
+    }
+    void clearOnSettle(std::string deviceId) { m_clearOnSettle = std::move(deviceId); }
+    bool selectDevice(const std::string& deviceId) override {
+        return m_inner.selectDevice(deviceId);
     }
 
     [[nodiscard]] SinkCapabilities capabilities() const override {
@@ -695,6 +702,9 @@ public:
     }
     void settleRateDebts() override {
         m_settles.fetch_add(1, std::memory_order_release);
+        if (!m_clearOnSettle.empty()) {
+            m_inner.fireRateDebtChanged(m_clearOnSettle, 0, 0);
+        }
     }
     bool open(const AudioFormat& sourceFormat, const RateDecision& decision,
               IPullSource* source) override {
@@ -710,6 +720,7 @@ public:
 private:
     NullSink         m_inner{NullSink::Mode::Paced};
     std::atomic<int> m_settles{0};
+    std::string      m_clearOnSettle;  // set before injection, then engine thread only
 };
 
 // ---------------------------------------------------------------------------
@@ -2174,11 +2185,141 @@ void testDeviceListChangeSettlesDebtsWhenNotPlaying() {
     CHECK(waitForLists(2));
     CHECK(sinkPtr->settles() == 1);  // Playing: passed over
 
+    // The stop ends the session, which settles once by itself; the list
+    // change that follows is handled after it and settles again.
     engine.stop();
     CHECK(waitForState(engine, State::Stopped));
     sinkPtr->inner().fireDeviceListChanged();
     CHECK(waitForLists(3));
-    CHECK(sinkPtr->settles() == 2);  // Stopped again: settled
+    CHECK(sinkPtr->settles() == 3);
+    CHECK(listener.errors() == 0);
+}
+
+// Wait until the sink has been asked to settle at least `count` times; the
+// engine asks after it publishes Stopped, so the state alone is too early.
+bool waitForSettles(const SettleCountingSink& sink, int count) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+    while (sink.settles() < count && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return sink.settles() >= count;
+}
+
+// A reopen (here the default-device change while following the default) closes
+// and opens with no settle in between: the device being opened may hold an
+// unpaid debt, which the open carries, and a settle would restore it only for
+// the open to switch it again. The stop that ends the session settles once.
+void testReopenDoesNotSettle() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto                sink    = std::make_unique<SettleCountingSink>();
+    SettleCountingSink* sinkPtr = sink.get();
+    sinkPtr->inner().setDevices(twoTestDevices());
+    sinkPtr->inner().setCapabilities(makeCaps({44100, 48000}, 48000, /*canSwitch=*/true));
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setSink(std::move(sink));
+
+    engine.enqueue("ramp:44100:2:600000");
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+
+    sinkPtr->inner().fireDefaultDeviceChanged();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+    while (sinkPtr->inner().recordedDecisions().size() < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    settle();
+    CHECK(engine.state() == State::Playing);
+    CHECK(sinkPtr->inner().recordedDecisions().size() == 2);  // closed and reopened
+    CHECK(sinkPtr->settles() == 0);                           // and nothing settled
+
+    engine.stop();
+    CHECK(waitForState(engine, State::Stopped));
+    CHECK(waitForSettles(*sinkPtr, 1));
+    settle();
+    CHECK(sinkPtr->settles() == 1);  // the session's end settles, once
+    CHECK(listener.errors() == 0);
+}
+
+// A device-list change while Paused. Following the default, a reopen onto the
+// returning device is expected, so the settle is passed over and left to that
+// open's carry; on a pinned device no reopen will follow, so it settles.
+void testPausedFollowingDefaultPassesOverSettle() {
+    auto waitForLists = [](const RecordingListener& listener, std::size_t count) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+        while (listener.deviceLists().size() < count &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return listener.deviceLists().size() >= count;
+    };
+
+    for (const bool pinned : {false, true}) {
+        RampDecoderFactory factory;
+        RecordingListener  listener;
+        Engine             engine;
+
+        auto                sink    = std::make_unique<SettleCountingSink>();
+        SettleCountingSink* sinkPtr = sink.get();
+        sinkPtr->inner().setDevices(twoTestDevices());
+        engine.setDecoderFactory(&factory);
+        engine.setListener(&listener);
+        engine.setSink(std::move(sink));
+
+        if (pinned) {
+            engine.selectOutputDevice("dev-b");  // parked pin, before any playback
+        }
+        engine.enqueue("ramp:9000000");
+        engine.play();
+        CHECK(waitForState(engine, State::Playing));
+        engine.pause();
+        CHECK(waitForState(engine, State::Paused));
+
+        sinkPtr->inner().fireDeviceListChanged();
+        CHECK(waitForLists(listener, 1));  // the push marks the change as handled
+        CHECK(sinkPtr->settles() == (pinned ? 1 : 0));
+        CHECK(engine.state() == State::Paused);
+        CHECK(listener.errors() == 0);
+
+        engine.stop();
+        CHECK(waitForState(engine, State::Stopped));
+    }
+}
+
+// The shutdown teardown is a session's end too: the engine asks the sink to
+// settle after the close and before its last drain, so a debt the settle
+// repays reaches the listener (which outlives the engine) before ~Engine
+// returns. Asked after the drain, that clear would be lost and the listener's
+// ledger would keep a debt that was repaid.
+void testShutdownSettlesBeforeDrain() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    {
+        Engine engine;
+        auto   sink = std::make_unique<SettleCountingSink>();
+        sink->clearOnSettle("dev-b");
+        engine.setDecoderFactory(&factory);
+        engine.setListener(&listener);
+        engine.setSink(std::move(sink));
+        engine.enqueue("ramp:9000000");
+        engine.play();
+        CHECK(waitForState(engine, State::Playing));
+        CHECK(listener.debts().empty());
+        // engine destroyed here, while Playing.
+    }
+    const auto debts = listener.debts();
+    CHECK(debts.size() == 1);
+    if (!debts.empty()) {
+        CHECK(debts.back().deviceId == "dev-b");
+        CHECK(debts.back().originalHz == 0);  // repaid by the shutdown's settle
+    }
     CHECK(listener.errors() == 0);
 }
 
@@ -3462,6 +3603,9 @@ int main() {
     testDeviceListAndDebtEventsRelay();
     testShutdownDeliversFinalRateDebt();
     testDeviceListChangeSettlesDebtsWhenNotPlaying();
+    testReopenDoesNotSettle();
+    testPausedFollowingDefaultPassesOverSettle();
+    testShutdownSettlesBeforeDrain();
 
     testOutputFailedEventStopsAndRetries();
     testOutputFailedWhileStoppedIgnored();
