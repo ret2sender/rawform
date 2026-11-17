@@ -55,6 +55,9 @@
 // the owner persisted in an earlier run, whose device is away at launch, joins
 // the same list (adoptPersisted()) and is repaid the same way.
 //
+// ScopeSettle, last in this file, is the rule for the device-rate measurement
+// that follows one of the sink's own changes.
+//
 // rawform's CoreAudio sink is the one user; the classes themselves are portable.
 
 #pragma once
@@ -169,6 +172,35 @@ public:
 private:
     std::vector<Entry> m_unpaid;
     std::vector<Entry> m_published;
+};
+
+/// The measurement that follows one of the sink's own rate switches. A
+/// platform unit can still report the pre-switch device rate just after the
+/// switch returned, and committing that read would describe a device that
+/// follows the source as resampling. So a read that disagrees with the rate
+/// the switch left the device at is not committed: the sink reads again for a
+/// bounded time, then re-initializes the unit once, and commits what the unit
+/// reports after that, because a disagreement that outlasts both is a device
+/// that really clocks another rate. The sink does this before it starts the
+/// unit, so no audio plays through a unit that has not caught up. Pure
+/// stepping rule, like the classes above; the sink does the waiting.
+struct ScopeSettle {
+    enum class Step {
+        Commit,        ///< take this read as the measurement
+        Wait,          ///< read again after kPollMs
+        Reinitialize,  ///< re-initialize the unit, then read again
+    };
+
+    static constexpr std::uint32_t kPollMs  = 10;   ///< between two reads
+    static constexpr std::uint32_t kBoundMs = 500;  ///< waited before re-initializing
+
+    /// The step for a read of scopeRate, waitedMs into the re-reads. switched
+    /// says whether this call executed a rate switch (one that did not
+    /// commits its first read, whatever it says); deviceRate is the rate that
+    /// switch left the device at, 0 when unknown, which leaves nothing to
+    /// compare against. A failed read (scopeRate 0) is a disagreement.
+    [[nodiscard]] static Step next(bool switched, double scopeRate, double deviceRate,
+                                   std::uint32_t waitedMs, bool reinitialized) noexcept;
 };
 
 }  // namespace rawform::audio

@@ -28,7 +28,8 @@
 // notification, close) and checks what the final close would restore. The
 // second half covers the debts a close could not repay: kept per device,
 // carried by a later session, settled, and published one device at a time,
-// and the debts adopted from the owner's file at launch.
+// and the debts adopted from the owner's file at launch. The last case is the
+// stepping rule for the measurement that follows a switch.
 // Same hand-rolled CHECK harness as the rest of the suite; main returns
 // non-zero on any failure.
 
@@ -41,6 +42,7 @@
 
 using rawform::audio::RateDebtBook;
 using rawform::audio::RateLedger;
+using rawform::audio::ScopeSettle;
 
 namespace {
 
@@ -367,6 +369,59 @@ void testAdoptedDebtLandedElsewhere() {
     CHECK(book.publish(std::nullopt).empty());
 }
 
+// The measurement after a switch to 44100 on a unit that may still report the
+// 48000 it ran at before. A read that agrees commits at once; one that does
+// not is read again until the bound, then the unit is re-initialized once,
+// and the read after that commits whatever it says. A call that switched
+// nothing commits its first read: a resampling open disagrees by design.
+void testScopeSettleSteps() {
+    using Step = ScopeSettle::Step;
+    const std::uint32_t bound = ScopeSettle::kBoundMs;
+    const std::uint32_t poll  = ScopeSettle::kPollMs;
+
+    CHECK(ScopeSettle::next(true, 44100.0, 44100.0, 0, false) == Step::Commit);
+    CHECK(ScopeSettle::next(false, 48000.0, 44100.0, 0, false) == Step::Commit);
+
+    CHECK(ScopeSettle::next(true, 48000.0, 44100.0, 0, false) == Step::Wait);
+    CHECK(ScopeSettle::next(true, 48000.0, 44100.0, bound - poll, false) == Step::Wait);
+    CHECK(ScopeSettle::next(true, 44100.0, 44100.0, 3 * poll, false) == Step::Commit);
+    CHECK(ScopeSettle::next(true, 48000.0, 44100.0, bound, false) == Step::Reinitialize);
+    CHECK(ScopeSettle::next(true, 44100.0, 44100.0, bound, true) == Step::Commit);
+    CHECK(ScopeSettle::next(true, 48000.0, 44100.0, bound, true) == Step::Commit);
+
+    // A read that failed is not agreement; an unknown device rate leaves
+    // nothing to compare against.
+    CHECK(ScopeSettle::next(true, 0.0, 44100.0, 0, false) == Step::Wait);
+    CHECK(ScopeSettle::next(true, 48000.0, 0.0, 0, false) == Step::Commit);
+
+    // Played the way the sink plays it, on a unit that never catches up: the
+    // waits add up to the bound, one re-initialize follows, then the commit.
+    std::uint32_t waited        = 0;
+    int           waits         = 0;
+    int           reinits       = 0;
+    bool          reinitialized = false;
+    for (;;) {
+        const Step step =
+            ScopeSettle::next(true, 48000.0, 44100.0, waited, reinitialized);
+        if (step == Step::Commit) {
+            break;
+        }
+        if (step == Step::Wait) {
+            waited += poll;
+            ++waits;
+        } else {
+            reinitialized = true;
+            ++reinits;
+        }
+        if (waits > 1000) {
+            break;  // a rule that never commits fails the checks below
+        }
+    }
+    CHECK(waited == bound);
+    CHECK(waits == static_cast<int>(bound / poll));
+    CHECK(reinits == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -384,6 +439,7 @@ int main() {
     testAdoptedDebtIsAlreadyPublished();
     testAdoptedDebtCarriesOrGoesMoot();
     testAdoptedDebtLandedElsewhere();
+    testScopeSettleSteps();
 
     if (g_failures == 0) {
         std::puts("RateLedgerTest: all checks passed");

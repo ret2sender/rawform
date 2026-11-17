@@ -176,6 +176,10 @@ that ships.
   The failed restore is now reported as failed (it read "restored device
   rate to 0 Hz") and its debt is kept until the device is back, across
   quits and launches when the device stays away that long.
+- CoreAudio: a track is no longer shown as resampled right after a rate
+  switch while the device runs at the track's rate. The audio unit could
+  still report the device's previous rate at that moment; rawform now waits
+  for it to follow the switch before it measures and starts playback.
 - The macOS "Audio MIDI Setup" wording no longer appears on Linux.
 - The main window opens centered on the primary screen and never larger
   than its available area; a saved position is kept as is, and resizing no
