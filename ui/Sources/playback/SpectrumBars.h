@@ -51,9 +51,12 @@
 // a read with nothing ordering it after the write. The item therefore states
 // the same handoff with a std::mutex of its own, whose calls the runtime does
 // see: every setter holds it across its assignment, updatePaintNode across
-// its reads. It is never contended, and it keeps the paint path in the
-// sanitizer's sight with no suppression. The getters take no lock: they run
-// on the GUI thread, the only one that writes.
+// its reads, and the destructor takes it once before the members are released
+// (the render thread's last paint of the item is over by then, which Qt
+// ensures through a wait the runtime may not see either). It is never
+// contended, and it keeps the paint path in the sanitizer's sight with no
+// suppression. The getters take no lock: they run on the GUI thread, the only
+// one that writes.
 
 #pragma once
 
@@ -92,6 +95,7 @@ class SpectrumBars : public QQuickItem {
 
 public:
     explicit SpectrumBars(QQuickItem* parent = nullptr);
+    ~SpectrumBars() override;
 
     [[nodiscard]] QList<qreal> values() const { return m_values; }
     [[nodiscard]] int          count() const { return m_count; }
@@ -117,7 +121,7 @@ protected:
 
 private:
     // Held by each setter across its assignment and by updatePaintNode across
-    // its reads of the members below.
+    // its reads of the members below; taken once by the destructor.
     std::mutex   m_lock;
     QList<qreal> m_values;
     int          m_count        = 20;

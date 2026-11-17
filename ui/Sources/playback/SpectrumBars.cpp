@@ -77,6 +77,14 @@ SpectrumBars::SpectrumBars(QQuickItem* parent) : QQuickItem(parent) {
     setFlag(ItemHasContents, true);
 }
 
+// GUI thread, after the render thread's last paint of the item: Qt has either
+// returned from that sync or, at window teardown, waited for the thread to
+// finish. Taking the lock once orders the members' release after that last
+// read in a form a sanitizer runtime can see.
+SpectrumBars::~SpectrumBars() {
+    const std::scoped_lock lock(m_lock);
+}
+
 // ---------------------------------------------------------------------------
 // The setters, GUI thread. Each holds the lock across its assignment only: a
 // slot on the changed signal may call back into the item, and update() takes

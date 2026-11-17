@@ -192,10 +192,11 @@ extern "C" const char* __tsan_default_suppressions() {
         // render thread, would be masked if it raced another thread; no item
         // in the tree declares one. Linux/GCC only: the shape has not been
         // reported in any macOS run.
-        // The sync phase has no entry. An item's updatePaintNode reads its
-        // members under a lock the item owns and its setters take
-        // (playback/SpectrumBars.h), so the runtime sees that handoff itself,
-        // on both platforms.
+        // The item's own members have no entry. An item's updatePaintNode
+        // reads them under a lock the item owns, which its setters take and
+        // its destructor takes before the members are released
+        // (playback/SpectrumBars.h), so the runtime sees those handoffs
+        // itself, on both platforms.
         "race:QQuickWindowPrivate::cleanupNodesOnShutdown\n"
 #endif
         ;

@@ -39,20 +39,21 @@
 # module loader) is Qt's, and a pattern anchored on the generated file name
 # cannot reach a hand-written rawform frame.
 #
-# ONE STATED EXCEPTION: the destructor of a QQuickItem subclass, running on the
-# main thread after Qt has waited for the scene graph render thread to finish,
+# ONE STATED EXCEPTION: the deletion of a QQuickItem subclass on the main
+# thread, after Qt has waited for the scene graph render thread to finish,
 # against Qt's own last read of that item on the render thread
-# (cleanupNodesOnShutdown, with the GUI thread blocked for the duration), is
-# Qt's choreography entered through Qt's contract, not a thread rawform chose.
-# Such a report qualifies when the OTHER racing stack is entirely Qt's and the
-# access on the rawform side is the member release in the destructor. The
-# pattern is then anchored on the Qt frame that establishes the contract, never
-# on the rawform frame, so it covers every item subclass the tree grows and
-# never a hand-written thread.
+# (cleanupNodesOnShutdown asking the item for its meta-object, with the GUI
+# thread blocked for the duration), is Qt's choreography entered through Qt's
+# contract, not a thread rawform chose. Such a report qualifies when the
+# render-thread stack is Qt's down to that meta-object read and the main-thread
+# stack is the item's deletion. The pattern is then anchored on the Qt frame
+# that establishes the contract, never on the rawform frame, so it covers
+# every item subclass the tree grows and never a hand-written thread.
 #
-# The sync phase is NOT under the exception. An item's updatePaintNode reads
-# its members under a lock the item owns and its setters take
-# (playback/SpectrumBars.h), so the runtime sees that handoff itself and
+# The item's own members are NOT under the exception. An item reads them in
+# updatePaintNode under a lock it owns, which its setters take for each
+# assignment and its destructor takes once before the members are released
+# (playback/SpectrumBars.h). The runtime sees those handoffs itself, so
 # updateDirtyNode needs no entry. An item added to the tree follows the same
 # rule.
 #
@@ -101,6 +102,7 @@ race:rawform_qmlcache_loader.cpp
 # run. The pattern would also mask an item's invalidateSceneGraph slot, which
 # this Qt frame invokes on the render thread, if it raced another thread; no
 # item in the tree declares one.
-# The sync phase has no entry: updatePaintNode reads the item's members under
-# the item's own lock (see the exception above), which the runtime sees.
+# The item's members have no entry: updatePaintNode reads them, and the
+# destructor releases them, under the item's own lock (see the exception
+# above), which the runtime sees.
 race:QQuickWindowPrivate::cleanupNodesOnShutdown
