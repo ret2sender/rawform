@@ -13,7 +13,8 @@ their findings fixed. Output failures and decode damage are reported instead
 of swallowed, the bit-perfect claim covers the whole output path, the window
 chrome is keyboard-reachable, large playlists edit in milliseconds, startup
 builds less before the first frame, and the README describes the application
-that ships.
+that ships. Beyond the audit, files open in rawform from file managers and
+launchers, and a second launch hands its files to the running window.
 
 ### Added
 
@@ -55,9 +56,12 @@ that ships.
   which halves the frames the window draws while a track plays; the bars
   settle at the same speed at both. Stored as `refresh_hz` in
   `spectrum.yaml`.
-- Three UI unit tests (the Properties apply sequencer, the playlist model's
-  bulk edits, the worker-result release helper), bringing the tree to
-  seventeen test binaries: nine engine, eight UI.
+- Ten unit tests: nine UI (the Properties apply sequencer, the playlist
+  model's bulk edits, the worker-result release helper, the position-tick
+  gate, read-only file opens, the preset store, the single-instance guard,
+  the spectrum bars' render-thread handoff, the rate ledger file) and one
+  engine (the CoreAudio rate ledger), bringing the tree to twenty-four test
+  binaries: ten engine, fourteen UI.
 - `docs/macos-audio.md`: what the CoreAudio backend does to the device's
   sample rate, when it is restored, and what the crash ledger is for. The
   README now links it, `docs/linux-audio.md` and `docs/KEYBOARD_SHORTCUTS.md`.
@@ -128,8 +132,9 @@ that ships.
   opens; both release builds now require FFmpeg at configure time instead
   of probing for it, so a detection miss fails the build rather than
   shipping a native-only release.
-- The release workflow checks the pushed tag against `ui/VERSION.txt`
-  before building (a `-rc` suffix is allowed for dry runs).
+- The release workflow runs only when started by hand, with the tag as its
+  input, and checks that tag against `ui/VERSION.txt` before building (a
+  `-rc` suffix is allowed for dry runs); pushing a tag starts nothing.
 - README: Usage now covers Add files / Add folder, Reload info and missing
   tracks, the Properties tabs and tools as they are, Rename Files, the
   spectrum options, the log console, every Settings page (Playback,
@@ -139,6 +144,16 @@ that ships.
   places Ogg Vorbis and Opus with the FFmpeg decoders, where the shipped
   builds decode them. `REUSE.toml` records the license of every asset
   without a header of its own.
+- `docs/KEYBOARD_SHORTCUTS.md` lists the new keyboard keys and the Find
+  dialog's keys; `docs/linux-audio.md` covers the whole output claim and the
+  Flatpak form of the CLI; `THIRD-PARTY-NOTICES.md` quotes the FFmpeg
+  build's `--disable-ffnvcodec` flag. The screenshot in the README and the
+  metainfo shows the current window.
+- `LICENSES/` carries the GPL-2.0-or-later, GPL-3.0-or-later,
+  LGPL-3.0-or-later and OFL-1.1 texts the license metadata cites, which a
+  fresh clone lacked.
+- `make check-deps` warns on Linux when `libpipewire-0.3` is missing; the
+  build still succeeds, with no audio output.
 
 ### Fixed
 
@@ -199,6 +214,8 @@ that ships.
 - The Custom Columns Align picker uses the app's own combo box (it painted
   light under a light system theme).
 - Speex (.spx) files can be added through Add files and the drop targets.
+- The playlist row menu's "Rename to" entry ends in an ellipsis, like every
+  other entry that opens a dialog.
 - Restoring a session whose active playlist file had vanished no longer
   activates the wrong tab.
 - After a Playback Queue entry started and left the queue, the current-row
