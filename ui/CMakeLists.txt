@@ -686,7 +686,7 @@ unset(_rawform_qmlcache_sources)
 #
 # Every test registered here carries the `ui` label (rawform_add_ui_test
 # below is the one registration path, so the label cannot be forgotten).
-# The engine tree is pulled in with EXCLUDE_FROM_ALL, so its nine tests are
+# The engine tree is pulled in with EXCLUDE_FROM_ALL, so its tests are
 # registered in this build too but their binaries are never built by `all`;
 # `-L ui` is how a caller (CI, a developer) runs exactly the tests this tree
 # builds. A label, not a name list, so a test added here is picked up by

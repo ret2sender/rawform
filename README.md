@@ -61,7 +61,7 @@ them.
 
 Right-clicking a playlist's column header manages columns, including custom
 columns defined with a `%pattern%` syntax in the Custom
-Columns window. Column layout is persisted per playlist.
+Playlist Columns window. Column layout is persisted per playlist.
 
 The **Playback Queue** is a cross-playlist "play these next" list. Right-click
 tracks in any playlist and choose Add to Playback Queue (`Q`) to append them,
@@ -222,7 +222,7 @@ fallback for formats TagLib cannot parse (ac3, dts).
 
 - CMake 3.28 or newer
 - A C++20 compiler
-- Qt 6 (Core, Gui, Quick, QuickControls2, Svg, Concurrent)
+- Qt 6 (Core, Gui, Network, Quick, QuickControls2, Svg, Concurrent)
 
 Windows is not supported: the tree carries the Windows window chrome and
 builds there, but the engine has no Windows output backend, so a Windows
@@ -350,7 +350,7 @@ cmake --build build/core
 ctest --test-dir build/core
 
 # UI unit tests (opt-in; fourteen console binaries, no display needed). The
-# engine's nine tests are registered in this tree too but not built by it,
+# engine's ten tests are registered in this tree too but not built by it,
 # hence the label.
 cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
 cmake --build build/app
