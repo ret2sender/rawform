@@ -93,7 +93,7 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="1.4.0" date="2026-11-18">
+    <release version="1.4.0" date="2026-11-17">
       <description>
         <p>The audit release: output failures, decode damage and underruns are reported instead of swallowed; the bit-perfect claim covers the system volume and the device depth; the window chrome is keyboard-reachable with accessibility roles; large playlist edits, Find indexing and playlist checks no longer stall the window; startup creates less before the first frame; the PipeWire handshake no longer delays the window; the spectrum display pauses while hidden and offers a 30 Hz refresh rate; the macOS bundle declares its minimum system version; the Flatpak reads GVFS locations. Files also open in rawform from file managers and launchers, and a second launch hands its files to the running window.</p>
       </description>
