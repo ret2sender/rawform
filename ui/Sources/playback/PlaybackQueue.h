@@ -119,7 +119,7 @@ public:
     Q_INVOKABLE int enqueueNext(rawform::PlaylistModel* source, const QList<int>& rows);
 
     /// Drop every entry. The explicit play gesture on a normal playlist
-    /// (double-click / Enter) calls this; so does Playback > Clear.
+    /// (double-click / Enter) calls this; so does Playback > Clear Playback Queue.
     Q_INVOKABLE void clear();
 
     // --- Controller surface (C++ only) -------------------------------------

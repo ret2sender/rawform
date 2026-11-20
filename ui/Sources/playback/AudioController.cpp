@@ -153,8 +153,7 @@ constexpr bool   kRgScanSkipExistingDefault = false;  // a fresh scan measures a
 
 // Output rate policy factory default: bit-perfect on, which
 // is also the engine's own construction default, so the first pushRateMode call
-// is a semantic no-op on a fresh install and playback.yaml-less runs behave
-// exactly as every build before the toggle existed.
+// is a semantic no-op on a fresh install and on a run without playback.yaml.
 constexpr bool   kBitPerfectDefault         = true;
 
 // The linear ReplayGain factor for one track under the given settings. Off is 1.0.
@@ -685,9 +684,9 @@ QString AudioController::formatSummary() const {
 // deliberately verbose so the remedy is obvious:
 //   1. "(Resampled to N Hz)" with the actual device rate;
 //   2. "(Volume Adjusted by PipeWire)" / "(Volume Adjusted by System)": a
-//      software volume or mute outside rawform (the per-application or device
-//      slider in a Linux mixer, the system volume on macOS; the platform is
-//      the one this build's sink runs on);
+//      software volume or mute outside rawform that the sink reports (the
+//      per-application or device slider in a Linux mixer; CoreAudioSink reports
+//      none); the wording follows the platform this build's sink runs on;
 //   3. the engine's own gain, as classified by pushGainToEngine from the value
 //      it actually pushed: "(Muted)", "(Volume Adjusted)", "(ReplayGain
 //      Adjusted)", or "(Volume + ReplayGain)" (the slider, the Settings RG
@@ -1738,8 +1737,8 @@ void AudioController::refreshReplayGain() {
     // fallback yields unity exactly as an unknown track should, and the next
     // successful lookup overwrites the snapshot. During the optimistic start
     // window the cursor already points at the incoming row, so the live branch
-    // computes the incoming track's factor there, exactly as before this fix
-    // (see the gapless seam note in refreshNowPlayingMeta).
+    // computes the incoming track's factor there (see the gapless seam note in
+    // refreshNowPlayingMeta).
     bool resolved = false;
     if (PlaylistModel* m = m_playingModel.data(); m && m_cursor.isValid()) {
         if (const TrackData* td = m->trackAt(m_cursor.row())) {

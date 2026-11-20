@@ -25,8 +25,8 @@
 // (SpectrumAnalyzer). It is a small, focused QObject in the same standalone shape
 // as ReplayGainScanController and MetadataReloader rather than more weight on the
 // already large AudioController: it owns the visualizer's timer, its DSP instance,
-// its temporal smoothing, and its one persisted preference (the analyzer source),
-// and it exposes the bar values QML draws.
+// its temporal smoothing, and its two persisted preferences (the analyzer source
+// and the refresh rate), and it exposes the bar values QML draws.
 //
 // WHAT IT DOES, on each timer tick (60 or 30 Hz, the refresh-rate preference):
 //   - While playing: pull the most recent mono window from the engine tap through
@@ -96,14 +96,14 @@ class SpectrumProvider : public QObject {
 
     /// The bar magnitudes QML draws: barCount values, each 0..1, low frequency
     /// first. Republished on every visible tick while the display is live (and as it
-    /// decays to flat after playback stops). A fixed-length list, so a bound Repeater
-    /// keys off barCount and only the delegate heights re-evaluate.
+    /// decays to flat after playback stops). A fixed-length list, so the SpectrumBars
+    /// item it feeds keeps a stable bar count.
     Q_PROPERTY(QList<qreal> bars READ bars NOTIFY barsChanged)
 
     /// The number of bars (the length of `bars`). Effectively constant for a given
     /// configuration; it carries a NOTIFY only so a reconfiguration that
-    /// changes the count keeps QML correct. The view binds its Repeater model to
-    /// this so the delegate set is stable across the per-tick bars updates.
+    /// changes the count keeps QML correct. The view binds SpectrumBars' count to
+    /// it.
     Q_PROPERTY(int barCount READ barCount NOTIFY barCountChanged)
 
     /// The analyzer source: 0 == Output (post master gain, follows the volume; the

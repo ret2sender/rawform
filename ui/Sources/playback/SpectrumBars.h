@@ -27,20 +27,20 @@
 // updatePaintNode on the render thread whenever the values change.
 //
 // WHY ONE ITEM. The bars update at the spectrum's refresh rate for as long as
-// a track plays. As a Repeater of Rectangles, every tick was one binding per
-// bar to compute its level, one height write per bar, and one scene graph
-// node per bar for the renderer to re-geometry, plus the QList-to-JS-array
-// conversion the per-bar reads cost; here a tick is one QList copy into
-// `values`, one update() and one vertex upload. The item knows nothing about
-// the provider: it draws whatever list it is given, like the Rectangles did.
+// a track plays. A Repeater of Rectangles would cost, every tick, one binding
+// per bar to compute its level, one height write per bar, one scene graph node
+// per bar for the renderer to re-geometry, and the QList-to-JS-array conversion
+// the per-bar reads need; here a tick is one QList copy into `values`, one
+// update() and one vertex upload. The item knows nothing about the provider: it
+// draws whatever list it is given.
 //
-// THE LOOK is the Rectangles' look, reproduced by hand because a geometry node
+// THE LOOK is a Rectangle's, reproduced by hand because a geometry node
 // has no antialiasing and no radius of its own: every bar is the same whole
 // number of logical pixels wide, with the same whole gap, the row centered in
 // the plot (the remainder of an uneven split goes to the margins, never to a
 // bar or a gap, which is what makes the bars read as uniform); the top edge
 // moves continuously, its partial pixel row drawn at the alpha of its coverage,
-// the way the antialiased Rectangle edge was; and the four corner pixels carry
+// the way an antialiased Rectangle edge is; and the four corner pixels carry
 // the coverage a 1 px radius leaves them, so the bars keep their softened ends.
 //
 // THE LOCK. Qt calls updatePaintNode on the render thread with the GUI thread

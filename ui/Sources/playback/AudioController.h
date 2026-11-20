@@ -25,8 +25,8 @@
 // playback and bind to its state, and it adds the one thing the engine deliberately does
 // NOT own, the cursor that makes playback follow a playlist.
 //
-// THREE THREADS, as the engine header spells out. The engine's Listener fires on
-// the engine thread, never the GUI thread. We marshal every callback to the GUI
+// THE ENGINE'S THREADS, as the engine header spells out. The engine's Listener
+// fires on the engine thread, never the GUI thread. We marshal every callback to the GUI
 // thread through a small private bridge (EngineListenerBridge, defined in the
 // .cpp) so the Q_PROPERTY/signal surface is only ever touched on the thread QML
 // lives on. The transport calls below are non-blocking (each enqueues an engine
@@ -512,9 +512,10 @@ signals:
     void warningOccurred(const QString& message);
     /// An informational engine/sink line for the log console: the output
     /// sink's device-negotiation diagnostics (rate switches, measured
-    /// bit-perfect outcomes, close-time restores) and the ctor's crash-recovery
-    /// notice for a stale rate ledger. MainWindow routes it to LogStore at
-    /// "info" level, parallel to warningOccurred's "warning" and
+    /// bit-perfect outcomes, close-time restores), the engine's own notices
+    /// (device selection, external changes, underruns), and the ctor's
+    /// crash-recovery notice for a stale rate ledger. MainWindow routes it to
+    /// LogStore at "info" level, parallel to warningOccurred's "warning" and
     /// errorOccurred's "error".
     void infoOccurred(const QString& message);
     void volumeChanged();   ///< volume (and so volumePercent) changed

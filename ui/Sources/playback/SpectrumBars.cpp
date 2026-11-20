@@ -48,8 +48,8 @@ constexpr int kVerticesPerQuad = 6;
 constexpr int kVerticesPerBar  = kQuadsPerBar * kVerticesPerQuad;
 
 // The coverage a 1 px corner radius leaves its corner pixel: the pixel's area
-// minus the quarter-circle cutout, 1 - (1 - pi/4). The Rectangles drew their
-// corners at this alpha through antialiasing; the bars keep it.
+// minus the quarter-circle cutout, 1 - (1 - pi/4). An antialiased Rectangle
+// draws its corners at this alpha; the bars match it.
 constexpr float kCornerCoverage = 0.7854f;
 
 // One quad, premultiplied color (the pipeline's convention), alpha scaled by
