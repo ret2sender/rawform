@@ -201,13 +201,14 @@ struct PipeWireSinkImpl {
     int                    doneSeq       = -1;     // last done sequence observed
 
     // The engine's event channel, guarded by the loop lock: written
-    // by setEventListener (engine thread, lock taken), read by the registry
-    // and metadata handlers (loop thread, lock held during dispatch). This
-    // sink emits onDeviceListChanged (node inventory or default-marking
-    // changes) and onExternalRateChanged (settings clock transitions); it
-    // never emits onDefaultDeviceChanged (the session manager migrates live
-    // streams itself, the documented asymmetry) nor onRateDebtChanged (the
-    // force lifts with the node: repayment is structural, there is no ledger).
+    // by setEventListener (engine thread, lock taken), read by the loop-thread
+    // handlers (lock held during dispatch). This sink emits onDeviceListChanged
+    // (node inventory or default-marking changes), onExternalRateChanged
+    // (settings clock transitions and the driver-format watch),
+    // onOutputAlterationsChanged and onOutputFailed; it never emits
+    // onDefaultDeviceChanged (the session manager migrates live streams itself,
+    // the documented asymmetry) nor onRateDebtChanged (the force lifts with the
+    // node: repayment is structural, there is no ledger).
     ISinkEventListener* events = nullptr;
 
     // Graph clock settings, written by the metadata listener on the loop thread,

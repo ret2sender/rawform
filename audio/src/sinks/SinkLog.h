@@ -24,10 +24,12 @@
 // the line to BOTH stderr (the CLI's byte-for-byte output; the trailing newline
 // is added here, so format strings carry none) and the installed ILogOutput
 // when present (the engine's seam, which the Qt layer forwards as onInfo).
-// Engine-thread only: every log site in a sink is an open/close/reconfigure
-// path the engine drives; never the real-time callback, and never a platform
-// notification thread (those write stderr directly, since the logger is an
-// engine-thread facility).
+// Engine-thread only where a logger is installed: every log site that can reach
+// one is an engine-driven path (open, reconfigure, close, capabilities, a settle);
+// the sites that run before injection (a sink's constructor, the owner's
+// repayStaleRateDebt) have no logger yet and write stderr alone. Never the
+// real-time callback, and never a platform notification thread (those write
+// stderr directly, since the logger is an engine-thread facility).
 //
 // Private to the sinks directory, like the sinks themselves; NullSink has
 // nothing to say and does not include it.

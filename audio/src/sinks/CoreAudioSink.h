@@ -124,8 +124,9 @@ public:
     /// engine drives the audible reopen.
     [[nodiscard]] std::vector<AudioDeviceInfo> enumerateDevices() const override;
     bool                         selectDevice(const std::string& deviceId) override;
-    /// Install the engine's event channel. This sink emits every event:
-    /// default-device and device-list changes from system-wide listeners alive
+    /// Install the engine's event channel. This sink emits every event but
+    /// onOutputAlterationsChanged (it reports no alterations): default-device
+    /// and device-list changes from system-wide listeners alive
     /// for the sink's life, external nominal-rate changes (with ledger
     /// forgiveness) from a per-open listener on the bound device,
     /// restore-ledger changes for the ledger persistence, and an output
@@ -175,11 +176,12 @@ public:
     /// The sink-console seams. setLogOutput stores the non-owning line logger;
     /// every diagnostic this sink prints (the decision-execution lines, the
     /// measured-outcome line, the close-time restore, and the open-path OSStatus
-    /// breadcrumbs) then goes to BOTH stderr (the pre-existing CLI behavior,
-    /// unchanged) and the logger. measuredDeviceRateHz reports the AUHAL
-    /// output-scope rate captured after the last successful open, rounded to the
-    /// nearest Hz, or 0 while not open; it is the same measurement bitPerfect()
-    /// is derived from, exposed portably for the Engine's outcome publication.
+    /// breadcrumbs) then goes to BOTH stderr (the CLI's output) and the logger.
+    /// measuredDeviceRateHz reports the AUHAL output-scope rate measured at the
+    /// last successful open or reconfigure (after an external rate change, the
+    /// nominal rate the device reports), rounded to the nearest Hz, or 0 while
+    /// not open; bitPerfect() is derived from the same value, and it is exposed
+    /// portably for the Engine's outcome publication.
     void          setLogOutput(ILogOutput* out) override;
     [[nodiscard]] std::uint32_t measuredDeviceRateHz() const override;
 

@@ -364,8 +364,8 @@ AudioChannelLabel labelFor(ChannelPosition p) {
 // channels than the device keeps its first channels and loses the rest; the
 // layout still tells the truth about what they are. A channel count the table
 // does not cover gets no layout and the identity map. Either property
-// failing is a breadcrumb, never a failed open: the stream plays as it did
-// before this existed.
+// failing is a breadcrumb, never a failed open: the stream then plays without
+// the layout or the map.
 void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
                         ILogOutput* out) {
     const std::span<const ChannelPosition> positions =
@@ -538,8 +538,9 @@ OSStatus onNominalRateChanged(AudioObjectID /*obj*/, UInt32 /*nAddrs*/,
 
 // Drive the device to targetRate and wait until the readback actually reaches it,
 // bounded by a 2 s ceiling. Writes the rate the device ended up at to *achieved.
-// Returns true only when the device genuinely reached targetRate. Runs only in
-// open()/close(), never on the RT thread.
+// Returns true only when the device genuinely reached targetRate. Runs on the
+// engine thread (open, reconfigure, close, the settle) and, before injection, in
+// repayStaleRateDebt(); never on the RT thread.
 bool setDeviceNominalRate(AudioDeviceID dev, double targetRate, double* achieved) {
     AudioObjectPropertyAddress addr{kAudioDevicePropertyNominalSampleRate,
                                     kAudioObjectPropertyScopeGlobal,
@@ -1545,14 +1546,6 @@ bool CoreAudioSink::bitPerfect() const noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// The sink-console seams. setLogOutput just parks the non-owning pointer;
-// the Engine installs itself at injection and outlives this sink, so no
-// lifetime dance is needed here. measuredDeviceRateHz exposes the same AUHAL
-// output-scope measurement bitPerfect() is derived from, rounded to the
-// nearest Hz (the scope reports a double; nominal rates are integers in
-// practice, and the RateManager side of the comparison is integral), gated on
-// opened so a closed sink honestly reports "no measurement" rather than a
-// stale rate.
 // The crash-recovery restore. Runs pre-injection with no logger
 // installed, so diagnostics go to stderr; the owner narrates to its own
 // console. Conservative by design: a device that anyone has since moved is
@@ -1637,6 +1630,15 @@ void CoreAudioSink::setEventListener(ISinkEventListener* listener) {
     m_impl->events = listener;
 }
 
+// ---------------------------------------------------------------------------
+// The sink-console seams. setLogOutput just parks the non-owning pointer;
+// the Engine installs itself at injection and outlives this sink, so no
+// lifetime dance is needed here. measuredDeviceRateHz exposes the same AUHAL
+// output-scope measurement bitPerfect() is derived from, rounded to the
+// nearest Hz (the scope reports a double; nominal rates are integers in
+// practice, and the RateManager side of the comparison is integral), gated on
+// opened so a closed sink honestly reports "no measurement" rather than a
+// stale rate.
 void CoreAudioSink::setLogOutput(ILogOutput* out) {
     m_impl->logOut = out;
 }

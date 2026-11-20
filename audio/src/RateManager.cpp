@@ -241,9 +241,8 @@ RateDecision RateManager::decide(const AudioFormat&      source,
             // gated on the device permitting a switch at all (a device that
             // refuses nominal-rate changes cannot be forced; fall back to leaving
             // it and resampling). Diagnostic mode: the policy predicts no resample
-            // here, and the sink's measured device rate, behind the engine's
-            // outputBitPerfect(), reports whether the hardware actually honored
-            // the forced rate.
+            // here, and the sink's measured bitPerfect() reports whether the
+            // hardware actually honored the forced rate.
             if (caps.canSwitchRate) {
                 deviceRate   = srcRate;
                 switchDevice = (srcRate != curRate);

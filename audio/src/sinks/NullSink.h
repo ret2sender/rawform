@@ -192,7 +192,7 @@ public:
 
     /// What outputAlterations() and realizedDepthBits() report. Both default to
     /// "nothing known" (0), the base-class answer, so every scenario that does
-    /// not set them keeps today's outcome. Settable at any time (a test models a
+    /// not set them reports no alteration. Settable at any time (a test models a
     /// volume moving mid-track by setting the mask and firing the nudge); the
     /// reads are mutex-guarded like the other fake-device state.
     void setOutputAlterations(OutputAlterations mask);
@@ -290,11 +290,11 @@ private:
     std::vector<AudioDeviceInfo> m_devices;
     std::string                  m_selectedDeviceId;  ///< empty = system default
 
-    /// The installed event listener. Written once, before any playback
-    /// (Engine::setSink installs it), read by the fire* helpers from arbitrary
-    /// test threads; m_mtx guards the pointer for TSan cleanliness, the calls
-    /// themselves run outside the lock (the listener enqueues, never
-    /// re-enters).
+    /// The installed event listener. Written at injection (Engine::setSink
+    /// installs it) and cleared at engine shutdown, read by the fire* helpers
+    /// from arbitrary test threads; m_mtx guards the pointer for TSan
+    /// cleanliness, the calls themselves run outside the lock (the listener
+    /// enqueues, never re-enters).
     ISinkEventListener*          m_events = nullptr;
 
     /// Failure shapes. m_startFails is engine-thread-only after injection (a
