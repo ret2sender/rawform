@@ -153,7 +153,6 @@
 #include <cstring>  // IWYU pragma: keep (std::memset in renderCallback)
 #include <mutex>
 #include <optional>  // the session's debt, when it owes one
-#include <span>  // the channel position table's view
 #include <string>
 #include <thread>  // std::this_thread::sleep_for, the measurement's re-read pause
 #include <utility>  // std::move
@@ -357,7 +356,8 @@ AudioChannelLabel labelFor(ChannelPosition p) {
 
 // Describe the stream's channels to the unit, on an UNINITIALIZED unit whose
 // input-scope format is already set: an input-scope AudioChannelLayout naming
-// each channel's speaker position from the shared table, and an output-scope
+// each channel's speaker position from the format (ChannelPositions.h: its
+// speaker mask, or the default order for its channel count), and an output-scope
 // channel map (device channel -> input channel, -1 for silence) that is the
 // identity except for mono, which is sent to the first two device channels so
 // it reaches both speakers. The AUHAL does not downmix, so a source with more
@@ -368,8 +368,7 @@ AudioChannelLabel labelFor(ChannelPosition p) {
 // the layout or the map.
 void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
                         ILogOutput* out) {
-    const std::span<const ChannelPosition> positions =
-        channelPositionsFor(sourceFormat.channels);
+    const ChannelPositionList positions = channelPositionsFor(sourceFormat);
     if (!positions.empty()) {
         const std::size_t bytes =
             offsetof(AudioChannelLayout, mChannelDescriptions) +

@@ -31,8 +31,8 @@
 // Pipeline invariant worth restating here, since these types encode it: the
 // canonical PCM format flowing through the whole engine is interleaved float32
 // and nothing else. Sample format is therefore NOT a field anyone can vary;
-// AudioFormat carries sample rate and channel count only, and the sink is the
-// single place that converts float32 to a device format.
+// AudioFormat carries sample rate, channel count and speaker layout only, and
+// the sink is the single place that converts float32 to a device format.
 
 #pragma once
 
@@ -43,27 +43,39 @@ namespace rawform::audio {
 
 /// Describes the shape of an interleaved float32 stream. There is intentionally
 /// no sample-format member: the only PCM representation in the engine is float32,
-/// so the sole degrees of freedom are how fast frames arrive (sampleRate) and how
-/// many samples make up one frame (channels). A "frame" throughout the engine
-/// means one sample per channel; a stereo frame is two contiguous floats.
+/// so the degrees of freedom are how fast frames arrive (sampleRate), how many
+/// samples make up one frame (channels), and which speaker each channel is for
+/// (channelMask). A "frame" throughout the engine means one sample per channel;
+/// a stereo frame is two contiguous floats. Eight bytes, no padding: the engine
+/// publishes it to the controlling thread as one packed 64-bit word.
 struct AudioFormat {
-    std::uint32_t sampleRate = 0;  ///< frames per second, e.g. 44100, 48000, 96000
-    std::uint16_t channels   = 0;  ///< samples per frame, e.g. 2 for stereo
+    std::uint32_t sampleRate  = 0;  ///< frames per second, e.g. 44100, 48000, 96000
+    std::uint16_t channels    = 0;  ///< samples per frame, e.g. 2 for stereo
+    /// The speakers the channels are for, as WAVEFORMATEXTENSIBLE speaker bits
+    /// (FL 0x1, FR 0x2, FC 0x4, LFE 0x8, BL 0x10, BR 0x20, BC 0x100, SL 0x200,
+    /// SR 0x400), with the channels interleaved in ascending bit order. 0 means
+    /// the default order for the channel count, the one FLAC and WAVE share; a
+    /// decoder reports a mask only for a source whose speakers differ from it.
+    std::uint16_t channelMask = 0;
 
-    /// A format is usable only once a decoder has reported real values. Zero in
-    /// either field means "not yet known", so a default-constructed AudioFormat
-    /// doubles as the unconfigured state.
+    /// A format is usable only once a decoder has reported real values. Zero
+    /// rate or channels means "not yet known", so a default-constructed
+    /// AudioFormat doubles as the unconfigured state.
     [[nodiscard]] constexpr bool isValid() const noexcept {
         return sampleRate != 0 && channels != 0;
     }
 };
 
-/// Two formats are equal when both fields match. The engine compares formats to
-/// decide whether a track change requires reconfiguring the output device for a
-/// new native sample rate (the bit-perfect rule: the device follows the track,
-/// the track is never resampled to fit the device).
+/// Two formats are equal when all three fields match. The engine compares
+/// formats to decide whether a track change requires reconfiguring the output
+/// device for a new native sample rate (the bit-perfect rule: the device follows
+/// the track, the track is never resampled to fit the device), and whether the
+/// next track may join the running stream gaplessly. A different speaker layout
+/// at the same rate and count is a different format: the device was told what
+/// each channel is.
 constexpr bool operator==(const AudioFormat& a, const AudioFormat& b) noexcept {
-    return a.sampleRate == b.sampleRate && a.channels == b.channels;
+    return a.sampleRate == b.sampleRate && a.channels == b.channels &&
+           a.channelMask == b.channelMask;
 }
 constexpr bool operator!=(const AudioFormat& a, const AudioFormat& b) noexcept {
     return !(a == b);
@@ -254,7 +266,7 @@ struct AudioDeviceInfo {
 /// the RT thread, by design.
 struct TrackInfo {
     std::string   path;             ///< identity: the file that produced this stream
-    AudioFormat   format;           ///< native rate + channels (the sink's target)
+    AudioFormat   format;           ///< native rate, channels, layout (the sink's target)
     SourceInfo    source;           ///< codec / bit-depth / bitrate, status line only
     std::uint64_t totalFrames = 0;  ///< length in frames; 0 when unknown
 

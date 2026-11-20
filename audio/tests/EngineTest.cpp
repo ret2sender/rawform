@@ -157,8 +157,10 @@ public:
     RampDecoder(std::uint32_t rate, std::uint16_t channels,
                 std::uint64_t totalFrames, bool seekable,
                 std::uint64_t valueBase = 0, bool seekFails = false,
-                RampFault fault = RampFault::None, std::uint16_t depthBits = 0)
-        : m_fmt{rate, channels}, m_total(totalFrames), m_seekable(seekable),
+                RampFault fault = RampFault::None, std::uint16_t depthBits = 0,
+                std::uint16_t channelMask = 0)
+        : m_fmt{.sampleRate = rate, .channels = channels, .channelMask = channelMask},
+          m_total(totalFrames), m_seekable(seekable),
           m_valueBase(valueBase), m_seekFails(seekFails), m_fault(fault),
           m_depthBits(depthBits) {}
 
@@ -255,6 +257,8 @@ private:
 //                                                   with that RampFault (above)
 //   "depth<N>:<frames>" (+ the rate/ch/base forms)  -> seekable, a lossless source
 //                                                   declaring N bits per sample
+//   "mask<N>:<frames>" (+ the rate/ch/base forms)   -> seekable, a source declaring
+//                                                   the speaker mask N (decimal)
 // Anything else fails to open (returns nullptr), which is how the open-failure
 // skip path is exercised. The factory is stateless and reentrant; the engine
 // thread is its only caller, but reentrancy keeps it honest.
@@ -278,8 +282,12 @@ public:
         bool          seekFails = false;
         RampFault     fault     = RampFault::None;
         std::uint16_t depthBits = 0;
+        std::uint16_t mask      = 0;
         if (!parts.empty() && parts[0].rfind("depth", 0) == 0 && parts[0].size() > 5) {
             depthBits = static_cast<std::uint16_t>(parseU64(parts[0].substr(5)));
+        } else if (!parts.empty() && parts[0].rfind("mask", 0) == 0 &&
+                   parts[0].size() > 4) {
+            mask = static_cast<std::uint16_t>(parseU64(parts[0].substr(4)));
         } else if (!parts.empty() && parts[0] == "ramp") {
             seekable = true;
         } else if (!parts.empty() && parts[0] == "noseek") {
@@ -332,7 +340,8 @@ public:
             return nullptr;
         }
         return std::make_unique<RampDecoder>(rate, channels, frames, seekable,
-                                             valueBase, seekFails, fault, depthBits);
+                                             valueBase, seekFails, fault, depthBits,
+                                             mask);
     }
 
 private:
@@ -454,12 +463,14 @@ private:
 
 // ---------------------------------------------------------------------------
 // A recording sink: like NullSink it advertises configurable capabilities,
-// records the RateDecision handed to each open(), and models the device
-// following a switch; additionally it records the channel-0 sample of EVERY real
-// frame it pulls, in order, across all opens. Two things are then provable:
+// records the RateDecision and the AudioFormat handed to each open(), and models
+// the device following a switch; additionally it records the channel-0 sample of
+// EVERY real frame it pulls, in order, across all opens. Three things are then
+// provable:
 //   - the number of recorded decisions: a gapless stitch does NOT reopen the
 //     sink, so it produces NO new decision, whereas a reconfigure does, so the
 //     decision COUNT distinguishes the two paths;
+//   - the formats each open() was given, speaker mask included;
 //   - the recorded channel-0 sequence: sample-contiguity across a boundary (no
 //     frame dropped or duplicated at the seam), which the distinct per-track
 //     value bands make unambiguous.
@@ -512,6 +523,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(m_obsMtx);
             m_decisions.push_back(decision);
+            m_formats.push_back(format);
         }
         if (decision.switchDevice) {
             m_caps.currentRate = decision.deviceRate;  // model device-follows-switch
@@ -564,6 +576,10 @@ public:
         std::lock_guard<std::mutex> lock(m_obsMtx);
         return m_decisions;
     }
+    std::vector<AudioFormat> recordedFormats() const {
+        std::lock_guard<std::mutex> lock(m_obsMtx);
+        return m_formats;
+    }
 
 private:
     void pumpLoop() {
@@ -591,9 +607,10 @@ private:
     AudioFormat               m_format{};
     IPullSource*              m_source = nullptr;
     std::vector<float>        m_scratch;
-    mutable std::mutex        m_obsMtx;      // guards the two observer logs below
+    mutable std::mutex        m_obsMtx;      // guards the three observer logs below
     std::vector<float>        m_channel0;    // pull-thread-written; test-thread-read
     std::vector<RateDecision> m_decisions;   // engine-thread-written in open()
+    std::vector<AudioFormat>  m_formats;     // engine-thread-written in open()
     SinkCapabilities          m_caps;
     ILogOutput*               m_log          = nullptr;  // non-owning (the console seam)
     std::uint32_t             m_measuredRate = 0;        // modeled AUHAL-style read
@@ -2719,13 +2736,15 @@ void testSeekInOverlapAnnouncesIncomingTrack() {
 // self-identifying.
 // ---------------------------------------------------------------------------
 
-// Build the expected channel-0 stream of a 2-channel ramp track: channel 0 of
-// frame `pos` is enc(valueBase + 2*pos).
-std::vector<float> expectedChannel0(std::uint64_t valueBase, std::uint64_t frames) {
+// Build the expected channel-0 stream of a ramp track: channel 0 of frame `pos`
+// is enc(valueBase + channels*pos). The gapless tests use 2 channels unless they
+// say otherwise.
+std::vector<float> expectedChannel0(std::uint64_t valueBase, std::uint64_t frames,
+                                    std::uint64_t channels = 2) {
     std::vector<float> v;
     v.reserve(static_cast<std::size_t>(frames));
     for (std::uint64_t pos = 0; pos < frames; ++pos) {
-        v.push_back(enc(valueBase + pos * 2u));
+        v.push_back(enc(valueBase + pos * channels));
     }
     return v;
 }
@@ -2837,6 +2856,64 @@ void testGaplessNoStitchDifferentRate() {
 
     std::vector<float>       expected = expectedChannel0(1048576u, 4000u);
     const std::vector<float> bExp     = expectedChannel0(2097152u, 6000u);
+    expected.insert(expected.end(), bExp.begin(), bExp.end());
+    const std::vector<float> got = sinkPtr->recordedChannel0();
+    CHECK(got.size() == expected.size());
+    CHECK(channel0Matches(got, expected));
+
+    CHECK(engine.state() == State::Stopped);
+    CHECK(listener.errors() == 0);
+}
+
+// Same rate and channel count, different speaker layouts: track A is 5.1 in the
+// default order (mask 0, FL FR FC LFE BL BR) and track B is 5.1 with side
+// surrounds (mask 0x60F, FL FR FC LFE SL SR). The device was told what each of
+// A's channels is, so B must not join A's stream: the gate fails, the sink is
+// opened again with B's mask, and the consumed channel-0 stream is still A's
+// band followed by B's.
+void testGaplessNoStitchDifferentLayout() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+
+    auto           sink    = std::make_unique<RecordingSink>();
+    RecordingSink* sinkPtr = sink.get();
+    sinkPtr->setCapabilities(makeCaps({48000}, 48000, /*canSwitch=*/false));  // fixed
+
+    engine.setDecoderFactory(&factory);
+    engine.setListener(&listener);
+    engine.setRateMode(RateMode::BitPerfectWhenAvailable);
+    engine.setSink(std::move(sink));
+
+    const std::string a = "ramp:48000:6:4000:1048576";
+    const std::string b = "mask1551:48000:6:6000:2097152";  // 1551 == 0x60F
+    engine.enqueue(a);
+    engine.enqueue(b);
+    engine.play();
+
+    CHECK(waitForCompletion(engine));
+    settle();
+
+    // Different layout: reconfigure, so the sink was opened twice, each time
+    // with its track's mask at the one rate and count.
+    const std::vector<AudioFormat> formats = sinkPtr->recordedFormats();
+    CHECK(formats.size() == 2);
+    if (formats.size() == 2) {
+        CHECK(formats[0].channelMask == 0);
+        CHECK(formats[1].channelMask == 0x060F);
+        CHECK(formats[0].sampleRate == 48000 && formats[1].sampleRate == 48000);
+        CHECK(formats[0].channels == 6 && formats[1].channels == 6);
+    }
+
+    const auto paths = listener.trackPaths();
+    CHECK(paths.size() == 2);
+    if (paths.size() == 2) {
+        CHECK(paths[0] == a);
+        CHECK(paths[1] == b);
+    }
+
+    std::vector<float>       expected = expectedChannel0(1048576u, 4000u, 6u);
+    const std::vector<float> bExp     = expectedChannel0(2097152u, 6000u, 6u);
     expected.insert(expected.end(), bExp.begin(), bExp.end());
     const std::vector<float> got = sinkPtr->recordedChannel0();
     CHECK(got.size() == expected.size());
@@ -3622,6 +3699,7 @@ int main() {
 
     testGaplessStitchSameFormat();
     testGaplessNoStitchDifferentRate();
+    testGaplessNoStitchDifferentLayout();
     testGaplessMultipleSeams();
     testGaplessPositionResetsPerTrack();
     testGaplessFreeRunSoak();

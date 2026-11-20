@@ -171,7 +171,6 @@
 #include <cstdlib>  // strtoul for metadata value parsing
 #include <cstring>
 #include <mutex>    // std::once_flag for the process-wide pw_init
-#include <span>     // the channel position table's view
 #include <string>
 #include <thread>   // the graph-rate confirmation poll in open()
 #include <vector>
@@ -1422,7 +1421,8 @@ std::uint32_t spaChannelFor(ChannelPosition p) {
 
 // The stream's EnumFormat pod for a source format: interleaved float32 (the
 // engine's canonical format) at the source rate, with each channel's speaker
-// position declared from the shared table so the graph's channel mixer can
+// position declared from the format (ChannelPositions.h: its speaker mask, or
+// the default order for its channel count) so the graph's channel mixer can
 // downmix or upmix it (a 5.1 track on a stereo sink keeps its center and
 // surrounds; a mono track reaches both speakers). A channel count the table
 // does not cover is declared unpositioned, honestly, rather than given an
@@ -1435,8 +1435,7 @@ const struct spa_pod* buildFormatPod(struct spa_pod_builder* builder,
     raw.format   = SPA_AUDIO_FORMAT_F32;
     raw.rate     = format.sampleRate;
     raw.channels = format.channels;
-    const std::span<const ChannelPosition> positions =
-        channelPositionsFor(format.channels);
+    const ChannelPositionList positions = channelPositionsFor(format);
     if (positions.empty()) {
         raw.flags = SPA_AUDIO_FLAG_UNPOSITIONED;
     } else {

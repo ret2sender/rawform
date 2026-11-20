@@ -26,8 +26,9 @@
 // states that contract ONCE as a battery and runs it, unchanged, against every
 // real decoder, so the boundary behavior is provably uniform. The per-format
 // tests (SndfileDecoderTest, FlacDecoderTest, Mp3DecoderTest) keep their
-// format-specific fidelity and round-trip assertions; this suite owns only the
-// shared boundary contract.
+// format-specific fidelity and round-trip assertions; this suite owns the shared
+// boundary contract, and the speaker positions a sink declares for a decoded
+// format (ChannelPositions.h).
 //
 // Same hand-rolled CHECK harness as the other tests: no GoogleTest, no Catch2, a
 // failure tally that makes main() return non-zero. Each fixture is materialized
@@ -63,6 +64,7 @@
 // decode battery on the same fixtures, so MetadataProbe's read of each file is
 // held to the decoder's facts.
 
+#include "ChannelPositions.h"
 #include "DecoderFactory.h"
 
 #include "rawform/audio/IDecoder.h"
@@ -85,12 +87,14 @@
 #include <cstddef>
 #include <cstdint>  // IWYU pragma: keep (std::int*_t)
 #include <cstdio>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 using rawform::audio::AudioFormat;
+using rawform::audio::ChannelPosition;
 using rawform::audio::Codec;
 using rawform::audio::DecoderFactory;
 using rawform::audio::DecoderKind;
@@ -594,9 +598,64 @@ void checkProbe(const Fixture& fx, const char* expectedLabel) {
 }
 #endif
 
+// ---------------------------------------------------------------------------
+// The positions a sink declares for a format (ChannelPositions.h). A mask names
+// the speakers in ascending bit order. A zero mask, a mask with a bit the table
+// cannot name, or one whose bit count disagrees with the channel count gets the
+// count's default order; beyond eight channels there is nothing to declare.
+bool positionsAre(const AudioFormat& f, std::initializer_list<ChannelPosition> want) {
+    return std::ranges::equal(rawform::audio::channelPositionsFor(f), want);
+}
+
+void checkChannelPositions() {
+    using P = ChannelPosition;
+    using rawform::audio::channelPositionsFor;
+    using rawform::audio::defaultChannelMask;
+    const auto fmt = [](std::uint16_t channels, std::uint16_t mask) {
+        return AudioFormat{
+            .sampleRate = 48000, .channels = channels, .channelMask = mask};
+    };
+
+    // Default orders.
+    CHECK(positionsAre(fmt(1, 0), {P::Mono}));
+    CHECK(positionsAre(fmt(6, 0), {P::FrontLeft, P::FrontRight, P::FrontCenter,
+                                   P::Lfe, P::BackLeft, P::BackRight}));
+
+    // Masks: 4.0 (FL FR FC BC), and 5.1 with side surrounds.
+    CHECK(positionsAre(fmt(4, 0x0107), {P::FrontLeft, P::FrontRight,
+                                        P::FrontCenter, P::BackCenter}));
+    CHECK(positionsAre(fmt(6, 0x060F), {P::FrontLeft, P::FrontRight, P::FrontCenter,
+                                        P::Lfe, P::SideLeft, P::SideRight}));
+
+    // A mask equal to the default order declares what 0 declares.
+    CHECK(positionsAre(fmt(6, 0x003F), {P::FrontLeft, P::FrontRight, P::FrontCenter,
+                                        P::Lfe, P::BackLeft, P::BackRight}));
+
+    // Ignored masks: four bits on three channels, and front-left-of-center
+    // (0x40), which the table cannot name.
+    CHECK(positionsAre(fmt(3, 0x0107), {P::FrontLeft, P::FrontRight, P::FrontCenter}));
+    CHECK(positionsAre(fmt(3, 0x0043), {P::FrontLeft, P::FrontRight, P::FrontCenter}));
+
+    // Nothing to declare.
+    CHECK(channelPositionsFor(fmt(0, 0)).empty());
+    CHECK(channelPositionsFor(fmt(9, 0)).empty());
+
+    // The default masks a decoder compares a source's mask against.
+    CHECK(defaultChannelMask(1) == 0);
+    CHECK(defaultChannelMask(2) == 0x0003);
+    CHECK(defaultChannelMask(4) == 0x0033);
+    CHECK(defaultChannelMask(6) == 0x003F);
+    CHECK(defaultChannelMask(7) == 0x070F);
+    CHECK(defaultChannelMask(8) == 0x063F);
+    CHECK(defaultChannelMask(9) == 0);
+}
+
 }  // namespace
 
 int main() {
+    std::printf("[conformance] channel positions\n");
+    checkChannelPositions();
+
     // The fixture table is positional on purpose: nine columns per row read as a
     // table, and designated initializers would triple the row width.
     // NOLINTBEGIN(modernize-use-designated-initializers)

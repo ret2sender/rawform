@@ -240,17 +240,20 @@ std::size_t computeCapacityFrames(std::uint32_t sampleRate,
 }
 
 // Pack an AudioFormat into one 64-bit word so the controlling thread can read a
-// consistent {rate, channels} pair from a single atomic, with no torn-read
-// window between two separate atomics. sampleRate occupies the upper bits,
-// channels the low 16.
+// consistent {rate, channels, layout} from a single atomic, with no torn-read
+// window between separate atomics. channelMask occupies the top 16 bits,
+// sampleRate the 32 below them, channels the low 16.
+static_assert(sizeof(AudioFormat) == 8, "packFormat fills 64 bits with 32 + 16 + 16");
 std::uint64_t packFormat(const AudioFormat& f) noexcept {
-    return (static_cast<std::uint64_t>(f.sampleRate) << 16) |
+    return (static_cast<std::uint64_t>(f.channelMask) << 48) |
+           (static_cast<std::uint64_t>(f.sampleRate) << 16) |
            static_cast<std::uint64_t>(f.channels);
 }
 AudioFormat unpackFormat(std::uint64_t bits) noexcept {
     AudioFormat f;
-    f.channels   = static_cast<std::uint16_t>(bits & 0xFFFFu);
-    f.sampleRate = static_cast<std::uint32_t>(bits >> 16);
+    f.channels    = static_cast<std::uint16_t>(bits & 0xFFFFu);
+    f.sampleRate  = static_cast<std::uint32_t>((bits >> 16) & 0xFFFFFFFFu);
+    f.channelMask = static_cast<std::uint16_t>(bits >> 48);
     return f;
 }
 
