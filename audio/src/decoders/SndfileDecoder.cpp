@@ -128,24 +128,24 @@ std::uint64_t speakerBit(int sfChannel) noexcept {
     }
 }
 
-// The speakers a file names, as AudioFormat::channelMask, when its header
-// carries a channel map: WAVE's channel mask (WAVEX, RF64) or a CAF or AIFF
-// channel layout chunk. 0 when it carries none, and for anything the table
-// cannot declare. The order libsndfile reports is the order sf_readf_float
-// delivers the channels in.
-std::uint16_t channelMaskOf(SNDFILE* snd, int channels) {
+// The speakers a file names, when its header carries a channel map: WAVE's
+// channel mask (WAVEX, RF64) or a CAF or AIFF channel layout chunk. The map
+// lists the channels in the order sf_readf_float delivers them, which a CAF or
+// AIFF layout need not keep ascending. No mask and no reorder when the file
+// carries no map, and for anything the table cannot declare.
+ChannelOrder channelOrderOf(SNDFILE* snd, int channels) {
     if (channels < 2 || channels > kMaxPositionedChannels) {
-        return 0;
+        return {};
     }
     std::array<int, kMaxPositionedChannels> map{};
     if (sf_command(snd, SFC_GET_CHANNEL_MAP_INFO, map.data(),
                    static_cast<int>(sizeof(int)) * channels) != SF_TRUE) {
-        return 0;
+        return {};
     }
     const auto count = static_cast<std::size_t>(channels);
     std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
     std::ranges::transform(std::span(map).first(count), speakers.begin(), speakerBit);
-    return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count)).mask;
+    return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count));
 }
 
 }  // namespace
@@ -158,6 +158,7 @@ std::uint16_t channelMaskOf(SNDFILE* snd, int channels) {
 struct SndfileDecoder::Impl {
     SNDFILE*      snd      = nullptr;
     int           channels = 0;      // cached for the read() interleave math
+    ChannelOrder  order{};           // the channel map's reorder, applied in read()
     AudioFormat   fmt{};
     SourceInfo    src{};
     std::uint64_t total    = 0;
@@ -230,10 +231,11 @@ std::unique_ptr<IDecoder> SndfileDecoder::open(const std::string& path,
     auto impl      = std::make_unique<Impl>();
     impl->snd      = snd;
     impl->channels = info.channels;
+    impl->order    = channelOrderOf(snd, info.channels);
     impl->fmt      = AudioFormat{
         .sampleRate  = static_cast<std::uint32_t>(info.samplerate),
         .channels    = static_cast<std::uint16_t>(info.channels),
-        .channelMask = channelMaskOf(snd, info.channels)};
+        .channelMask = impl->order.mask};
     impl->total    = info.frames > 0 ? static_cast<std::uint64_t>(info.frames) : 0;
     impl->seekable = info.seekable != 0;
 
@@ -275,6 +277,9 @@ std::string   SndfileDecoder::lastError()   const { return m_impl->lastError; }
 // library returns nothing more. For a regular file libsndfile satisfies the
 // request in a single call until the final partial block, but looping costs
 // nothing and makes the EOS semantics independent of libsndfile's chunking.
+// Each block then moves to ascending speaker order when the file's channel map
+// lists its channels in another order, so they arrive in the order format()'s
+// mask describes.
 std::size_t SndfileDecoder::read(float* dst, std::size_t frames) {
     if (frames == 0) {
         return 0;
@@ -293,6 +298,7 @@ std::size_t SndfileDecoder::read(float* dst, std::size_t frames) {
             }
             break;
         }
+        reorderChannels(dst + done * ch, static_cast<std::size_t>(got), m_impl->order);
         done += static_cast<std::size_t>(got);
     }
     return done;

@@ -67,6 +67,9 @@
 
 #include "ChannelPositions.h"
 #include "DecoderFactory.h"
+#if RAWFORM_HAVE_FFMPEG
+#include "decoders/FfmpegDecoder.h"
+#endif
 
 #include "rawform/audio/IDecoder.h"
 #include "rawform/audio/MetadataProbe.h"
@@ -85,6 +88,8 @@
 #include <FLAC/stream_encoder.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>  // IWYU pragma: keep (std::int*_t)
@@ -95,6 +100,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using rawform::audio::AudioFormat;
@@ -727,21 +733,38 @@ void checkChannelPositions() {
     CHECK(sourceChannelMask(0x0004, 1) == 0);
     CHECK(sourceChannelMask(0x073F, 9) == 0);
 
-    // The mask for a source that names a speaker per channel, in stream order:
-    // 4.0 in ascending order; then the default order, an unnamed speaker (FLC),
-    // a speaker with no bit, a repeated speaker, and 4.0 out of ascending order,
-    // which all keep the default order's positions.
-    const auto orderMask = [](std::initializer_list<std::uint64_t> speakers) {
+    // A source that names a speaker per channel, in stream order. 4.0 in
+    // ascending order needs no reorder. 4.0 as C L R Cs is moved: output FL
+    // takes source channel 1, FR 2, FC 0, BC 3. 5.1 as L C R Ls Rs LFE is moved
+    // to the default order, so it reports no mask. The default order itself, an
+    // unnamed speaker (FLC), a speaker with no bit and a repeated speaker get no
+    // mask, and none of them moves.
+    const auto orderOf = [](std::initializer_list<std::uint64_t> speakers) {
         return rawform::audio::channelOrderFor(
-                   std::span<const std::uint64_t>(speakers.begin(), speakers.size()))
-            .mask;
+            std::span<const std::uint64_t>(speakers.begin(), speakers.size()));
     };
-    CHECK(orderMask({0x001, 0x002, 0x004, 0x100}) == 0x0107);
-    CHECK(orderMask({0x001, 0x002, 0x010, 0x020}) == 0);
-    CHECK(orderMask({0x001, 0x002, 0x040}) == 0);
-    CHECK(orderMask({0x001, 0x002, 0x000}) == 0);
-    CHECK(orderMask({0x001, 0x001, 0x004}) == 0);
-    CHECK(orderMask({0x004, 0x001, 0x002, 0x100}) == 0);
+    const auto ascending = orderOf({0x001, 0x002, 0x004, 0x100});
+    CHECK(ascending.mask == 0x0107 && !ascending.reorder);
+    const auto c40b = orderOf({0x004, 0x001, 0x002, 0x100});
+    CHECK(c40b.mask == 0x0107 && c40b.reorder);
+    CHECK(c40b.from[0] == 1 && c40b.from[1] == 2 && c40b.from[2] == 0 &&
+          c40b.from[3] == 3);
+    const auto c51c = orderOf({0x001, 0x004, 0x002, 0x010, 0x020, 0x008});
+    CHECK(c51c.mask == 0 && c51c.reorder);
+    const auto defaultQuad = orderOf({0x001, 0x002, 0x010, 0x020});
+    CHECK(defaultQuad.mask == 0 && !defaultQuad.reorder);
+    const auto flc = orderOf({0x040, 0x001, 0x002});
+    CHECK(flc.mask == 0 && !flc.reorder);
+    const auto noBit = orderOf({0x004, 0x001, 0x000});
+    CHECK(noBit.mask == 0 && !noBit.reorder);
+    const auto repeated = orderOf({0x004, 0x001, 0x001});
+    CHECK(repeated.mask == 0 && !repeated.reorder);
+
+    // The reorder moves samples within each frame and nothing else.
+    std::array<float, 8> frames = {0.7f, 0.3f, 0.5f, 0.13f, -0.7f, -0.3f, -0.5f, -0.13f};
+    rawform::audio::reorderChannels(frames.data(), 2, c40b);
+    CHECK((frames == std::array<float, 8>{0.3f, 0.5f, 0.7f, 0.13f, -0.3f, -0.5f, -0.7f,
+                                          -0.13f}));
 }
 
 // ---------------------------------------------------------------------------
@@ -845,13 +868,13 @@ auto positionTones(std::initializer_list<ChannelPosition> positions) {
     };
 }
 
-// The layout check proper, on a fixture already on disk, which it removes. A
-// mask, when given, is also asserted, for the rows whose point is the mask the
-// decoder reports.
-void checkDecodedLayout(const char* name, const std::string& path,
-                        DecoderKind decoder, std::optional<std::uint16_t> mask,
-                        std::initializer_list<ChannelPosition> expected) {
-    std::unique_ptr<IDecoder> dec = openLayoutFixture(path);
+// The layout check proper, on a decoder opened on a fixture, which it removes.
+// A mask, when given, is also asserted, for the rows whose point is the mask
+// the decoder reports.
+void checkLayoutOf(const char* name, const std::string& path,
+                   std::unique_ptr<IDecoder> dec, DecoderKind decoder,
+                   std::optional<std::uint16_t>           mask,
+                   std::initializer_list<ChannelPosition> expected) {
     CHECK(dec != nullptr);
     if (!dec) {
         std::remove(path.c_str());
@@ -904,6 +927,13 @@ void checkDecodedLayout(const char* name, const std::string& path,
     std::remove(path.c_str());
 }
 
+// The same check on a fixture opened through the factory.
+void checkDecodedLayout(const char* name, const std::string& path,
+                        DecoderKind decoder, std::optional<std::uint16_t> mask,
+                        std::initializer_list<ChannelPosition> expected) {
+    checkLayoutOf(name, path, openLayoutFixture(path), decoder, mask, expected);
+}
+
 // A 16-bit 48 kHz FLAC layout fixture, half a second of one tone per channel,
 // for the positions listed in order, carrying comment ("NAME=value") unless it
 // is null. The decoder must report mask and declare the listed positions, each
@@ -939,17 +969,15 @@ std::vector<int> channelMapOf(const std::string& path) {
 }
 
 // A 48 kHz float libsndfile layout fixture in the given format, half a second
-// of one tone per channel for the positions listed, carrying map unless it is
-// empty. libsndfile must read back the map it wrote, since that is all the
-// decoder learns the speakers from; then the decoder must report mask and
-// declare the listed positions.
-void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
-                        std::initializer_list<int> map, std::uint16_t mask,
-                        std::initializer_list<ChannelPosition> positions) {
-    const std::string path    = std::string("rawform_layout_") + name + ext;
-    const bool        written = encodeSndfile(
-        path, static_cast<int>(positions.size()), kLayoutRate, kLayoutFrames, sfFormat,
-        std::span<const int>(map.begin(), map.size()), positionTones(positions));
+// of one tone per channel for the source positions, in stream order, carrying
+// map unless it is empty. libsndfile must read back the map it wrote, since that
+// is all a decoder learns the speakers from.
+void writeSndfileLayout(const char* name, const std::string& path, int sfFormat,
+                        std::initializer_list<int>             map,
+                        std::initializer_list<ChannelPosition> source) {
+    const bool written = encodeSndfile(
+        path, static_cast<int>(source.size()), kLayoutRate, kLayoutFrames, sfFormat,
+        std::span<const int>(map.begin(), map.size()), positionTones(source));
     if (!written) {
         std::fprintf(stderr, "  %s: libsndfile did not write the file with its map\n",
                      name);
@@ -965,10 +993,92 @@ void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
         std::fprintf(stderr, "\n");
     }
     CHECK(std::ranges::equal(back, map));
-    checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, positions);
+}
+
+// A libsndfile layout fixture (writeSndfileLayout) through the factory. The
+// decoder must report mask and declare the declared positions, each decoded
+// channel holding its own tone: the same list as the source when the map is
+// in ascending order, the source's speakers in ascending order when it is not.
+void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
+                        std::initializer_list<int> map, std::uint16_t mask,
+                        std::initializer_list<ChannelPosition> source,
+                        std::initializer_list<ChannelPosition> declared) {
+    const std::string path = std::string("rawform_layout_") + name + ext;
+    writeSndfileLayout(name, path, sfFormat, map, source);
+    checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, declared);
+}
+
+// A float ramp in a CAF whose map is out of ascending order (C L R Cs). The
+// decoder must deliver every sample bit for bit, only moved to its speaker's
+// place: output channel i holds source channel from[i].
+void checkReorderExact() {
+    const std::string                      path   = "rawform_reorder_exact.caf";
+    constexpr int                          ch     = 4;
+    constexpr std::uint64_t                frames = 5000;
+    constexpr std::array<std::uint64_t, 4> from   = {1, 2, 0, 3};
+    const std::initializer_list<int>       map    = {
+        SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT,
+        SF_CHANNEL_MAP_REAR_CENTER};
+    CHECK(encodeSndfile(path, ch, kLayoutRate, frames, SF_FORMAT_CAF | SF_FORMAT_FLOAT,
+                        std::span<const int>(map.begin(), map.size()),
+                        [](std::uint64_t frame, int c) {
+                            return pat(frame * ch + static_cast<std::uint64_t>(c));
+                        }));
+    std::unique_ptr<IDecoder> dec = openLayoutFixture(path);
+    CHECK(dec != nullptr);
+    if (!dec) {
+        std::remove(path.c_str());
+        return;
+    }
+    CHECK(dec->format().channelMask == 0x0107);
+    std::vector<float> all;
+    std::vector<float> buf(1024 * ch);
+    for (;;) {
+        const std::size_t got = dec->read(buf.data(), 1024);
+        if (got == 0) {
+            break;
+        }
+        all.insert(all.end(), buf.begin(),
+                   buf.begin() + static_cast<std::ptrdiff_t>(got * ch));
+    }
+    CHECK(all.size() == frames * ch);
+    std::size_t moved = 0;
+    for (std::uint64_t f = 0; f < frames && (f + 1) * ch <= all.size(); ++f) {
+        for (std::uint64_t i = 0; i < ch; ++i) {
+            const float want = pat(f * ch + from[i]);
+            if (std::bit_cast<std::uint32_t>(all[f * ch + i]) !=
+                std::bit_cast<std::uint32_t>(want)) {
+                ++moved;
+            }
+        }
+    }
+    if (moved != 0) {
+        std::fprintf(stderr, "  reorder_exact: %zu samples not where expected\n", moved);
+    }
+    CHECK(moved == 0);
+    dec.reset();
+    std::remove(path.c_str());
 }
 
 #if RAWFORM_HAVE_FFMPEG
+// The out-of-order CAF (C L R Cs) through FFmpeg, which reads such a layout as
+// a custom order. Opened directly: the factory hands CAF to libsndfile.
+void checkFfmpegCustomOrder() {
+    using P                = ChannelPosition;
+    const std::string path = "rawform_layout_ffmpeg_custom.caf";
+    writeSndfileLayout("ffmpeg_custom", path, SF_FORMAT_CAF | SF_FORMAT_FLOAT,
+                       {SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT,
+                        SF_CHANNEL_MAP_REAR_CENTER},
+                       {P::FrontCenter, P::FrontLeft, P::FrontRight, P::BackCenter});
+    std::string               err;
+    std::unique_ptr<IDecoder> dec = rawform::audio::FfmpegDecoder::open(path, &err);
+    if (!dec) {
+        std::fprintf(stderr, "open failed for %s: %s\n", path.c_str(), err.c_str());
+    }
+    checkLayoutOf("ffmpeg_custom", path, std::move(dec), DecoderKind::Ffmpeg, 0x0107,
+                  {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
+}
+
 void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
                  std::initializer_list<ChannelPosition> expected) {
     const std::string path = std::string("rawform_layout_") + name + ".ac3";
@@ -1060,17 +1170,41 @@ int main() {
             SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT, SF_CHANNEL_MAP_REAR_LEFT,
             SF_CHANNEL_MAP_REAR_RIGHT};
         checkSndfileLayout("wavex_40", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT, map40,
-                           0x0107, p40);
+                           0x0107, p40, p40);
         checkSndfileLayout("rf64_40", ".rf64", SF_FORMAT_RF64 | SF_FORMAT_FLOAT, map40,
-                           0x0107, p40);
+                           0x0107, p40, p40);
         checkSndfileLayout("caf_40", ".caf", SF_FORMAT_CAF | SF_FORMAT_FLOAT, map40,
-                           0x0107, p40);
+                           0x0107, p40, p40);
         checkSndfileLayout("aiff_40", ".aiff", SF_FORMAT_AIFF | SF_FORMAT_FLOAT, map40,
-                           0x0107, p40);
+                           0x0107, p40, p40);
         checkSndfileLayout("wavex_quad_map", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT,
-                           mapQuad, 0, quad);
+                           mapQuad, 0, quad, quad);
         checkSndfileLayout("wav_no_map", ".wav", SF_FORMAT_WAV | SF_FORMAT_FLOAT, {}, 0,
-                           quad);
+                           quad, quad);
+
+        // Layouts whose channels are not in ascending speaker order, from the
+        // layout table CAF and AIFF share: MPEG 4.0 B (C L R Cs) is delivered as
+        // 4.0, MPEG 5.1 C (L C R Ls Rs LFE) as the default 5.1, so with no mask.
+        // Then the exact check that the reorder only moves samples.
+        const std::initializer_list<int> map40b = {
+            SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT,
+            SF_CHANNEL_MAP_REAR_CENTER};
+        const std::initializer_list<P> src40b = {P::FrontCenter, P::FrontLeft,
+                                                 P::FrontRight, P::BackCenter};
+        checkSndfileLayout("caf_40b", ".caf", SF_FORMAT_CAF | SF_FORMAT_FLOAT, map40b,
+                           0x0107, src40b, p40);
+        checkSndfileLayout("aiff_40b", ".aiff", SF_FORMAT_AIFF | SF_FORMAT_FLOAT, map40b,
+                           0x0107, src40b, p40);
+        checkSndfileLayout(
+            "caf_51c", ".caf", SF_FORMAT_CAF | SF_FORMAT_FLOAT,
+            {SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_RIGHT,
+             SF_CHANNEL_MAP_REAR_LEFT, SF_CHANNEL_MAP_REAR_RIGHT, SF_CHANNEL_MAP_LFE},
+            0,
+            {P::FrontLeft, P::FrontCenter, P::FrontRight, P::BackLeft, P::BackRight,
+             P::Lfe},
+            {P::FrontLeft, P::FrontRight, P::FrontCenter, P::Lfe, P::BackLeft,
+             P::BackRight});
+        checkReorderExact();
     }
 
 #if RAWFORM_HAVE_FFMPEG
@@ -1155,6 +1289,8 @@ int main() {
         checkLayoutControl("vorbis3", 3, {P::FrontLeft, P::FrontRight, P::FrontCenter});
         checkLayoutControl("vorbis4", 4,
                            {P::FrontLeft, P::FrontRight, P::BackLeft, P::BackRight});
+        // A custom order, delivered in ascending speaker order.
+        checkFfmpegCustomOrder();
     }
 #else
     std::printf("[conformance] aac/ac3/dts/vorbis/opus/wma/alac/layouts SKIPPED: built "

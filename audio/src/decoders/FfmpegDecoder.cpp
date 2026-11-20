@@ -50,10 +50,12 @@
 //      for sndfile, FLAC, and mpg123. With equal in/out rates and a packed-float
 //      target, swresample runs one-to-one with zero internal delay, which keeps
 //      the frame-count math exact and means there is no resampler tail to drain.
-//      The channels keep the source's order, and the source's speakers travel
-//      in AudioFormat::channelMask (channelMaskFor below), so a sink declares
-//      each channel where the source put it rather than where the default order
-//      for the count would.
+//      The source's speakers travel in AudioFormat::channelMask (sourceOrderOf
+//      below), so a sink declares each channel where the source put it rather
+//      than where the default order for the count would. The channels keep the
+//      source's order, except that a custom order is moved to ascending speaker
+//      order once converted: a copy of each sample to its speaker's place,
+//      never a remix.
 //
 // Seek mirrors FlacDecoder's shape: a raw seek lands at or before the target, we
 // flush the decoder, then decode-and-discard forward to the exact target frame
@@ -94,11 +96,13 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -168,23 +172,38 @@ static_assert(AV_CH_BACK_CENTER == channelBit(ChannelPosition::BackCenter));
 static_assert(AV_CH_SIDE_LEFT == channelBit(ChannelPosition::SideLeft));
 static_assert(AV_CH_SIDE_RIGHT == channelBit(ChannelPosition::SideRight));
 
-// The source's speakers, for AudioFormat::channelMask (ChannelPositions.h). In
-// FFmpeg's native order the channels are interleaved in ascending bit order,
-// the order a mask describes, and the resampler keeps that order, so the
-// layout's mask goes to sourceChannelMask, the rule every decoder shares: 0
-// when the speakers are the default order for the channel count (so such a
-// track still joins a native decoder's stream gaplessly), and 0 for more
-// channels than the table covers or a speaker it cannot name. Any other order
-// gets 0 as well: an unspecified, custom or ambisonic one. Those keep the
-// default order's positions.
-std::uint16_t channelMaskFor(const AVChannelLayout& layout) {
+// The source's speakers, for AudioFormat::channelMask, and the reorder that
+// brings its channels to ascending bit order, the order a mask describes
+// (ChannelPositions.h). In FFmpeg's native order the channels already come in
+// ascending bit order and the resampler keeps it, so the layout's mask goes to
+// sourceChannelMask, the rule every decoder shares: 0 when the speakers are the
+// default order for the channel count (so such a track still joins a native
+// decoder's stream gaplessly), and 0 for more channels than the table covers or
+// a speaker it cannot name. A custom order names one speaker per channel in any
+// order, as a CAF or MOV channel layout can; channelOrderFor takes the same
+// rule and works out the reorder. An unspecified or ambisonic order gets no
+// mask and no reorder, and keeps the default order's positions.
+ChannelOrder sourceOrderOf(const AVChannelLayout& layout) {
     // The range test comes before the narrowing cast, not after it.
-    if (layout.order != AV_CHANNEL_ORDER_NATIVE || layout.nb_channels < 0 ||
-        layout.nb_channels > kMaxPositionedChannels) {
-        return 0;
+    if (layout.nb_channels < 0 || layout.nb_channels > kMaxPositionedChannels) {
+        return {};
     }
-    return sourceChannelMask(layout.u.mask,
-                             static_cast<std::uint16_t>(layout.nb_channels));
+    const auto count = static_cast<std::size_t>(layout.nb_channels);
+    if (layout.order == AV_CHANNEL_ORDER_NATIVE) {
+        return ChannelOrder{
+            .mask = sourceChannelMask(layout.u.mask, static_cast<std::uint16_t>(count))};
+    }
+    if (layout.order == AV_CHANNEL_ORDER_CUSTOM && layout.u.map != nullptr) {
+        // A channel id below 64 is its native bit's index; anything else
+        // (unused, unknown, ambisonic) has no bit and leaves the layout unnamed.
+        std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
+        for (std::size_t c = 0; c < count; ++c) {
+            const int id = layout.u.map[c].id;
+            speakers[c] = id >= 0 && id < 64 ? std::uint64_t{1} << id : 0;
+        }
+        return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count));
+    }
+    return {};
 }
 
 // Container bit depth for the status line, following the engine rule: a real
@@ -248,6 +267,7 @@ struct FfmpegDecoder::Impl {
     SourceInfo    src{};
     std::uint64_t total    = 0;     // frames, 0 == unknown (or estimate, lossy)
     unsigned      channels = 0;     // cached for the interleave math
+    ChannelOrder  order{};          // a custom order's reorder, applied in staging
     bool          seekable_ = false;
 
     // ---- decode/pull state --------------------------------------------------
@@ -336,8 +356,9 @@ struct FfmpegDecoder::Impl {
     // float32 target. A frame that reports an unspecified channel order (some
     // raw AAC streams do) gets a default positional layout for its channel count,
     // which preserves the count without inventing a remix. Either way the
-    // channels leave in the order they arrived, the order open() described in
-    // audioFormat.channelMask.
+    // channels leave the resampler in the order they arrived; appendCurrentFrame
+    // then moves a custom order's channels to the ascending order open()
+    // described in audioFormat.channelMask.
     bool configureSwr() {
         AVChannelLayout inLayout;
         if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC ||
@@ -518,7 +539,9 @@ struct FfmpegDecoder::Impl {
     // a frame (a mid-stream parameter change, a dependent substream) is dropped
     // and counted rather than written past the staging buffer. swr runs
     // one-to-one here (equal in/out rate, packed-float out), so the produced
-    // count equals nb_samples; we trim to the actual count defensively.
+    // count equals nb_samples; we trim to the actual count defensively. The
+    // staged frames of a custom-order source then move to ascending speaker
+    // order, the one open() declared.
     bool appendCurrentFrame() {
         const int inSamples = frame->nb_samples;
         if (inSamples <= 0) {
@@ -544,6 +567,7 @@ struct FfmpegDecoder::Impl {
             return false;
         }
         staging.resize(base + static_cast<std::size_t>(got) * channels);
+        reorderChannels(staging.data() + base, static_cast<std::size_t>(got), order);
         return true;
     }
 };
@@ -635,10 +659,11 @@ std::unique_ptr<IDecoder> FfmpegDecoder::open(const std::string& path,
         }
         return nullptr;
     }
+    impl->order       = sourceOrderOf(impl->codecCtx->ch_layout);
     impl->audioFormat = AudioFormat{
         .sampleRate  = rate,
         .channels    = static_cast<std::uint16_t>(channels),
-        .channelMask = channelMaskFor(impl->codecCtx->ch_layout)};
+        .channelMask = impl->order.mask};
     impl->channels = channels;
 
     // ---- length in frames --------------------------------------------------

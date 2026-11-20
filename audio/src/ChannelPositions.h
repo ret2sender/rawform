@@ -31,7 +31,11 @@
 // from a WAVE, CAF or AIFF header) reports them when they differ from that
 // order, through the one rule in sourceChannelMask below. So a 4.0 source (FL FR
 // FC BC) is not declared as quad (FL FR BL BR), nor AC3's side surrounds (SL SR)
-// as back surrounds (BL BR). The layout rides in AudioFormat rather
+// as back surrounds (BL BR). A source whose channels come in some other order
+// than ascending bit order (a CAF or AIFF layout such as C L R Cs, an FFmpeg
+// custom order) is moved to it as it is decoded (channelOrderFor,
+// reorderChannels): the samples only change places, so a mask always describes
+// the order the channels arrive in. The layout rides in AudioFormat rather
 // than beside it because every path that must agree on it already carries one:
 // the gapless stitch gate, the hold gate, the sink's open and reconfigure.
 //
@@ -49,6 +53,7 @@
 
 #include "rawform/audio/Types.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -209,30 +214,74 @@ sourceChannelMask(std::uint64_t speakers, std::uint16_t channels) noexcept {
 struct ChannelOrder {
     /// For AudioFormat::channelMask, by sourceChannelMask's rule.
     std::uint16_t mask = 0;
+    /// Whether the channels must move to reach ascending bit order.
+    bool reorder = false;
+    /// The stream's channel count, and the source channel each output channel
+    /// takes: output channel i is source channel from[i]. Read only when
+    /// reorder is set.
+    std::uint16_t                                     channels = 0;
+    std::array<std::uint8_t, kMaxPositionedChannels> from{};
 };
 
 /// The order for a source that names one speaker per channel, in stream order:
 /// each entry is the speaker's WAVEFORMATEXTENSIBLE bit, 0 for a speaker that
-/// has none. The mask is the set of those bits by sourceChannelMask's rule when
-/// every entry is a single bit and the channels already come in ascending bit
-/// order, the order a mask describes (which also rules out a repeated speaker).
-/// Any other list gets mask 0 and keeps the default order's positions.
+/// has none. When every entry is a single named bit and none repeats, the mask
+/// is their set by sourceChannelMask's rule, and channels that do not already
+/// come in ascending bit order (the order a mask describes) are to be moved
+/// there; a set equal to the count's default order then reports mask 0 like any
+/// other. Any other list (a speaker the table cannot name, a speaker with no
+/// bit, a repeated one) gets mask 0 and keeps its source order, so it keeps the
+/// default order's positions.
 [[nodiscard]] constexpr ChannelOrder
 channelOrderFor(std::span<const std::uint64_t> speakers) noexcept {
-    if (speakers.size() > kMaxPositionedChannels) {
+    const std::size_t count = speakers.size();
+    if (count < 2 || count > kMaxPositionedChannels) {
         return {};
     }
-    std::uint64_t set      = 0;
-    std::uint64_t previous = 0;
+    std::uint64_t set = 0;
     for (const std::uint64_t bit : speakers) {
-        if (std::popcount(bit) != 1 || bit <= previous) {
+        if (std::popcount(bit) != 1 || (set & bit) != 0) {
             return {};
         }
         set |= bit;
-        previous = bit;
     }
-    return ChannelOrder{
-        .mask = sourceChannelMask(set, static_cast<std::uint16_t>(speakers.size()))};
+    if ((set & ~std::uint64_t{kNamedChannelMask}) != 0) {
+        return {};
+    }
+    ChannelOrder order;
+    order.mask     = sourceChannelMask(set, static_cast<std::uint16_t>(count));
+    order.channels = static_cast<std::uint16_t>(count);
+    std::size_t out = 0;
+    for (const ChannelPosition p : detail::kMaskOrder) {
+        const auto it = std::ranges::find(speakers, std::uint64_t{channelBit(p)});
+        if (it != speakers.end()) {
+            const auto source = static_cast<std::size_t>(it - speakers.begin());
+            order.from[out]   = static_cast<std::uint8_t>(source);
+            order.reorder     = order.reorder || source != out;
+            ++out;
+        }
+    }
+    return order;
+}
+
+/// Moves each of frames interleaved frames to ascending speaker order, in place,
+/// as order says; nothing when order needs no reorder. It only copies, so every
+/// sample keeps its exact value, and it allocates nothing, so a decoder can run
+/// it on every block it delivers.
+constexpr void reorderChannels(float* interleaved, std::size_t frames,
+                               const ChannelOrder& order) noexcept {
+    if (!order.reorder) {
+        return;
+    }
+    const std::size_t                         ch = order.channels;
+    std::array<float, kMaxPositionedChannels> frame{};
+    for (std::size_t f = 0; f < frames; ++f) {
+        float* p = interleaved + f * ch;
+        std::ranges::copy_n(p, static_cast<std::ptrdiff_t>(ch), frame.begin());
+        for (std::size_t i = 0; i < ch; ++i) {
+            p[i] = frame[order.from[i]];
+        }
+    }
 }
 
 /// The positions of a stream's channels, in order, for 1 to
