@@ -2,10 +2,11 @@
 #
 # rawform - insert per-file license headers.
 #
-# Walks audio/ and ui/, prepending the GPL-3.0-or-later notice stanza to every
-# source file that does not already carry one. Comment style follows the file
-# type: /* */ for C++, Objective-C++ and QML; # for CMake and shell. Binary
-# assets, fonts, license texts, IDE state and build output are never touched.
+# Walks audio/, ui/ and scripts/, prepending the GPL-3.0-or-later notice
+# stanza to every source file that does not already carry one. Comment style
+# follows the file type: /* */ for C++, Objective-C++ and QML; # for CMake
+# and shell. Binary assets, fonts, license texts, IDE state and build output
+# are never touched.
 #
 # The script is idempotent: a file whose first lines already contain an
 # SPDX-License-Identifier is skipped, so re-running it after adding new files

@@ -46,8 +46,7 @@
 #
 # Flathub readiness, out of this manifest's scope and listed here so the
 # submission starts from one place:
-#   - pin each git source to a commit hash and swap the mpg123 checksum to
-#     sha256;
+#   - pin each git source to a commit hash;
 #   - a real install(TARGETS) rule in ui/CMakeLists.txt in place of the
 #     hand-placed artifacts in the rawform module below;
 #   - the app id: com.rawform.app needs control of rawform.com under
@@ -64,10 +63,10 @@
 #     not preserve bit-perfect.
 #   - Config files (every store under userConfigDir(): settings.yaml,
 #     playback.yaml, window.yaml, spectrum.yaml, rename_patterns.yaml,
-#     playlist_custom_columns.yaml, columns.rwftp, live_playlist/) resolve
-#     through XDG under the sandbox to ~/.var/app/com.rawform.app/config/...
-#     automatically; no code change. rate_ledger.yaml is CoreAudio-only and
-#     never exists on Linux.
+#     search_filters.yaml, playlist_custom_columns.yaml, columns.rwftp,
+#     queue_columns.rwftp, live_playlist/) resolve through XDG under the
+#     sandbox to ~/.var/app/com.rawform.app/config/... automatically; no code
+#     change. rate_ledger.yaml is CoreAudio-only and never exists on Linux.
 #   - Music access is host, read-write (the reasons are on the
 #     --filesystem line below): a player that persists arbitrary library
 #     paths needs real read grants beyond xdg-music, and in-place tag and

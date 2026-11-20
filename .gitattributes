@@ -1,6 +1,6 @@
 # Normalize line endings in the repository to LF; check out as-is on every
-# platform. Added before the first commit so history never records a
-# platform's CRLF drift as a whole-file rewrite.
+# platform, so history never records a platform's CRLF drift as a
+# whole-file rewrite.
 * text=auto
 
 # Text formats git might otherwise misclassify

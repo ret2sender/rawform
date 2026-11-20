@@ -47,8 +47,8 @@
 #   scripts/macdeploy.sh [path/to/rawform.app] [--dmg]
 #
 # Environment:
-#   QT_PREFIX           Qt installation prefix (default: `brew --prefix qt`,
-#                       falling back to the newest ~/Qt/6.x.x/macos)
+#   QT_PREFIX           Qt installation prefix (default: macdeployqt on PATH,
+#                       then `brew --prefix qt`, then the newest ~/Qt/6.x.x/macos)
 #   QMLDIR              QML source directory to scan (default: ui/Sources/qml)
 #   APPSTORE_COMPLIANT  Pass -appstore-compliant to macdeployqt, skipping
 #                       plugins that use private API (default: 1; set 0 to
@@ -114,9 +114,9 @@ fi
 # ---------------------------------------------------------------------------
 # Locate macdeployqt
 #
-# Same resolution order as the Makefile's Qt discovery: explicit QT_PREFIX,
-# then PATH, then Homebrew, then the Qt online installer layout. A candidate
-# only counts if the binary is actually executable there.
+# The Makefile's Qt discovery order with a PATH lookup added: explicit
+# QT_PREFIX, then PATH, then Homebrew, then the Qt online installer layout. A
+# candidate only counts if the binary is actually executable there.
 # ---------------------------------------------------------------------------
 MACDEPLOYQT=""
 if [[ -n "${QT_PREFIX:-}" && -x "$QT_PREFIX/bin/macdeployqt" ]]; then

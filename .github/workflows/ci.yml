@@ -23,13 +23,13 @@
 #     version the Flatpak ships.
 #   - Two build trees per platform, matching the Makefile's own split: the
 #     app tree carries the UI test binaries (-DRAWFORM_BUILD_TESTS=ON;
-#     Qt-Core/Qml-only console apps, no display server needed), while the
-#     nine engine tests need a STANDALONE audio/ build. ui/ pulls the engine
+#     console binaries, no display server needed), while the
+#     ten engine tests need a STANDALONE audio/ build. ui/ pulls the engine
 #     in with EXCLUDE_FROM_ALL, so the engine's test targets are configured
 #     but never built by the app's `all` target; the app-tree ctest is
 #     therefore scoped to the UI tests by their `ui` label (ui/CMakeLists.txt
 #     sets it on every UI test, so a new test is picked up here without a
-#     workflow edit), and the engine tree runs the other nine (this is
+#     workflow edit), and the engine tree runs the other ten (this is
 #     exactly what `make test` does locally).
 #   - CMake: ui/ requires 3.28 and audio/ 3.20; the Fedora container's own
 #     cmake satisfies both trees, so no job downloads a CMake.
