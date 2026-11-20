@@ -25,12 +25,13 @@
 // AudioFormat::channelMask: a set of WAVEFORMATEXTENSIBLE speaker bits, with the
 // channels interleaved in ascending bit order. A mask of 0 means the default
 // order for the channel count, the table below: for 1 to 8 channels FLAC's
-// channel assignment and WAVE's default order agree. The FFmpeg and FLAC
-// decoders report the speakers their source names (FFmpeg's channel layout, a
-// FLAC file's WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment) when they differ from
-// that order, through the one rule in sourceChannelMask below. So a 4.0 source
-// (FL FR FC BC) is not declared as quad (FL FR BL BR), nor AC3's side surrounds
-// (SL SR) as back surrounds (BL BR). The layout rides in AudioFormat rather
+// channel assignment and WAVE's default order agree. A decoder whose source
+// names its speakers (FFmpeg's channel layout, a FLAC file's
+// WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment, the channel map libsndfile reads
+// from a WAVE, CAF or AIFF header) reports them when they differ from that
+// order, through the one rule in sourceChannelMask below. So a 4.0 source (FL FR
+// FC BC) is not declared as quad (FL FR BL BR), nor AC3's side surrounds (SL SR)
+// as back surrounds (BL BR). The layout rides in AudioFormat rather
 // than beside it because every path that must agree on it already carries one:
 // the gapless stitch gate, the hold gate, the sink's open and reconfigure.
 //
@@ -52,6 +53,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace rawform::audio {
 
@@ -201,6 +203,36 @@ sourceChannelMask(std::uint64_t speakers, std::uint16_t channels) noexcept {
     }
     const auto mask = static_cast<std::uint16_t>(speakers);
     return mask == defaultChannelMask(channels) ? 0 : mask;
+}
+
+/// What a decoder does with a source that names a speaker for each channel.
+struct ChannelOrder {
+    /// For AudioFormat::channelMask, by sourceChannelMask's rule.
+    std::uint16_t mask = 0;
+};
+
+/// The order for a source that names one speaker per channel, in stream order:
+/// each entry is the speaker's WAVEFORMATEXTENSIBLE bit, 0 for a speaker that
+/// has none. The mask is the set of those bits by sourceChannelMask's rule when
+/// every entry is a single bit and the channels already come in ascending bit
+/// order, the order a mask describes (which also rules out a repeated speaker).
+/// Any other list gets mask 0 and keeps the default order's positions.
+[[nodiscard]] constexpr ChannelOrder
+channelOrderFor(std::span<const std::uint64_t> speakers) noexcept {
+    if (speakers.size() > kMaxPositionedChannels) {
+        return {};
+    }
+    std::uint64_t set      = 0;
+    std::uint64_t previous = 0;
+    for (const std::uint64_t bit : speakers) {
+        if (std::popcount(bit) != 1 || bit <= previous) {
+            return {};
+        }
+        set |= bit;
+        previous = bit;
+    }
+    return ChannelOrder{
+        .mask = sourceChannelMask(set, static_cast<std::uint16_t>(speakers.size()))};
 }
 
 /// The positions of a stream's channels, in order, for 1 to

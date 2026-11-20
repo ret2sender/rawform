@@ -93,6 +93,7 @@
 #include <memory>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -143,16 +144,15 @@ constexpr std::uint64_t kFnvOffset = 0xcbf29ce484222325ull;
 // ---------------------------------------------------------------------------
 // Fixture writers.
 
-// Float32 WAV via libsndfile, carrying the ramp. The float subtype keeps the
-// round trip exact (SndfileDecoder reads it back with SFC_SET_NORM_FLOAT), so the
-// WAV fixture is the strictest possible case.
-// Writes a known float ramp through libsndfile in the requested major+subtype
-// format. WAV/FLOAT yields a lossless fixture (strict tier); the Ogg subtypes
-// (Vorbis, Opus) yield lossy fixtures whose exact samples do not survive, so they
-// are checked structurally. libsndfile picks the format from SF_INFO, not the
-// path extension, so the caller's file name only needs a plausible suffix.
-bool writeSndfileFloat(const std::string& path, int channels, int rate,
-                       std::uint64_t frames, int sfFormat) {
+// A float file via libsndfile in the requested major+subtype format. libsndfile
+// picks the format from SF_INFO, not the path extension, so the caller's file
+// name only needs a plausible suffix. sampleAt(frame, channel) gives each
+// sample; a non-empty map is handed to SFC_SET_CHANNEL_MAP_INFO before any
+// audio, and a refusal fails the write.
+template <typename SampleAt>
+bool encodeSndfile(const std::string& path, int channels, int rate,
+                   std::uint64_t frames, int sfFormat, std::span<const int> map,
+                   SampleAt sampleAt) {
     SF_INFO info;
     info.frames     = 0;
     info.samplerate = rate;
@@ -165,6 +165,14 @@ bool writeSndfileFloat(const std::string& path, int channels, int rate,
     if (sf == nullptr) {
         return false;
     }
+    if (!map.empty()) {
+        std::vector<int> copy(map.begin(), map.end());
+        if (sf_command(sf, SFC_SET_CHANNEL_MAP_INFO, copy.data(),
+                       static_cast<int>(copy.size() * sizeof(int))) != SF_TRUE) {
+            sf_close(sf);
+            return false;
+        }
+    }
     constexpr sf_count_t block = 1024;
     std::vector<float>   buf(static_cast<std::size_t>(block) * channels);
     std::uint64_t        written = 0;
@@ -176,7 +184,7 @@ bool writeSndfileFloat(const std::string& path, int channels, int rate,
         for (sf_count_t f = 0; f < n; ++f) {
             for (int c = 0; c < channels; ++c) {
                 buf[static_cast<std::size_t>(f) * channels + c] =
-                    pat((written + static_cast<std::uint64_t>(f)) * channels + c);
+                    sampleAt(written + static_cast<std::uint64_t>(f), c);
             }
         }
         if (sf_writef_float(sf, buf.data(), n) != n) {
@@ -187,6 +195,20 @@ bool writeSndfileFloat(const std::string& path, int channels, int rate,
     }
     sf_close(sf);
     return good;
+}
+
+// Float32 via libsndfile, carrying the ramp. WAV/FLOAT keeps the round trip
+// exact (SndfileDecoder reads it back with SFC_SET_NORM_FLOAT), so the WAV
+// fixture is the strictest possible case (strict tier); the Ogg subtypes
+// (Vorbis, Opus) yield lossy fixtures whose exact samples do not survive, so
+// they are checked structurally.
+bool writeSndfileFloat(const std::string& path, int channels, int rate,
+                       std::uint64_t frames, int sfFormat) {
+    return encodeSndfile(path, channels, rate, frames, sfFormat, {},
+                         [channels](std::uint64_t frame, int c) {
+                             return pat(frame * static_cast<std::uint64_t>(channels) +
+                                        static_cast<std::uint64_t>(c));
+                         });
 }
 
 // Quantize the [-1, 1) ramp to a signed integer of the given depth. Lossless for
@@ -704,6 +726,22 @@ void checkChannelPositions() {
     CHECK(sourceChannelMask(0x0107, 3) == 0);
     CHECK(sourceChannelMask(0x0004, 1) == 0);
     CHECK(sourceChannelMask(0x073F, 9) == 0);
+
+    // The mask for a source that names a speaker per channel, in stream order:
+    // 4.0 in ascending order; then the default order, an unnamed speaker (FLC),
+    // a speaker with no bit, a repeated speaker, and 4.0 out of ascending order,
+    // which all keep the default order's positions.
+    const auto orderMask = [](std::initializer_list<std::uint64_t> speakers) {
+        return rawform::audio::channelOrderFor(
+                   std::span<const std::uint64_t>(speakers.begin(), speakers.size()))
+            .mask;
+    };
+    CHECK(orderMask({0x001, 0x002, 0x004, 0x100}) == 0x0107);
+    CHECK(orderMask({0x001, 0x002, 0x010, 0x020}) == 0);
+    CHECK(orderMask({0x001, 0x002, 0x040}) == 0);
+    CHECK(orderMask({0x001, 0x002, 0x000}) == 0);
+    CHECK(orderMask({0x001, 0x001, 0x004}) == 0);
+    CHECK(orderMask({0x004, 0x001, 0x002, 0x100}) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +827,24 @@ double toneHz(ChannelPosition p) noexcept {
     return it != std::ranges::end(kPositionTones) ? it->hz : 0.0;
 }
 
+// The fixtures this file writes for the layout check: half a second at 48 kHz.
+constexpr int           kLayoutRate   = 48000;
+constexpr std::uint64_t kLayoutFrames = 24000;
+
+// The samples of a written layout fixture: channel c carries, at a quarter of
+// full scale, the tone of the c-th position listed.
+auto positionTones(std::initializer_list<ChannelPosition> positions) {
+    std::vector<double> hz;
+    for (const ChannelPosition p : positions) {
+        hz.push_back(toneHz(p));
+    }
+    return [hz](std::uint64_t frame, int c) {
+        const double t     = static_cast<double>(frame) / kLayoutRate;
+        const double omega = 2.0 * std::numbers::pi * hz[static_cast<std::size_t>(c)];
+        return static_cast<float>(0.25 * std::sin(omega * t));
+    };
+}
+
 // The layout check proper, on a fixture already on disk, which it removes. A
 // mask, when given, is also asserted, for the rows whose point is the mask the
 // decoder reports.
@@ -857,23 +913,59 @@ void checkFlacLayout(const char* name, Container container, const char* comment,
                      std::initializer_list<ChannelPosition> positions) {
     const std::string path = std::string("rawform_layout_") + name +
                              (container == Container::Ogg ? ".oga" : ".flac");
-    constexpr int       rate = 48000;
-    std::vector<double> hz;
-    for (const ChannelPosition p : positions) {
-        hz.push_back(toneHz(p));
-    }
     MetadataPtr comments = comment != nullptr
                                ? commentBlock(comment)
                                : MetadataPtr(nullptr, &FLAC__metadata_object_delete);
     CHECK(comment == nullptr || comments != nullptr);
-    CHECK(encodeFlac(path, static_cast<int>(hz.size()), rate, 16, 24000, container,
-                     comments.get(), [&hz](std::uint64_t frame, int c) {
-                         const double t = static_cast<double>(frame) / rate;
-                         return static_cast<float>(
-                             0.25 * std::sin(2.0 * std::numbers::pi *
-                                             hz[static_cast<std::size_t>(c)] * t));
-                     }));
+    CHECK(encodeFlac(path, static_cast<int>(positions.size()), kLayoutRate, 16,
+                     kLayoutFrames, container, comments.get(),
+                     positionTones(positions)));
     checkDecodedLayout(name, path, DecoderKind::Flac, mask, positions);
+}
+
+// The channel map libsndfile reports for a file, empty when it reports none.
+std::vector<int> channelMapOf(const std::string& path) {
+    SF_INFO  info{};
+    SNDFILE* sf = sf_open(path.c_str(), SFM_READ, &info);
+    if (sf == nullptr) {
+        return {};
+    }
+    std::vector<int> map(static_cast<std::size_t>(std::max(info.channels, 0)));
+    const bool       has =
+        sf_command(sf, SFC_GET_CHANNEL_MAP_INFO, map.data(),
+                   static_cast<int>(map.size() * sizeof(int))) == SF_TRUE;
+    sf_close(sf);
+    return has ? map : std::vector<int>{};
+}
+
+// A 48 kHz float libsndfile layout fixture in the given format, half a second
+// of one tone per channel for the positions listed, carrying map unless it is
+// empty. libsndfile must read back the map it wrote, since that is all the
+// decoder learns the speakers from; then the decoder must report mask and
+// declare the listed positions.
+void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
+                        std::initializer_list<int> map, std::uint16_t mask,
+                        std::initializer_list<ChannelPosition> positions) {
+    const std::string path    = std::string("rawform_layout_") + name + ext;
+    const bool        written = encodeSndfile(
+        path, static_cast<int>(positions.size()), kLayoutRate, kLayoutFrames, sfFormat,
+        std::span<const int>(map.begin(), map.size()), positionTones(positions));
+    if (!written) {
+        std::fprintf(stderr, "  %s: libsndfile did not write the file with its map\n",
+                     name);
+    }
+    CHECK(written);
+    const std::vector<int> back = channelMapOf(path);
+    if (!std::ranges::equal(back, map)) {
+        std::fprintf(stderr, "  %s: libsndfile reads back a map of %zu entries:", name,
+                     back.size());
+        for (const int v : back) {
+            std::fprintf(stderr, " %d", v);
+        }
+        std::fprintf(stderr, "\n");
+    }
+    CHECK(std::ranges::equal(back, map));
+    checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, positions);
 }
 
 #if RAWFORM_HAVE_FFMPEG
@@ -955,6 +1047,30 @@ int main() {
         checkFlacLayout("flac_decimal_mask", Container::Native,
                         "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=263", 0, quad);
         checkFlacLayout("flac_no_mask", Container::Native, nullptr, 0, quad);
+
+        // Files whose container carries a channel map naming 4.0: WAVE's channel
+        // mask in WAVEX and RF64, a channel layout chunk in CAF and AIFF (W64 is
+        // absent: libsndfile writes no map into it). libsndfile spells the front
+        // speakers with Apple's names in every one of them. Then a WAVE mask
+        // naming the default order, and a WAV with no map at all.
+        const std::initializer_list<int> map40 = {
+            SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT, SF_CHANNEL_MAP_CENTER,
+            SF_CHANNEL_MAP_REAR_CENTER};
+        const std::initializer_list<int> mapQuad = {
+            SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT, SF_CHANNEL_MAP_REAR_LEFT,
+            SF_CHANNEL_MAP_REAR_RIGHT};
+        checkSndfileLayout("wavex_40", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT, map40,
+                           0x0107, p40);
+        checkSndfileLayout("rf64_40", ".rf64", SF_FORMAT_RF64 | SF_FORMAT_FLOAT, map40,
+                           0x0107, p40);
+        checkSndfileLayout("caf_40", ".caf", SF_FORMAT_CAF | SF_FORMAT_FLOAT, map40,
+                           0x0107, p40);
+        checkSndfileLayout("aiff_40", ".aiff", SF_FORMAT_AIFF | SF_FORMAT_FLOAT, map40,
+                           0x0107, p40);
+        checkSndfileLayout("wavex_quad_map", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT,
+                           mapQuad, 0, quad);
+        checkSndfileLayout("wav_no_map", ".wav", SF_FORMAT_WAV | SF_FORMAT_FLOAT, {}, 0,
+                           quad);
     }
 
 #if RAWFORM_HAVE_FFMPEG

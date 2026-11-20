@@ -28,12 +28,18 @@
 
 #include "decoders/SndfileDecoder.h"
 
+#include "ChannelPositions.h"
 #include "rawform/audio/Types.h"
 
 #include <sndfile.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>  // SEEK_SET
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -96,6 +102,50 @@ Codec codecForSubtype(int sfFormat, std::uint16_t bits) noexcept {
         default:                break;
     }
     return bits != 0 ? Codec::Pcm : Codec::Unknown;
+}
+
+// The WAVEFORMATEXTENSIBLE bit of one libsndfile channel-map entry, 0 for a
+// speaker the position table has no bit for (mono, left or right of center, the
+// top layer, ambisonic components), which leaves the whole file without a mask.
+// Apple's names and Microsoft's for the same speaker give the same bit, since
+// which pair libsndfile reports is its own choice. The entries are plain ints
+// from an unnamed enum, hence the default label.
+std::uint64_t speakerBit(int sfChannel) noexcept {
+    switch (sfChannel) {
+        case SF_CHANNEL_MAP_LEFT:
+        case SF_CHANNEL_MAP_FRONT_LEFT:   return channelBit(ChannelPosition::FrontLeft);
+        case SF_CHANNEL_MAP_RIGHT:
+        case SF_CHANNEL_MAP_FRONT_RIGHT:  return channelBit(ChannelPosition::FrontRight);
+        case SF_CHANNEL_MAP_CENTER:
+        case SF_CHANNEL_MAP_FRONT_CENTER: return channelBit(ChannelPosition::FrontCenter);
+        case SF_CHANNEL_MAP_LFE:          return channelBit(ChannelPosition::Lfe);
+        case SF_CHANNEL_MAP_REAR_LEFT:    return channelBit(ChannelPosition::BackLeft);
+        case SF_CHANNEL_MAP_REAR_RIGHT:   return channelBit(ChannelPosition::BackRight);
+        case SF_CHANNEL_MAP_REAR_CENTER:  return channelBit(ChannelPosition::BackCenter);
+        case SF_CHANNEL_MAP_SIDE_LEFT:    return channelBit(ChannelPosition::SideLeft);
+        case SF_CHANNEL_MAP_SIDE_RIGHT:   return channelBit(ChannelPosition::SideRight);
+        default:                          return 0;
+    }
+}
+
+// The speakers a file names, as AudioFormat::channelMask, when its header
+// carries a channel map: WAVE's channel mask (WAVEX, RF64) or a CAF or AIFF
+// channel layout chunk. 0 when it carries none, and for anything the table
+// cannot declare. The order libsndfile reports is the order sf_readf_float
+// delivers the channels in.
+std::uint16_t channelMaskOf(SNDFILE* snd, int channels) {
+    if (channels < 2 || channels > kMaxPositionedChannels) {
+        return 0;
+    }
+    std::array<int, kMaxPositionedChannels> map{};
+    if (sf_command(snd, SFC_GET_CHANNEL_MAP_INFO, map.data(),
+                   static_cast<int>(sizeof(int)) * channels) != SF_TRUE) {
+        return 0;
+    }
+    const auto count = static_cast<std::size_t>(channels);
+    std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
+    std::ranges::transform(std::span(map).first(count), speakers.begin(), speakerBit);
+    return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count)).mask;
 }
 
 }  // namespace
@@ -180,8 +230,10 @@ std::unique_ptr<IDecoder> SndfileDecoder::open(const std::string& path,
     auto impl      = std::make_unique<Impl>();
     impl->snd      = snd;
     impl->channels = info.channels;
-    impl->fmt      = AudioFormat{ .sampleRate = static_cast<std::uint32_t>(info.samplerate),
-                                  .channels   = static_cast<std::uint16_t>(info.channels) };
+    impl->fmt      = AudioFormat{
+        .sampleRate  = static_cast<std::uint32_t>(info.samplerate),
+        .channels    = static_cast<std::uint16_t>(info.channels),
+        .channelMask = channelMaskOf(snd, info.channels)};
     impl->total    = info.frames > 0 ? static_cast<std::uint64_t>(info.frames) : 0;
     impl->seekable = info.seekable != 0;
 
