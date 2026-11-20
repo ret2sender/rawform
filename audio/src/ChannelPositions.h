@@ -26,9 +26,10 @@
 // channels interleaved in ascending bit order. A mask of 0 means the default
 // order for the channel count, the table below: for 1 to 8 channels FLAC's
 // channel assignment and WAVE's default order agree, and that is the order the
-// native decoders deliver. A decoder whose source names other speakers for its
-// channel count reports them in the mask instead, so a 4.0 source (FL FR FC BC)
-// is not declared as quad (FL FR BL BR). The layout rides in AudioFormat rather
+// native decoders deliver. The FFmpeg decoder reports the speakers its source
+// names when they differ from that order, so a 4.0 source (FL FR FC BC) is not
+// declared as quad (FL FR BL BR), nor AC3's side surrounds (SL SR) as back
+// surrounds (BL BR). The layout rides in AudioFormat rather
 // than beside it because every path that must agree on it already carries one:
 // the gapless stitch gate, the hold gate, the sink's open and reconfigure.
 //
@@ -153,16 +154,17 @@ inline constexpr std::array<ChannelPosition, 9> kMaskOrder{{
     ChannelPosition::SideRight,
 }};
 
-// Every bit a mask may carry; any other bit is a speaker this table cannot name.
-inline constexpr std::uint16_t kNamedMask = [] {
+}  // namespace detail
+
+/// Every bit a mask may carry; any other bit is a speaker this table cannot
+/// name, and a decoder whose source has one reports no mask.
+inline constexpr std::uint16_t kNamedChannelMask = [] {
     std::uint16_t mask = 0;
-    for (const ChannelPosition p : kMaskOrder) {
+    for (const ChannelPosition p : detail::kMaskOrder) {
         mask = static_cast<std::uint16_t>(mask | channelBit(p));
     }
     return mask;
 }();
-
-}  // namespace detail
 
 /// The mask a channel count's default order stands for: the bits of its table
 /// row. 0 for mono, for no channels, and beyond the table. A decoder compares a
@@ -194,7 +196,7 @@ channelPositionsFor(const AudioFormat& format) noexcept {
         return list;
     }
     const std::uint16_t mask = format.channelMask;
-    if (mask != 0 && (mask & ~detail::kNamedMask) == 0 &&
+    if (mask != 0 && (mask & ~kNamedChannelMask) == 0 &&
         std::popcount(mask) == channels) {
         for (const ChannelPosition p : detail::kMaskOrder) {
             if ((mask & channelBit(p)) != 0) {

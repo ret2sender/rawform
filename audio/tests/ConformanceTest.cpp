@@ -55,8 +55,9 @@
 //     and a repeated seek reproduces the same decode.
 //
 // The FFmpeg-decoded cases (AAC, AC3, DTS, WMA, ALAC as embedded byte blobs;
-// Vorbis and Opus generated through libsndfile's Ogg writers) compile in only
-// when the library was built with FFmpeg (RAWFORM_HAVE_FFMPEG); without it they
+// Vorbis and Opus generated through libsndfile's Ogg writers), and the
+// speaker-layout check on four multichannel AC3 blobs (checkLayout), compile in
+// only when the library was built with FFmpeg (RAWFORM_HAVE_FFMPEG); without it they
 // are skipped with a single notice and the suite still runs the three native
 // decoders. The blobs live in tests/fixtures/<Codec>Blob.h, included below;
 // each header records the ffmpeg command that produced it, except Mp3Blob.h,
@@ -89,6 +90,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <vector>
@@ -299,6 +301,10 @@ bool createWma(const std::string& p) { return writeBytes(p, kWma, sizeof(kWma));
 
 #include "fixtures/AlacBlob.h"
 bool createAlac(const std::string& p) { return writeBytes(p, kAlac, sizeof(kAlac)); }
+
+// kAc3Layout40, kAc3LayoutQuadSide, kAc3Layout21 and kAc3Layout51Side, for
+// checkLayout below.
+#include "fixtures/Ac3LayoutBlob.h"
 
 // Vorbis and Opus are generated programmatically: libsndfile writes both Ogg
 // subtypes. They still decode through FFmpeg because SndfileDecoder declines those
@@ -650,6 +656,153 @@ void checkChannelPositions() {
     CHECK(defaultChannelMask(9) == 0);
 }
 
+#if RAWFORM_HAVE_FFMPEG
+// ---------------------------------------------------------------------------
+// Speaker layouts end to end: what each decoded channel holds is what a sink is
+// told it is. Each AC3 fixture carries one tone per source channel, placed by
+// speaker (fixtures/Ac3LayoutBlob.h). checkLayout opens it through the factory,
+// takes the positions a sink would declare for the decoded format, and listens
+// to every decoded channel: the strongest of the nine tones below must be the
+// tone of the position declared for that channel.
+
+// The tone each position carries in the fixtures. All nine are listened for, so
+// a channel declared at the wrong position hears the wrong tone.
+struct PositionTone {
+    ChannelPosition position;
+    double          hz;
+};
+constexpr PositionTone kPositionTones[] = {
+    {ChannelPosition::FrontLeft, 300.0},  {ChannelPosition::FrontRight, 500.0},
+    {ChannelPosition::FrontCenter, 700.0}, {ChannelPosition::Lfe, 60.0},
+    {ChannelPosition::BackLeft, 900.0},   {ChannelPosition::BackRight, 1100.0},
+    {ChannelPosition::BackCenter, 1300.0}, {ChannelPosition::SideLeft, 1500.0},
+    {ChannelPosition::SideRight, 1700.0},
+};
+
+const char* positionName(ChannelPosition p) noexcept {
+    switch (p) {
+        case ChannelPosition::Mono:        return "Mono";
+        case ChannelPosition::FrontLeft:   return "FL";
+        case ChannelPosition::FrontRight:  return "FR";
+        case ChannelPosition::FrontCenter: return "FC";
+        case ChannelPosition::Lfe:         return "LFE";
+        case ChannelPosition::BackLeft:    return "BL";
+        case ChannelPosition::BackRight:   return "BR";
+        case ChannelPosition::BackCenter:  return "BC";
+        case ChannelPosition::SideLeft:    return "SL";
+        case ChannelPosition::SideRight:   return "SR";
+    }
+    return "?";
+}
+
+// Goertzel power of one frequency over a channel's samples.
+double tonePower(const std::vector<float>& x, double hz, double rate) {
+    const double c = 2.0 * std::cos(2.0 * std::numbers::pi * hz / rate);
+    double       a = 0.0;
+    double       b = 0.0;
+    for (const float v : x) {
+        const double next = static_cast<double>(v) + c * a - b;
+        b = a;
+        a = next;
+    }
+    return a * a + b * b - c * a * b;
+}
+
+// The position whose tone is strongest in one channel.
+ChannelPosition loudestPosition(const std::vector<float>& x, double rate) {
+    ChannelPosition best      = ChannelPosition::Mono;
+    double          bestPower = -1.0;
+    for (const PositionTone& t : kPositionTones) {
+        const double p = tonePower(x, t.hz, rate);
+        if (p > bestPower) {
+            bestPower = p;
+            best      = t.position;
+        }
+    }
+    return best;
+}
+
+// Open a layout fixture through the factory, saying why when nothing opens it.
+std::unique_ptr<IDecoder> openLayoutFixture(const std::string& path) {
+    DecoderFactory            factory;
+    std::string               err;
+    std::unique_ptr<IDecoder> dec = factory.open(path, &err);
+    if (!dec) {
+        std::fprintf(stderr, "open failed for %s: %s\n", path.c_str(), err.c_str());
+    }
+    return dec;
+}
+
+void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
+                 std::initializer_list<ChannelPosition> expected) {
+    const std::string path = std::string("rawform_layout_") + name + ".ac3";
+    CHECK(writeBytes(path, bytes, size));
+    std::unique_ptr<IDecoder> dec = openLayoutFixture(path);
+    CHECK(dec != nullptr);
+    if (!dec) {
+        std::remove(path.c_str());
+        return;
+    }
+
+    const AudioFormat fmt = dec->format();
+    CHECK(dec->sourceInfo().decoder == DecoderKind::Ffmpeg);
+    CHECK(static_cast<std::size_t>(fmt.channels) == expected.size());
+    const auto declared = rawform::audio::channelPositionsFor(fmt);
+    CHECK(std::ranges::equal(declared, expected));
+
+    // Decode it all, then listen to the middle half of each channel, clear of
+    // the encoder's start and end.
+    const std::size_t  ch = fmt.channels;
+    std::vector<float> all;
+    std::vector<float> buf(4096 * ch);
+    for (;;) {
+        const std::size_t got = dec->read(buf.data(), 4096);
+        if (got == 0) {
+            break;
+        }
+        all.insert(all.end(), buf.begin(),
+                   buf.begin() + static_cast<std::ptrdiff_t>(got * ch));
+    }
+    const std::size_t frames = ch == 0 ? 0 : all.size() / ch;
+    CHECK(frames > 0);
+    for (std::size_t c = 0; c < ch && c < declared.size(); ++c) {
+        std::vector<float> x;
+        for (std::size_t f = frames / 4; f < (3 * frames) / 4; ++f) {
+            x.push_back(all[f * ch + c]);
+        }
+        const ChannelPosition heard = loudestPosition(x, fmt.sampleRate);
+        if (heard != declared[c]) {
+            std::fprintf(stderr, "  %s channel %zu: declared %s, holds the %s tone\n",
+                         name, c, positionName(declared[c]), positionName(heard));
+        }
+        CHECK(heard == declared[c]);
+    }
+
+    dec.reset();
+    std::remove(path.c_str());
+}
+
+// A source FFmpeg decodes in the default order for its channel count reports
+// no mask, so it keeps the table's positions and can still join a stream of a
+// native-decoder source with the same count.
+void checkLayoutControl(const char* name, int channels,
+                        std::initializer_list<ChannelPosition> expected) {
+    const std::string path = std::string("rawform_layout_") + name + ".ogg";
+    CHECK(writeSndfileFloat(path, channels, 44100, 50000,
+                            SF_FORMAT_OGG | SF_FORMAT_VORBIS));
+    std::unique_ptr<IDecoder> dec = openLayoutFixture(path);
+    CHECK(dec != nullptr);
+    if (dec) {
+        const AudioFormat fmt = dec->format();
+        CHECK(dec->sourceInfo().decoder == DecoderKind::Ffmpeg);
+        CHECK(fmt.channelMask == 0);
+        CHECK(positionsAre(fmt, expected));
+        dec.reset();
+    }
+    std::remove(path.c_str());
+}
+#endif
+
 }  // namespace
 
 int main() {
@@ -738,8 +891,26 @@ int main() {
         runBattery(alac);
         checkProbe(alac, "ALAC");
     }
+    {
+        // The four layouts FFmpeg declares differently from the default order
+        // for their channel count, then two sources in the default order.
+        using P = ChannelPosition;
+        std::printf("[conformance] layouts\n");
+        checkLayout("40", kAc3Layout40, sizeof(kAc3Layout40),
+                    {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
+        checkLayout("quadside", kAc3LayoutQuadSide, sizeof(kAc3LayoutQuadSide),
+                    {P::FrontLeft, P::FrontRight, P::SideLeft, P::SideRight});
+        checkLayout("21", kAc3Layout21, sizeof(kAc3Layout21),
+                    {P::FrontLeft, P::FrontRight, P::Lfe});
+        checkLayout("51side", kAc3Layout51Side, sizeof(kAc3Layout51Side),
+                    {P::FrontLeft, P::FrontRight, P::FrontCenter, P::Lfe,
+                     P::SideLeft, P::SideRight});
+        checkLayoutControl("vorbis3", 3, {P::FrontLeft, P::FrontRight, P::FrontCenter});
+        checkLayoutControl("vorbis4", 4,
+                           {P::FrontLeft, P::FrontRight, P::BackLeft, P::BackRight});
+    }
 #else
-    std::printf("[conformance] aac/ac3/dts/vorbis/opus/wma/alac SKIPPED: built "
+    std::printf("[conformance] aac/ac3/dts/vorbis/opus/wma/alac/layouts SKIPPED: built "
                 "without FFmpeg (RAWFORM_HAVE_FFMPEG=0)\n");
 #endif
     // NOLINTEND(modernize-use-designated-initializers)

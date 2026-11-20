@@ -50,6 +50,10 @@
 //      for sndfile, FLAC, and mpg123. With equal in/out rates and a packed-float
 //      target, swresample runs one-to-one with zero internal delay, which keeps
 //      the frame-count math exact and means there is no resampler tail to drain.
+//      The channels keep the source's order, and the source's speakers travel
+//      in AudioFormat::channelMask (channelMaskFor below), so a sink declares
+//      each channel where the source put it rather than where the default order
+//      for the count would.
 //
 // Seek mirrors FlacDecoder's shape: a raw seek lands at or before the target, we
 // flush the decoder, then decode-and-discard forward to the exact target frame
@@ -68,6 +72,7 @@
 
 #include "decoders/FfmpegDecoder.h"
 
+#include "ChannelPositions.h"
 #include "LiveBitrateMeter.h"
 #include "rawform/audio/Types.h"
 
@@ -149,6 +154,38 @@ Codec mapCodec(AVCodecID id) {
         case AV_CODEC_ID_MP3:        return Codec::Mp3;
         default:                     return Codec::Other;
     }
+}
+
+// FFmpeg's speaker bits are the WAVEFORMATEXTENSIBLE bits AudioFormat::channelMask
+// uses, so a native-order layout's mask carries over as it is.
+static_assert(AV_CH_FRONT_LEFT == channelBit(ChannelPosition::FrontLeft));
+static_assert(AV_CH_FRONT_RIGHT == channelBit(ChannelPosition::FrontRight));
+static_assert(AV_CH_FRONT_CENTER == channelBit(ChannelPosition::FrontCenter));
+static_assert(AV_CH_LOW_FREQUENCY == channelBit(ChannelPosition::Lfe));
+static_assert(AV_CH_BACK_LEFT == channelBit(ChannelPosition::BackLeft));
+static_assert(AV_CH_BACK_RIGHT == channelBit(ChannelPosition::BackRight));
+static_assert(AV_CH_BACK_CENTER == channelBit(ChannelPosition::BackCenter));
+static_assert(AV_CH_SIDE_LEFT == channelBit(ChannelPosition::SideLeft));
+static_assert(AV_CH_SIDE_RIGHT == channelBit(ChannelPosition::SideRight));
+
+// The source's speakers, for AudioFormat::channelMask (ChannelPositions.h). In
+// FFmpeg's native order the channels are interleaved in ascending bit order,
+// the order a mask describes, and the resampler keeps that order. 0 when the
+// speakers are the default order for the channel count, so one layout has one
+// representation (and such a track still joins a native decoder's stream
+// gaplessly), and 0 for any layout a mask cannot describe: an unspecified,
+// custom or ambisonic order, more channels than the table covers, or a speaker
+// the table cannot name. Those keep the default order's positions.
+std::uint16_t channelMaskFor(const AVChannelLayout& layout) {
+    if (layout.order != AV_CHANNEL_ORDER_NATIVE || layout.nb_channels < 2 ||
+        layout.nb_channels > kMaxPositionedChannels ||
+        (layout.u.mask & ~std::uint64_t{kNamedChannelMask}) != 0) {
+        return 0;
+    }
+    const auto mask = static_cast<std::uint16_t>(layout.u.mask);
+    return mask == defaultChannelMask(static_cast<std::uint16_t>(layout.nb_channels))
+               ? 0
+               : mask;
 }
 
 // Container bit depth for the status line, following the engine rule: a real
@@ -299,7 +336,9 @@ struct FfmpegDecoder::Impl {
     // the input: same rate (no resample), same layout (no downmix), packed
     // float32 target. A frame that reports an unspecified channel order (some
     // raw AAC streams do) gets a default positional layout for its channel count,
-    // which preserves the count without inventing a remix.
+    // which preserves the count without inventing a remix. Either way the
+    // channels leave in the order they arrived, the order open() described in
+    // audioFormat.channelMask.
     bool configureSwr() {
         AVChannelLayout inLayout;
         if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC ||
@@ -597,9 +636,11 @@ std::unique_ptr<IDecoder> FfmpegDecoder::open(const std::string& path,
         }
         return nullptr;
     }
-    impl->audioFormat = AudioFormat{.sampleRate = rate,
-                                    .channels   = static_cast<std::uint16_t>(channels)};
-    impl->channels    = channels;
+    impl->audioFormat = AudioFormat{
+        .sampleRate  = rate,
+        .channels    = static_cast<std::uint16_t>(channels),
+        .channelMask = channelMaskFor(impl->codecCtx->ch_layout)};
+    impl->channels = channels;
 
     // ---- length in frames --------------------------------------------------
     // Prefer the stream duration (in the stream time base); fall back to the
