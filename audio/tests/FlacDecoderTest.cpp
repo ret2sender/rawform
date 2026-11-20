@@ -42,6 +42,9 @@
 //     the first frame (no gap to pad) and a middle frame (libFLAC pads the gap
 //     with silence and reports it separately) are covered
 //   - a nonexistent path yields nullptr and a non-empty error
+//   - an Ogg FLAC file (libFLAC's Ogg encoder) opens through the same open() with
+//     the same round trip, length, seek landing and reported source (codec and
+//     decoder Flac)
 //
 // The ramp values are k/2048 for integer k, and 2^(bits-1)/2048 is itself an
 // integer at both 16 and 24 bits, so quantizing the ramp to PCM and back is
@@ -68,6 +71,7 @@
 
 using rawform::audio::AudioFormat;
 using rawform::audio::Codec;
+using rawform::audio::DecoderKind;
 using rawform::audio::FlacDecoder;
 using rawform::audio::IDecoder;
 using rawform::audio::SourceInfo;
@@ -112,12 +116,15 @@ FLAC__int32 quantize(float f, int bits) noexcept {
     return static_cast<FLAC__int32>(v);
 }
 
-// Encodes `frames` frames of the ramp to a real .flac via libFLAC's stream
+// The container the encoder writes: a native FLAC stream, or FLAC in Ogg.
+enum class Container { Native, Ogg };
+
+// Encodes `frames` frames of the ramp to a real FLAC file via libFLAC's stream
 // encoder. Returns true on success. set_total_samples_estimate makes the encoder
 // rewrite STREAMINFO with the true length on finish, so the decoder reports an
 // exact totalFrames.
 bool writeFlac(const std::string& path, int channels, int rate, int bits,
-               std::uint64_t frames) {
+               std::uint64_t frames, Container container = Container::Native) {
     FLAC__StreamEncoder* enc = FLAC__stream_encoder_new();
     if (!enc) {
         return false;
@@ -133,8 +140,11 @@ bool writeFlac(const std::string& path, int channels, int rate, int bits,
         return false;
     }
 
-    if (FLAC__stream_encoder_init_file(enc, path.c_str(), nullptr, nullptr) !=
-        FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
+    const FLAC__StreamEncoderInitStatus st =
+        container == Container::Ogg
+            ? FLAC__stream_encoder_init_ogg_file(enc, path.c_str(), nullptr, nullptr)
+            : FLAC__stream_encoder_init_file(enc, path.c_str(), nullptr, nullptr);
+    if (st != FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
         FLAC__stream_encoder_delete(enc);
         return false;
     }
@@ -464,6 +474,53 @@ void testDamagedFrameRecovers() {
 }
 
 // ---------------------------------------------------------------------------
+// Ogg FLAC: the same codec in an Ogg container, opened through libFLAC's Ogg
+// entry point. The Ogg support is required, not optional: a libFLAC built
+// without it fails here rather than skipping, since rawform would then hand
+// Ogg FLAC to FFmpeg or, without FFmpeg, play nothing.
+void testOggFlac() {
+    CHECK(FLAC_API_SUPPORTS_OGG_FLAC == 1);
+
+    const std::string path = "rf_flac_ogg.oga";
+    constexpr std::uint64_t frames = 12000;
+    constexpr int ch = 2;
+    CHECK(writeFlac(path, ch, 44100, 16, frames, Container::Ogg));
+
+    std::string err;
+    std::unique_ptr<IDecoder> dec = FlacDecoder::open(path, &err);
+    CHECK(dec != nullptr);
+    if (!dec) {
+        std::fprintf(stderr, "  Ogg FLAC open failed: %s\n", err.c_str());
+    } else {
+        CHECK(dec->format() == (AudioFormat{44100, 2}));
+        CHECK(dec->totalFrames() == frames);
+        CHECK(dec->seekable());
+
+        const SourceInfo si = dec->sourceInfo();
+        CHECK(si.codec == Codec::Flac);
+        CHECK(si.decoder == DecoderKind::Flac);
+        CHECK(si.bitsPerSample == 16);
+        CHECK(si.bitrateKbps > 0);
+
+        const float              tol = integerTolerance(16);
+        const std::vector<float> all = readAll(*dec);
+        CHECK(all.size() == frames * ch);
+        CHECK(firstMismatch(all.data(), all.size(), 0, tol) < 0);
+
+        // Off a block boundary, so the post-seek trim runs on the Ogg path too.
+        constexpr std::size_t readFrames = 1500;
+        std::vector<float>    buf(readFrames * ch);
+        CHECK(dec->seek(5333));
+        CHECK(dec->read(buf.data(), readFrames) == readFrames);
+        CHECK(firstMismatch(buf.data(), readFrames * ch, 5333ull * ch, tol) < 0);
+
+        CHECK(dec->seek(frames));
+        CHECK(dec->read(buf.data(), readFrames) == 0);
+    }
+    std::remove(path.c_str());
+}
+
+// ---------------------------------------------------------------------------
 // Open failure: a missing path yields nullptr and a non-empty error.
 void testOpenFailure() {
     std::string err;
@@ -482,6 +539,7 @@ int main() {
     testSeek();
     testEosAndPartial();
     testDamagedFrameRecovers();
+    testOggFlac();
     testOpenFailure();
 
     if (g_failures == 0) {

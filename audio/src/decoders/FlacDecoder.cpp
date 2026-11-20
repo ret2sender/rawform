@@ -20,11 +20,11 @@
 
 // FlacDecoder.cpp
 //
-// libFLAC implementation of the IDecoder contract. Everything that touches
-// <FLAC/stream_decoder.h> is confined to this translation unit: the decoder
-// handle, the staging buffer, and the libFLAC callbacks all live here, so the
-// static library links FLAC::FLAC privately while the header stays free of the
-// dependency.
+// libFLAC implementation of the IDecoder contract, for FLAC in its own stream
+// format and FLAC in Ogg. Everything that touches <FLAC/stream_decoder.h> is
+// confined to this translation unit: the decoder handle, the staging buffer, and
+// the libFLAC callbacks all live here, so the static library links FLAC::FLAC
+// privately while the header stays free of the dependency.
 //
 // The central design problem this file solves is impedance: libFLAC is a PUSH
 // decoder (it calls our write callback once per FLAC frame, handing us a whole
@@ -42,7 +42,9 @@
 // (bytesConsumed*8, framesProduced/sampleRate) into a LiveBitrateMeter. That is
 // the exact compressed size of one FLAC frame over the audio it produced, so the
 // trailing-window average is an accurate "current bitrate". The static
-// sourceInfo().bitrateKbps stays the whole-file average.
+// sourceInfo().bitrateKbps stays the whole-file average. libFLAC reports the
+// decode position for native FLAC only, so for Ogg FLAC the measurement never
+// runs and the live figure stays the file average the meter is seeded with.
 //
 // Damage. libFLAC's error callback is advisory for everything except an
 // unparseable stream: on a lost sync, a bad frame header, bad metadata, or a
@@ -70,6 +72,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -139,7 +142,7 @@ struct FlacDecoder::Impl {
     // --- libFLAC callbacks --------------------------------------------------
     // Static members rather than free functions so they may name Impl and reach
     // its fields while Impl stays a fully private nested type (no codec types
-    // escape into the header). client_data is the Impl* handed to init_file, so
+    // escape into the header). client_data is the Impl* handed to the init call, so
     // each recovers the decoder state with one cast. Their types match libFLAC's
     // callback typedefs exactly, so open() passes &Impl::<name> with no cast.
 
@@ -245,6 +248,16 @@ std::uint64_t fileSizeBytes(const std::string& path) {
     return end > 0 ? static_cast<std::uint64_t>(end) : 0;
 }
 
+// True when the file begins with an Ogg page. libFLAC must be told the
+// container before it reads a byte: its native entry point does not parse Ogg
+// pages, and its Ogg entry point does not parse a native stream.
+bool startsWithOggPage(const std::string& path) {
+    char          head[4] = {};
+    std::ifstream f(path, std::ios::binary);
+    return f.read(head, sizeof(head)) &&
+           std::string_view(head, sizeof(head)) == "OggS";
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -268,9 +281,14 @@ std::unique_ptr<IDecoder> FlacDecoder::open(const std::string& path,
     // it at the end); we only decode forward and seek, so disable it.
     FLAC__stream_decoder_set_md5_checking(impl->dec, false);
 
-    const FLAC__StreamDecoderInitStatus st = FLAC__stream_decoder_init_file(
-        impl->dec, path.c_str(), &Impl::writeCallback, &Impl::metadataCallback,
-        &Impl::errorCallback, impl.get());
+    const FLAC__StreamDecoderInitStatus st =
+        startsWithOggPage(path)
+            ? FLAC__stream_decoder_init_ogg_file(
+                  impl->dec, path.c_str(), &Impl::writeCallback,
+                  &Impl::metadataCallback, &Impl::errorCallback, impl.get())
+            : FLAC__stream_decoder_init_file(
+                  impl->dec, path.c_str(), &Impl::writeCallback,
+                  &Impl::metadataCallback, &Impl::errorCallback, impl.get());
     if (st != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
         if (error) {
             *error = std::string("libFLAC init failed: ") +

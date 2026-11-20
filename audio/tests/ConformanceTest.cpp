@@ -31,11 +31,12 @@
 //
 // Same hand-rolled CHECK harness as the other tests: no GoogleTest, no Catch2, a
 // failure tally that makes main() return non-zero. Each fixture is materialized
-// to a temp file (WAV via libsndfile, FLAC via libFLAC, MP3 and AAC from embedded
-// byte blobs that need no encoder), then opened THROUGH THE REAL DecoderFactory.
-// Routing through the factory makes this a dispatch test as well: every fixture
-// asserts it landed on the decoder it should have, which is the direct proof that
-// the FFmpeg fallback never shadows a native reference decoder, and that an
+// to a temp file (WAV via libsndfile, native and Ogg FLAC via libFLAC, MP3 and AAC
+// from embedded byte blobs that need no encoder), then opened THROUGH THE REAL
+// DecoderFactory. Routing through the factory makes this a dispatch test as well:
+// every fixture asserts it landed on the decoder it should have, which is the
+// direct proof that the FFmpeg fallback never shadows a native reference decoder,
+// that Ogg FLAC reaches libFLAC under an .oga or a .flac name, and that an
 // ADTS-AAC stream (whose frame sync sniffs as MP3) correctly falls through
 // libmpg123 to FFmpeg.
 //
@@ -197,9 +198,12 @@ FLAC__int32 quantize(float f, int bits) noexcept {
     return static_cast<FLAC__int32>(v);
 }
 
+// The container the FLAC encoder writes: a native FLAC stream, or FLAC in Ogg.
+enum class Container { Native, Ogg };
+
 // 16-bit FLAC via libFLAC's stream encoder, carrying the same ramp.
 bool writeFlac(const std::string& path, int channels, int rate, int bits,
-               std::uint64_t frames) {
+               std::uint64_t frames, Container container = Container::Native) {
     FLAC__StreamEncoder* enc = FLAC__stream_encoder_new();
     if (enc == nullptr) {
         return false;
@@ -214,8 +218,11 @@ bool writeFlac(const std::string& path, int channels, int rate, int bits,
         FLAC__stream_encoder_delete(enc);
         return false;
     }
-    if (FLAC__stream_encoder_init_file(enc, path.c_str(), nullptr, nullptr) !=
-        FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
+    const FLAC__StreamEncoderInitStatus st =
+        container == Container::Ogg
+            ? FLAC__stream_encoder_init_ogg_file(enc, path.c_str(), nullptr, nullptr)
+            : FLAC__stream_encoder_init_file(enc, path.c_str(), nullptr, nullptr);
+    if (st != FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
         FLAC__stream_encoder_delete(enc);
         return false;
     }
@@ -265,6 +272,12 @@ bool writeBytes(const std::string& path, const unsigned char* bytes,
 bool createWav(const std::string& p)  { return writeSndfileFloat(p, 2, 44100, 50000, SF_FORMAT_WAV | SF_FORMAT_FLOAT); }
 bool createFlac(const std::string& p) { return writeFlac(p, 2, 44100, 16, 50000); }
 bool createMp3(const std::string& p)  { return writeBytes(p, kMp3, sizeof(kMp3)); }
+
+// Ogg FLAC needs no FFmpeg: libFLAC writes it here and reads it back, so a
+// native-only build runs these rows too.
+bool createOggFlac(const std::string& p) {
+    return writeFlac(p, 2, 44100, 16, 50000, Container::Ogg);
+}
 
 #if RAWFORM_HAVE_FFMPEG
 #include "fixtures/AacBlob.h"
@@ -591,6 +604,10 @@ int main() {
         {"wav",  ".wav",  &createWav,  Codec::Pcm,  DecoderKind::Sndfile, Tier::Strict,     2, 44100, 1.0e-5f},
         {"flac", ".flac", &createFlac, Codec::Flac, DecoderKind::Flac,    Tier::Strict,     2, 44100, 2.0e-4f},
         {"mp3",  ".mp3",  &createMp3,  Codec::Mp3,  DecoderKind::Mpg123,  Tier::Structural, 1, 44100, 0.0f},
+        // Ogg FLAC routes to libFLAC by content, under its own name and under
+        // the .flac name such files often carry.
+        {"oggflac",         ".oga",  &createOggFlac, Codec::Flac, DecoderKind::Flac, Tier::Strict, 2, 44100, 2.0e-4f},
+        {"oggflac_as_flac", ".flac", &createOggFlac, Codec::Flac, DecoderKind::Flac, Tier::Strict, 2, 44100, 2.0e-4f},
     };
     for (const Fixture& fx : fixtures) {
         std::printf("[conformance] %s\n", fx.name);
@@ -631,6 +648,15 @@ int main() {
         std::printf("[conformance] %s\n", vorbis.name);
         runBattery(vorbis);
         checkProbe(vorbis, "Vorbis");
+    }
+    {
+        // An Ogg Vorbis file named .flac: the content says Ogg, not FLAC, so
+        // libsndfile stays a candidate, declines Vorbis, and FFmpeg decodes it.
+        constexpr Fixture vorbisAsFlac{"vorbis_as_flac", ".flac", &createVorbis,
+                                       Codec::Vorbis, DecoderKind::Ffmpeg,
+                                       Tier::Structural, 2, 44100, 0.0f};
+        std::printf("[conformance] %s\n", vorbisAsFlac.name);
+        runBattery(vorbisAsFlac);
     }
     {
         constexpr Fixture opus{"opus", ".opus", &createOpus, Codec::Opus,

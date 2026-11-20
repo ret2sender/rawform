@@ -20,11 +20,12 @@
 
 // FlacDecoder.h
 //
-// IDecoder backed by libFLAC, the native reference decoder for FLAC. FLAC goes
-// through the reference library rather than libsndfile's optional FLAC
-// support so the decode is the canonical one; the DecoderFactory enforces that
-// structurally and dispatches here by content/extension. Like every decoder it
-// is constructed only through its own non-throwing open().
+// IDecoder backed by libFLAC, the native reference decoder for FLAC, in its own
+// stream format or in Ogg. FLAC goes through the reference library rather than
+// libsndfile's optional FLAC support so the decode is the canonical one; the
+// DecoderFactory enforces that structurally and dispatches here by
+// content/extension. Like every decoder it is constructed only through its own
+// non-throwing open().
 //
 // Dependency containment: <FLAC/stream_decoder.h> appears in none of this
 // header. libFLAC's stream decoder handle, the staging buffer that bridges its
@@ -62,8 +63,9 @@ namespace rawform::audio {
 
 class FlacDecoder final : public IDecoder {
 public:
-    /// Non-throwing factory. Opens path through libFLAC's stream decoder, reads
-    /// the STREAMINFO so format/depth/length are known before any audio is asked
+    /// Non-throwing factory. Opens path through libFLAC's stream decoder (its
+    /// Ogg entry point when the file begins with an Ogg page), reads the
+    /// STREAMINFO so format/depth/length are known before any audio is asked
     /// for, and returns a ready decoder or nullptr on any failure (file missing,
     /// not a FLAC stream, or a libFLAC init error). When error is non-null it is
     /// written with a human-readable reason on failure and left untouched on

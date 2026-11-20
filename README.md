@@ -196,9 +196,9 @@ Decoding is engine-side and content-sniffed: the file's leading bytes pick
 the decoder cascade, the extension only biases the order, and the first
 decoder that opens wins.
 
-- **Native reference decoders**: FLAC (libFLAC), MP3 (libmpg123), and the
-  libsndfile PCM family (WAV, AIFF, AU, CAF, and the other containers
-  libsndfile handles).
+- **Native reference decoders**: FLAC and Ogg FLAC (libFLAC), MP3
+  (libmpg123), and the libsndfile PCM family (WAV, AIFF, AU, CAF, and the
+  other containers libsndfile handles).
 - **FFmpeg fallback** (optional, on by default when FFmpeg is found): Ogg
   Vorbis, Opus, AAC, ALAC/M4A, WMA, AC3, DTS, and the rest of the long tail.
   The native decoders are always tried first; FFmpeg only catches what they

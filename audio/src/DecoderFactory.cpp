@@ -28,7 +28,8 @@
 //
 //   1. Sniff the leading bytes (primary signal). "fLaC" is FLAC; an MPEG
 //      frame sync (0xFF Ex) is MP3; "RIFF"/"FORM"/".snd"/"caff" is a
-//      libsndfile container; "OggS" is an Ogg container; the AC-3, DTS, ADTS,
+//      libsndfile container; "OggS" is an Ogg container, and Ogg FLAC when its
+//      first packet opens with the Ogg FLAC mapping header; the AC-3, DTS, ADTS,
 //      and ASF sync words are FFmpeg-only elementary streams or containers.
 //      An "ID3" prefix is a tag, not a format: the sniff skips the ID3v2 tag
 //      (its syncsafe size, plus the footer when flagged) and classifies the
@@ -48,11 +49,12 @@
 //   4. The frozen-decoder rule is structural: when the file is FLAC or MP3,
 //      libsndfile is removed from the candidate list entirely, so its own
 //      optional FLAC/MP3 support can never shadow libFLAC or libmpg123. "FLAC or
-//      MP3" is decided by content sniff always, and by a .flac/.mp3/.mp2
-//      extension UNLESS the content unmistakably says a sndfile container or an
-//      Ogg container (the two mislabel cases: a real WAV named ".mp3" should
-//      still play through sndfile, because that is not libsndfile decoding an
-//      MP3, and an Ogg FLAC named ".flac" is libsndfile's Ogg job).
+//      MP3" is decided by content sniff always (Ogg FLAC included), and by a
+//      .flac/.mp3/.mp2 extension UNLESS the content unmistakably says a sndfile
+//      container or another Ogg stream (the two mislabel cases: a real WAV named
+//      ".mp3" should still play through sndfile, because that is not libsndfile
+//      decoding an MP3, and an Ogg Vorbis or Opus file named ".flac" is not FLAC
+//      at all).
 //
 //   5. When nothing opens, return nullptr and report the most-likely decoder's
 //      own error, so the user sees a relevant reason rather than the last
@@ -115,27 +117,34 @@ enum class Dec {
 };
 
 // What the leading bytes look like. Distinct from Dec because one sniff can map
-// to several candidate decoders: "Sndfile" means "a container libsndfile reads",
-// and "Ogg" is split out because an Ogg stream routes only to libsndfile or
-// FFmpeg, never to the raw-FLAC or MP3 decoders (which key off their own magic).
-enum class Sniff { Flac, Mp3, Ogg, Ac3, Dts, Wma, Adts, Sndfile, Unknown };
+// to several candidate decoders: "Sndfile" means "a container libsndfile reads".
+// Ogg splits in two: "OggFlac" is FLAC in Ogg, which libFLAC opens through its
+// Ogg entry point, and "Ogg" is any other Ogg stream (Vorbis, Opus), which routes
+// only to libsndfile or FFmpeg, never to the FLAC or MP3 decoders.
+enum class Sniff { Flac, OggFlac, Mp3, Ogg, Ac3, Dts, Wma, Adts, Sndfile, Unknown };
 
-constexpr std::size_t kSniffBytes = 16;
+// Enough for every signature below, the longest being Ogg FLAC's: a 27-byte page
+// header, its segment table, then the 5-byte mapping header that opens the first
+// packet.
+constexpr std::size_t kSniffBytes = 64;
 
 // Classify a window of leading bytes (the file head, or the first bytes after
 // an ID3v2 tag). Pure: no I/O, so the ID3 re-sniff below can run it on a
 // second window. Unknown means none of the signatures matched.
 Sniff classifyBytes(const unsigned char* b, std::size_t n) {
-    auto starts = [&](const char* sig, std::size_t len) {
-        if (n < len) {
+    auto matchAt = [&](std::size_t off, const char* sig, std::size_t len) {
+        if (n < off + len) {
             return false;
         }
         for (std::size_t i = 0; i < len; ++i) {
-            if (b[i] != static_cast<unsigned char>(sig[i])) {
+            if (b[off + i] != static_cast<unsigned char>(sig[i])) {
                 return false;
             }
         }
         return true;
+    };
+    auto starts = [&](const char* sig, std::size_t len) {
+        return matchAt(0, sig, len);
     };
 
     // Exact match on the first four bytes, for the binary sync words below.
@@ -200,7 +209,16 @@ Sniff classifyBytes(const unsigned char* b, std::size_t n) {
         return Sniff::Mp3;  // MPEG frame sync
     }
     if (starts("OggS", 4)) {
-        return Sniff::Ogg;  // Ogg container (Vorbis/Opus/FLAC); never MP3 or raw FLAC
+        // Ogg FLAC: the first packet opens with 0x7F "FLAC". Byte 26 of the page
+        // header counts the segment-table bytes that follow it; the packet data
+        // starts after them.
+        if (n > 26) {
+            const std::size_t packet = 27 + static_cast<std::size_t>(b[26]);
+            if (n > packet && b[packet] == 0x7F && matchAt(packet + 1, "FLAC", 4)) {
+                return Sniff::OggFlac;
+            }
+        }
+        return Sniff::Ogg;  // any other Ogg stream (Vorbis, Opus); never MP3 or FLAC
     }
     if (starts("RIFF", 4) || starts("FORM", 4) || starts(".snd", 4) ||
         starts("caff", 4)) {
@@ -325,14 +343,17 @@ std::unique_ptr<IDecoder> DecoderFactory::open(const std::string& path,
     switch (sniff) {
         case Sniff::Flac:    order = {Dec::Flac, Dec::Mp3, Dec::Sndfile}; break;
         case Sniff::Mp3:     order = {Dec::Mp3, Dec::Flac, Dec::Sndfile}; break;
-        // Ogg container. The only valid native candidate is libsndfile (it reads
-        // Ogg/FLAC; the Vorbis/Opus it declines on an FFmpeg build fall through
-        // to FFmpeg). The raw-FLAC and MP3 decoders are deliberately excluded:
-        // an Ogg stream carries neither magic, and offering it to Mpg123Decoder
-        // risks a frame-sync false positive (Opus packets can contain 0xFF 0xEx
-        // bytes that libmpg123 mistakes for an MPEG frame, opening the file as
-        // bogus "MP3"). So: Sndfile, then the terminal FFmpeg appended below,
-        // and nothing else.
+        // FLAC in Ogg. libFLAC opens it through its Ogg entry point, and the
+        // frozen-decoder rule below keeps libsndfile out, as for native FLAC.
+        case Sniff::OggFlac: order = {Dec::Flac}; break;
+        // Any other Ogg stream. The only valid native candidate is libsndfile
+        // (the Vorbis/Opus it declines on an FFmpeg build fall through to
+        // FFmpeg). The FLAC and MP3 decoders are deliberately excluded: such a
+        // stream carries neither magic, and offering it to Mpg123Decoder risks a
+        // frame-sync false positive (Opus packets can contain 0xFF 0xEx bytes
+        // that libmpg123 mistakes for an MPEG frame, opening the file as bogus
+        // "MP3"). So: Sndfile, then the terminal FFmpeg appended below, and
+        // nothing else.
         case Sniff::Ogg:     order = {Dec::Sndfile}; break;
         // Raw AC3 / DTS / ADTS-AAC elementary stream, or an ASF / WMA container.
         // No native decoder reads any of these, and offering them to
@@ -361,16 +382,13 @@ std::unique_ptr<IDecoder> DecoderFactory::open(const std::string& path,
     }
 
     // Frozen-decoder rule. Exclude sndfile when the file is FLAC or MP3 by
-    // content, or by a .flac/.mp3/.mp2 extension that the content does not contradict.
-    // An Ogg sniff is a second contradiction that keeps sndfile IN: the rule
-    // exists to keep libsndfile away from raw FLAC/MP3 BITSTREAMS, where its own
-    // optional support would shadow the reference decoders, and an Ogg container
-    // is neither. Ogg-contained FLAC is precisely libsndfile's job in this
-    // cascade (see the Sniff::Ogg routing above), and such files are named
-    // ".flac" often enough in the wild that erasing sndfile here would hand them
-    // to the FFmpeg fallback, or, on a native-only build, leave them unplayable,
-    // contradicting the Ogg case's own routing intent.
-    const bool contentFlacOrMp3 = (sniff == Sniff::Flac || sniff == Sniff::Mp3);
+    // content (Ogg FLAC included), or by a .flac/.mp3/.mp2 extension that the
+    // content does not contradict. A non-FLAC Ogg sniff is a second
+    // contradiction that keeps sndfile IN: an Ogg Vorbis or Opus file named
+    // ".flac" is not FLAC, and on a build without FFmpeg libsndfile is the only
+    // decoder that can play it.
+    const bool contentFlacOrMp3 =
+        (sniff == Sniff::Flac || sniff == Sniff::OggFlac || sniff == Sniff::Mp3);
     const bool extFlacOrMp3 = (extFlac || extMp3);
     const bool excludeSndfile =
         contentFlacOrMp3 ||

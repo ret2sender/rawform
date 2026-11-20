@@ -154,8 +154,9 @@ std::unique_ptr<IDecoder> SndfileDecoder::open(const std::string& path,
     // its terminal FFmpeg candidate. Gated on FFmpeg actually being in the build:
     // with no FFmpeg to catch them, declining would leave these files unplayable,
     // so a no-FFmpeg build keeps serving them, at a zero bitrate. Every other
-    // subtype, the PCM containers (WAV/AIFF/AU/CAF) and any Ogg/FLAC the native
-    // FlacDecoder did not sniff, is still handled here.
+    // subtype, the PCM containers (WAV/AIFF/AU/CAF) among them, is still handled
+    // here. Ogg FLAC is not offered to this decoder: the factory sniffs it and
+    // routes it to FlacDecoder.
 #if RAWFORM_HAVE_FFMPEG
     {
         const int subtype = info.format & SF_FORMAT_SUBMASK;
