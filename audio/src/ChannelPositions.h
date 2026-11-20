@@ -25,11 +25,12 @@
 // AudioFormat::channelMask: a set of WAVEFORMATEXTENSIBLE speaker bits, with the
 // channels interleaved in ascending bit order. A mask of 0 means the default
 // order for the channel count, the table below: for 1 to 8 channels FLAC's
-// channel assignment and WAVE's default order agree, and that is the order the
-// native decoders deliver. The FFmpeg decoder reports the speakers its source
-// names when they differ from that order, so a 4.0 source (FL FR FC BC) is not
-// declared as quad (FL FR BL BR), nor AC3's side surrounds (SL SR) as back
-// surrounds (BL BR). The layout rides in AudioFormat rather
+// channel assignment and WAVE's default order agree. The FFmpeg and FLAC
+// decoders report the speakers their source names (FFmpeg's channel layout, a
+// FLAC file's WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment) when they differ from
+// that order, through the one rule in sourceChannelMask below. So a 4.0 source
+// (FL FR FC BC) is not declared as quad (FL FR BL BR), nor AC3's side surrounds
+// (SL SR) as back surrounds (BL BR). The layout rides in AudioFormat rather
 // than beside it because every path that must agree on it already carries one:
 // the gapless stitch gate, the hold gate, the sink's open and reconfigure.
 //
@@ -181,6 +182,25 @@ defaultChannelMask(std::uint16_t channels) noexcept {
             mask | channelBit(detail::kPositionRows[channels - 1u][i]));
     }
     return mask;
+}
+
+/// The mask a decoder reports for a source that names its speakers as a mask,
+/// with its channels in ascending bit order: the source's mask when it differs
+/// from the count's default order, and 0 otherwise. 0 also for anything the
+/// table cannot declare: fewer than 2 or more than kMaxPositionedChannels
+/// channels, a speaker the table cannot name, or a bit count that disagrees
+/// with the channel count. Every decoder goes through this one rule, so two
+/// sources with the same speakers carry the same mask and compare equal at the
+/// stitch and hold gates.
+[[nodiscard]] constexpr std::uint16_t
+sourceChannelMask(std::uint64_t speakers, std::uint16_t channels) noexcept {
+    if (channels < 2 || channels > kMaxPositionedChannels ||
+        (speakers & ~std::uint64_t{kNamedChannelMask}) != 0 ||
+        std::popcount(speakers) != channels) {
+        return 0;
+    }
+    const auto mask = static_cast<std::uint16_t>(speakers);
+    return mask == defaultChannelMask(channels) ? 0 : mask;
 }
 
 /// The positions of a stream's channels, in order, for 1 to

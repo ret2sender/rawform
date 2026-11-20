@@ -61,31 +61,71 @@
 
 #include "decoders/FlacDecoder.h"
 
+#include "ChannelPositions.h"
 #include "LiveBitrateMeter.h"
 #include "rawform/audio/Types.h"
 
+#include <FLAC/metadata.h>
 #include <FLAC/stream_decoder.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>  // IWYU pragma: keep (std::uintN_t)
 #include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 namespace rawform::audio {
 
+namespace {
+
+// The value of a file's WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment: the speakers
+// it names when they differ from FLAC's default order for its channel count, its
+// channels in ascending bit order. The FLAC format writes the value as "0x" and
+// hex digits, and so does the flac tool; a value in any other form is not
+// guessed at and reads as 0, no mask. libFLAC matches the field name without
+// regard to case, as Vorbis comments require.
+std::uint64_t channelMaskComment(const FLAC__StreamMetadata& comments) {
+    const int at = FLAC__metadata_object_vorbiscomment_find_entry_from(
+        &comments, 0, "WAVEFORMATEXTENSIBLE_CHANNEL_MASK");
+    if (at < 0) {
+        return 0;
+    }
+    const FLAC__StreamMetadata_VorbisComment_Entry& entry =
+        comments.data.vorbis_comment.comments[at];
+    const std::string_view text(reinterpret_cast<const char*>(entry.entry),
+                                entry.length);
+    const std::size_t eq = text.find('=');
+    if (eq == std::string_view::npos) {
+        return 0;
+    }
+    const std::string_view value = text.substr(eq + 1);
+    if (value.size() < 3 || value.size() > 10 || value[0] != '0' ||
+        (value[1] != 'x' && value[1] != 'X')) {
+        return 0;
+    }
+    const char*   first = value.data() + 2;
+    const char*   last  = value.data() + value.size();
+    std::uint64_t mask  = 0;
+    const auto [end, ec] = std::from_chars(first, last, mask, 16);
+    return ec == std::errc{} && end == last ? mask : 0;
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // The pimpl. Owns the libFLAC handle (freed in its destructor so FlacDecoder's
 // own destructor can be the defaulted one), the staging buffer that bridges
-// push to pull, and the facts cached from STREAMINFO at open time.
+// push to pull, and the facts cached from the metadata at open time.
 struct FlacDecoder::Impl {
     FLAC__StreamDecoder* dec = nullptr;
 
-    // ---- facts cached once from STREAMINFO ----------------------------------
+    // ---- facts cached once from the metadata --------------------------------
     AudioFormat   fmt{};
     SourceInfo    src{};
     std::uint64_t total      = 0;      // total samples (frames), 0 == unknown
@@ -93,6 +133,9 @@ struct FlacDecoder::Impl {
     unsigned      bits       = 0;      // STREAMINFO bits-per-sample (16/24/...)
     float         invScale   = 0.0f;   // 1 / 2^(bits-1): int sample -> [-1, 1)
     bool          seekable   = false;
+    // The channel-mask comment's value, 0 when there is none; open() turns it
+    // into fmt.channelMask once every metadata block has been seen.
+    std::uint64_t speakerMask = 0;
 
     // ---- the push-to-pull staging buffer ------------------------------------
     // staging holds interleaved float32 produced by the write callback but not
@@ -193,8 +236,12 @@ struct FlacDecoder::Impl {
     static void metadataCallback(const FLAC__StreamDecoder* /*dec*/,
                                  const FLAC__StreamMetadata* meta, void* client) {
         auto* impl = static_cast<Impl*>(client);
+        if (meta->type == FLAC__METADATA_TYPE_VORBIS_COMMENT) {
+            impl->speakerMask = channelMaskComment(*meta);
+            return;
+        }
         if (meta->type != FLAC__METADATA_TYPE_STREAMINFO) {
-            return;  // we only care about STREAMINFO; ignore VORBIS_COMMENT etc.
+            return;  // open() asks libFLAC for these two block types only
         }
         const auto& si = meta->data.stream_info;
         impl->channels = si.channels;
@@ -262,7 +309,7 @@ bool startsWithOggPage(const std::string& path) {
 
 // ---------------------------------------------------------------------------
 // Factory. Non-throwing: returns a fully-opened decoder or nullptr, never a
-// half-open object. STREAMINFO is read here (process_until_end_of_metadata) so
+// half-open object. The metadata is read here (process_until_end_of_metadata) so
 // format(), totalFrames(), and sourceInfo() are all valid before any audio is
 // pulled.
 std::unique_ptr<IDecoder> FlacDecoder::open(const std::string& path,
@@ -281,6 +328,12 @@ std::unique_ptr<IDecoder> FlacDecoder::open(const std::string& path,
     // it at the end); we only decode forward and seek, so disable it.
     FLAC__stream_decoder_set_md5_checking(impl->dec, false);
 
+    // libFLAC hands the metadata callback STREAMINFO alone unless asked for more;
+    // the comment block is where a file names speakers other than the default
+    // order for its channel count. The one call covers both entry points below.
+    FLAC__stream_decoder_set_metadata_respond(impl->dec,
+                                              FLAC__METADATA_TYPE_VORBIS_COMMENT);
+
     const FLAC__StreamDecoderInitStatus st =
         startsWithOggPage(path)
             ? FLAC__stream_decoder_init_ogg_file(
@@ -298,8 +351,9 @@ std::unique_ptr<IDecoder> FlacDecoder::open(const std::string& path,
     }
 
     // Drive the decoder through every metadata block so metadataCallback has run
-    // and STREAMINFO is cached. This positions the decoder at the first audio
-    // frame, so a fresh decoder reads from sample 0 with an empty staging buffer.
+    // and STREAMINFO and the channel-mask comment are cached. This positions the
+    // decoder at the first audio frame, so a fresh decoder reads from sample 0
+    // with an empty staging buffer.
     if (!FLAC__stream_decoder_process_until_end_of_metadata(impl->dec)) {
         if (error) {
             *error = "libFLAC failed to read stream metadata";
@@ -316,6 +370,13 @@ std::unique_ptr<IDecoder> FlacDecoder::open(const std::string& path,
         }
         return nullptr;
     }
+
+    // The comment's mask describes the channels in ascending bit order, the order
+    // a mask means, so the samples need no reordering; the shared rule decides
+    // whether it is reported. Applied here rather than in the callback so the
+    // order of the two blocks in the file does not matter.
+    impl->fmt.channelMask =
+        sourceChannelMask(impl->speakerMask, static_cast<std::uint16_t>(impl->channels));
 
     // SourceInfo. FLAC is lossless, so there is no constant bitrate; we report
     // the AVERAGE rate (file bytes over duration).

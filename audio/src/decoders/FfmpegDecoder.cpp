@@ -170,22 +170,21 @@ static_assert(AV_CH_SIDE_RIGHT == channelBit(ChannelPosition::SideRight));
 
 // The source's speakers, for AudioFormat::channelMask (ChannelPositions.h). In
 // FFmpeg's native order the channels are interleaved in ascending bit order,
-// the order a mask describes, and the resampler keeps that order. 0 when the
-// speakers are the default order for the channel count, so one layout has one
-// representation (and such a track still joins a native decoder's stream
-// gaplessly), and 0 for any layout a mask cannot describe: an unspecified,
-// custom or ambisonic order, more channels than the table covers, or a speaker
-// the table cannot name. Those keep the default order's positions.
+// the order a mask describes, and the resampler keeps that order, so the
+// layout's mask goes to sourceChannelMask, the rule every decoder shares: 0
+// when the speakers are the default order for the channel count (so such a
+// track still joins a native decoder's stream gaplessly), and 0 for more
+// channels than the table covers or a speaker it cannot name. Any other order
+// gets 0 as well: an unspecified, custom or ambisonic one. Those keep the
+// default order's positions.
 std::uint16_t channelMaskFor(const AVChannelLayout& layout) {
-    if (layout.order != AV_CHANNEL_ORDER_NATIVE || layout.nb_channels < 2 ||
-        layout.nb_channels > kMaxPositionedChannels ||
-        (layout.u.mask & ~std::uint64_t{kNamedChannelMask}) != 0) {
+    // The range test comes before the narrowing cast, not after it.
+    if (layout.order != AV_CHANNEL_ORDER_NATIVE || layout.nb_channels < 0 ||
+        layout.nb_channels > kMaxPositionedChannels) {
         return 0;
     }
-    const auto mask = static_cast<std::uint16_t>(layout.u.mask);
-    return mask == defaultChannelMask(static_cast<std::uint16_t>(layout.nb_channels))
-               ? 0
-               : mask;
+    return sourceChannelMask(layout.u.mask,
+                             static_cast<std::uint16_t>(layout.nb_channels));
 }
 
 // Container bit depth for the status line, following the engine rule: a real

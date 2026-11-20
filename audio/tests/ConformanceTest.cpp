@@ -81,6 +81,7 @@
 #define SF_FORMAT_OPUS 0x0064
 #endif
 
+#include <FLAC/metadata.h>
 #include <FLAC/stream_encoder.h>
 
 #include <algorithm>
@@ -207,9 +208,33 @@ FLAC__int32 quantize(float f, int bits) noexcept {
 // The container the FLAC encoder writes: a native FLAC stream, or FLAC in Ogg.
 enum class Container { Native, Ogg };
 
-// 16-bit FLAC via libFLAC's stream encoder, carrying the same ramp.
-bool writeFlac(const std::string& path, int channels, int rate, int bits,
-               std::uint64_t frames, Container container = Container::Native) {
+using MetadataPtr =
+    std::unique_ptr<FLAC__StreamMetadata, decltype(&FLAC__metadata_object_delete)>;
+
+// A VORBIS_COMMENT block holding one comment, given whole as "NAME=value" and
+// written verbatim, so a test controls both the field name's case and the
+// value's form; null when libFLAC cannot build it.
+MetadataPtr commentBlock(const char* comment) {
+    MetadataPtr block(FLAC__metadata_object_new(FLAC__METADATA_TYPE_VORBIS_COMMENT),
+                      &FLAC__metadata_object_delete);
+    std::string                              text(comment);
+    FLAC__StreamMetadata_VorbisComment_Entry entry{};
+    entry.length = static_cast<FLAC__uint32>(text.size());
+    entry.entry  = reinterpret_cast<FLAC__byte*>(text.data());
+    if (!block ||
+        !FLAC__metadata_object_vorbiscomment_append_comment(block.get(), entry,
+                                                            /*copy=*/true)) {
+        return MetadataPtr(nullptr, &FLAC__metadata_object_delete);
+    }
+    return block;
+}
+
+// FLAC via libFLAC's stream encoder. sampleAt(frame, channel) gives each sample
+// in [-1, 1); a non-null comments block is written after STREAMINFO.
+template <typename SampleAt>
+bool encodeFlac(const std::string& path, int channels, int rate, int bits,
+                std::uint64_t frames, Container container,
+                FLAC__StreamMetadata* comments, SampleAt sampleAt) {
     FLAC__StreamEncoder* enc = FLAC__stream_encoder_new();
     if (enc == nullptr) {
         return false;
@@ -220,6 +245,9 @@ bool writeFlac(const std::string& path, int channels, int rate, int bits,
     ok &= FLAC__stream_encoder_set_sample_rate(enc, static_cast<unsigned>(rate));
     ok &= FLAC__stream_encoder_set_total_samples_estimate(enc, frames);
     ok &= FLAC__stream_encoder_set_compression_level(enc, 5);
+    if (comments != nullptr) {
+        ok &= FLAC__stream_encoder_set_metadata(enc, &comments, 1);
+    }
     if (!ok) {
         FLAC__stream_encoder_delete(enc);
         return false;
@@ -243,7 +271,7 @@ bool writeFlac(const std::string& path, int channels, int rate, int bits,
         for (unsigned f = 0; f < n; ++f) {
             for (int c = 0; c < channels; ++c) {
                 buf[static_cast<std::size_t>(f) * channels + c] =
-                    quantize(pat((written + f) * channels + c), bits);
+                    quantize(sampleAt(written + f, c), bits);
             }
         }
         if (!FLAC__stream_encoder_process_interleaved(enc, buf.data(), n)) {
@@ -255,6 +283,16 @@ bool writeFlac(const std::string& path, int channels, int rate, int bits,
     good = (FLAC__stream_encoder_finish(enc) != 0) && good;
     FLAC__stream_encoder_delete(enc);
     return good;
+}
+
+// FLAC carrying the ramp.
+bool writeFlac(const std::string& path, int channels, int rate, int bits,
+               std::uint64_t frames, Container container = Container::Native) {
+    return encodeFlac(path, channels, rate, bits, frames, container, nullptr,
+                      [channels](std::uint64_t frame, int c) {
+                          return pat(frame * static_cast<std::uint64_t>(channels) +
+                                     static_cast<std::uint64_t>(c));
+                      });
 }
 
 // Raw bytes to a file, for the encoder-free MP3 and AAC fixtures.
@@ -617,6 +655,7 @@ void checkChannelPositions() {
     using P = ChannelPosition;
     using rawform::audio::channelPositionsFor;
     using rawform::audio::defaultChannelMask;
+    using rawform::audio::sourceChannelMask;
     const auto fmt = [](std::uint16_t channels, std::uint16_t mask) {
         return AudioFormat{
             .sampleRate = 48000, .channels = channels, .channelMask = mask};
@@ -654,16 +693,27 @@ void checkChannelPositions() {
     CHECK(defaultChannelMask(7) == 0x070F);
     CHECK(defaultChannelMask(8) == 0x063F);
     CHECK(defaultChannelMask(9) == 0);
+
+    // The mask a decoder reports for a source's own mask: the mask when it
+    // differs from the default order, 0 for the default order itself, and 0 for
+    // anything the table cannot declare (an unnamed speaker, a bit count that
+    // disagrees with the channel count, mono, more than eight channels).
+    CHECK(sourceChannelMask(0x0107, 4) == 0x0107);
+    CHECK(sourceChannelMask(0x0033, 4) == 0);
+    CHECK(sourceChannelMask(0x0043, 3) == 0);
+    CHECK(sourceChannelMask(0x0107, 3) == 0);
+    CHECK(sourceChannelMask(0x0004, 1) == 0);
+    CHECK(sourceChannelMask(0x073F, 9) == 0);
 }
 
-#if RAWFORM_HAVE_FFMPEG
 // ---------------------------------------------------------------------------
 // Speaker layouts end to end: what each decoded channel holds is what a sink is
-// told it is. Each AC3 fixture carries one tone per source channel, placed by
-// speaker (fixtures/Ac3LayoutBlob.h). checkLayout opens it through the factory,
-// takes the positions a sink would declare for the decoded format, and listens
-// to every decoded channel: the strongest of the nine tones below must be the
-// tone of the position declared for that channel.
+// told it is. Each layout fixture carries one tone per source channel, placed by
+// speaker: the AC3 streams in fixtures/Ac3LayoutBlob.h, and the FLAC files
+// written below. checkDecodedLayout opens one through the factory, takes the
+// positions a sink would declare for the decoded format, and listens to every
+// decoded channel: the strongest of the nine tones below must be the tone of the
+// position declared for that channel.
 
 // The tone each position carries in the fixtures. All nine are listened for, so
 // a channel declared at the wrong position hears the wrong tone.
@@ -733,10 +783,18 @@ std::unique_ptr<IDecoder> openLayoutFixture(const std::string& path) {
     return dec;
 }
 
-void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
-                 std::initializer_list<ChannelPosition> expected) {
-    const std::string path = std::string("rawform_layout_") + name + ".ac3";
-    CHECK(writeBytes(path, bytes, size));
+// The tone a position carries in the fixtures.
+double toneHz(ChannelPosition p) noexcept {
+    const auto* it = std::ranges::find(kPositionTones, p, &PositionTone::position);
+    return it != std::ranges::end(kPositionTones) ? it->hz : 0.0;
+}
+
+// The layout check proper, on a fixture already on disk, which it removes. A
+// mask, when given, is also asserted, for the rows whose point is the mask the
+// decoder reports.
+void checkDecodedLayout(const char* name, const std::string& path,
+                        DecoderKind decoder, std::optional<std::uint16_t> mask,
+                        std::initializer_list<ChannelPosition> expected) {
     std::unique_ptr<IDecoder> dec = openLayoutFixture(path);
     CHECK(dec != nullptr);
     if (!dec) {
@@ -745,8 +803,16 @@ void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
     }
 
     const AudioFormat fmt = dec->format();
-    CHECK(dec->sourceInfo().decoder == DecoderKind::Ffmpeg);
+    CHECK(dec->sourceInfo().decoder == decoder);
     CHECK(static_cast<std::size_t>(fmt.channels) == expected.size());
+    if (mask) {
+        if (fmt.channelMask != *mask) {
+            std::fprintf(stderr, "  %s: mask 0x%04X, expected 0x%04X\n", name,
+                         static_cast<unsigned>(fmt.channelMask),
+                         static_cast<unsigned>(*mask));
+        }
+        CHECK(fmt.channelMask == *mask);
+    }
     const auto declared = rawform::audio::channelPositionsFor(fmt);
     CHECK(std::ranges::equal(declared, expected));
 
@@ -780,6 +846,42 @@ void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
 
     dec.reset();
     std::remove(path.c_str());
+}
+
+// A 16-bit 48 kHz FLAC layout fixture, half a second of one tone per channel,
+// for the positions listed in order, carrying comment ("NAME=value") unless it
+// is null. The decoder must report mask and declare the listed positions, each
+// channel holding its own tone.
+void checkFlacLayout(const char* name, Container container, const char* comment,
+                     std::uint16_t mask,
+                     std::initializer_list<ChannelPosition> positions) {
+    const std::string path = std::string("rawform_layout_") + name +
+                             (container == Container::Ogg ? ".oga" : ".flac");
+    constexpr int       rate = 48000;
+    std::vector<double> hz;
+    for (const ChannelPosition p : positions) {
+        hz.push_back(toneHz(p));
+    }
+    MetadataPtr comments = comment != nullptr
+                               ? commentBlock(comment)
+                               : MetadataPtr(nullptr, &FLAC__metadata_object_delete);
+    CHECK(comment == nullptr || comments != nullptr);
+    CHECK(encodeFlac(path, static_cast<int>(hz.size()), rate, 16, 24000, container,
+                     comments.get(), [&hz](std::uint64_t frame, int c) {
+                         const double t = static_cast<double>(frame) / rate;
+                         return static_cast<float>(
+                             0.25 * std::sin(2.0 * std::numbers::pi *
+                                             hz[static_cast<std::size_t>(c)] * t));
+                     }));
+    checkDecodedLayout(name, path, DecoderKind::Flac, mask, positions);
+}
+
+#if RAWFORM_HAVE_FFMPEG
+void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
+                 std::initializer_list<ChannelPosition> expected) {
+    const std::string path = std::string("rawform_layout_") + name + ".ac3";
+    CHECK(writeBytes(path, bytes, size));
+    checkDecodedLayout(name, path, DecoderKind::Ffmpeg, std::nullopt, expected);
 }
 
 // A source FFmpeg decodes in the default order for its channel count reports
@@ -824,6 +926,35 @@ int main() {
     for (const Fixture& fx : fixtures) {
         std::printf("[conformance] %s\n", fx.name);
         runBattery(fx);
+    }
+
+    {
+        // FLAC files that name 4.0 in a WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment,
+        // natively and in Ogg, with the field name in either case. Then files
+        // whose comment, or its absence, leaves the default order for the count:
+        // the default mask itself, a speaker the table cannot name, a bit count
+        // that disagrees with the channel count, and a value not written in hex.
+        using P = ChannelPosition;
+        constexpr const char* k40 = "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0107";
+        const std::initializer_list<P> p40 = {P::FrontLeft, P::FrontRight,
+                                              P::FrontCenter, P::BackCenter};
+        const std::initializer_list<P> quad = {P::FrontLeft, P::FrontRight,
+                                               P::BackLeft, P::BackRight};
+        const std::initializer_list<P> p30 = {P::FrontLeft, P::FrontRight,
+                                              P::FrontCenter};
+        std::printf("[conformance] native layouts\n");
+        checkFlacLayout("flac_40", Container::Native, k40, 0x0107, p40);
+        checkFlacLayout("oggflac_40", Container::Ogg, k40, 0x0107, p40);
+        checkFlacLayout("flac_40_lowercase", Container::Native,
+                        "waveformatextensible_channel_mask=0x0107", 0x0107, p40);
+        checkFlacLayout("flac_quad_mask", Container::Native,
+                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0033", 0, quad);
+        checkFlacLayout("flac_flc_mask", Container::Native,
+                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0043", 0, p30);
+        checkFlacLayout("flac_40_mask_on_3", Container::Native, k40, 0, p30);
+        checkFlacLayout("flac_decimal_mask", Container::Native,
+                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=263", 0, quad);
+        checkFlacLayout("flac_no_mask", Container::Native, nullptr, 0, quad);
     }
 
 #if RAWFORM_HAVE_FFMPEG
