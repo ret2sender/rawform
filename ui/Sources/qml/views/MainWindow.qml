@@ -34,15 +34,14 @@
 //
 // Wiring: this file binds the C++ singletons (AudioController, PlaybackQueue,
 // PlaylistTabs, TrackScanner, PlaylistStore, WindowGeometryStore,
-// MetadataPaneModel) to the components, which declare what they consume and
-// reach no singleton themselves. It forwards ThemedMenuBar's request signals to
-// PlaylistDialogs and the tool windows, feeds the status line (live activity
-// while busy, otherwise the latest LogStore entry), logs activity edges and
-// playback errors, and persists the windowed geometry on quit. Settings, Find,
-// About and the file dialogs are created here on their first use and then
-// share this window's lifetime (a Loader each, so none of them exists before
-// the first frame); Properties, Custom Columns and Rename Files are created by
-// PlaylistView.
+// MetadataPaneModel) to the components. It forwards ThemedMenuBar's request
+// signals to PlaylistDialogs and the tool windows, feeds the status line (live
+// activity while busy, otherwise the latest LogStore entry), logs activity
+// edges and playback errors, and persists the windowed geometry on quit.
+// Settings, Find, About and the file dialogs are created here on their first
+// use and then share this window's lifetime (a Loader each, so none of them
+// exists before the first frame); Properties, Custom Columns and Rename Files
+// are created by PlaylistView.
 
 pragma ComponentBehavior: Bound
 
@@ -110,8 +109,9 @@ ApplicationWindow {
         PlaylistTabs.flushPendingWrites()
         // Persist the windowed frame only. Closing while maximized or
         // fullscreen skips the write, so the last good windowed geometry in
-        // window.yaml survives (the macOS fullscreen-exit fix already leaves a
-        // clean windowed frame behind, which is what makes this guard exact).
+        // window.yaml survives (MacOSStyling's fullscreen-exit handling already
+        // leaves a clean windowed frame behind, which is what makes this guard
+        // exact).
         if (applicationWindow.visibility === Window.Windowed)
             WindowGeometryStore.save(applicationWindow.x, applicationWindow.y,
                                 applicationWindow.width, applicationWindow.height)
@@ -183,8 +183,8 @@ ApplicationWindow {
     // The three tool windows (Settings, Find, About) and the file dialogs are
     // created on their first use, not with this window: each sits behind a
     // Loader that is inactive until its open function flips it, and never
-    // goes inactive again, so from the first open on the instance is the
-    // hide()-reused one it always was (the Find texts survive a close, the
+    // goes inactive again, so from the first open on the instance is a
+    // hide()-reused one (the Find texts survive a close, the
     // Settings size restores from window.yaml, the Escape shortcuts stay
     // gated on their own window). What this buys is the first frame: a
     // Settings window alone is several hundred QML objects, and none of the
@@ -212,7 +212,7 @@ ApplicationWindow {
 
     // The non-modal Find dialog (Edit > Find). One instance, so the session's
     // last search text survives a close. It follows the ACTIVE tab through the
-    // two bindings, and reveals rows through the playlist view.
+    // three bindings, and reveals rows through the playlist view.
     Loader {
         id: findLoader
         active: false

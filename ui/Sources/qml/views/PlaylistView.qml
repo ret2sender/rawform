@@ -21,9 +21,10 @@
 // PlaylistView.qml
 //
 // Playlist view: a HorizontalHeaderView above a TableView in a rounded,
-// hover-reactive frame. Both bind to the same PlaylistModel, but the header is
-// independent (no syncView): it renders its own cells from the model's
-// columnCount/headerData. That independence is the point:
+// hover-reactive frame. The body binds the active tab's PlaylistFilterProxy and
+// the header its source PlaylistModel, but the header is independent (no
+// syncView): it renders its own cells from the model's columnCount/headerData.
+// That independence is the point:
 //
 //  - Column widths live in ONE place, the header's explicit column widths.
 //    Because the header always has realized cells, its built-in resizableColumns
@@ -54,10 +55,10 @@ Item {
     id: root
 
     // The native selection model, also created in C++ and assigned from
-    // MainWindow. Bound to the TableView below; its currentIndex drives the
-    // metadata pane (wired in C++). Implements the FileQueue selection flow
-    // (plain / ctrl-toggle / shift-range / ctrl+shift additive) via the
-    // click handler in the cell delegate.
+    // MainWindow. Attached to the TableView below; its selection drives the
+    // metadata pane (wired in C++). The selection flow (plain / ctrl-toggle /
+    // shift-range / ctrl+shift additive) lives in the body's click overlay
+    // (bodyMouse).
     property ItemSelectionModel selectionModel
 
     // The CURRENT (focus) row, for the focus outline. Driven by the DATA
@@ -97,7 +98,7 @@ Item {
     // consumers (AudioController.playAt, the dialogs' openFor, the drop
     // position) get model.source plus a row mapped through it. The proxy
     // re-exports the invokables and signals this view uses, so the rest of the
-    // file reads as it did against the model.
+    // file reads as it would against the model.
     property PlaylistFilterProxy model
 
     // Bumped on the proxy's layoutChanged (a filter applied or lifted, a row
@@ -181,8 +182,8 @@ Item {
     // null log degrades to silent.
     property LogStore log
 
-    // Shift-range anchor: the row a range extends FROM. Mirrors FileQueue's
-    // __lastClickedIndex. Updated on every click.
+    // Shift-range anchor: the row a range extends FROM. Planted by every
+    // click except a Shift+click, which ranges from it.
     property int _anchorRow: -1
 
     // How far one Left / Right press moves playback. Five seconds is the
@@ -225,9 +226,9 @@ Item {
     // A click-hold-drag that EXTENDS the selection instead of moving rows.
     // Armed by a plain press on a row that was NOT already selected (the press
     // exclusive-selects it, making it the anchor) or by a shift press (anchor
-    // unchanged); a press on an already-selected row keeps arming the reorder
-    // drag as before, so select-then-drag still moves blocks. Ctrl presses stay
-    // click-only toggles (a live additive range cannot shrink truthfully).
+    // unchanged); a press on an already-selected row arms the reorder
+    // drag, so select-then-drag still moves blocks. Ctrl+Shift presses stay
+    // click-only (a live additive range cannot shrink truthfully).
     property bool _rowSelDragging: false
     // A Ctrl+click-hold-drag that APPENDS a live range to the selection
     // that existed at drag start. The press's toggle runs first (click
@@ -293,13 +294,13 @@ Item {
     // Centralized width fix-up for COLUMN REMOVALS, wherever they originate. Header
     // explicit widths are stored BY INDEX and never shift when the model removes a
     // column, so every column right of the removal would wear its old neighbor's width.
-    // Centralized here rather than in the QML toggle (hideColumn) because C++-initiated
+    // Centralized here rather than in the toggle (_toggleColumn) because C++-initiated
     // removals never pass through the toggle: deleting a shown custom column's DEFINITION
     // in the manager goes registry -> onCustomColumnRemoved -> begin/endRemoveColumns
     // with no view involvement, which is exactly the "each column takes its neighbor's
     // width" scenario this prevents. Snapshot on aboutToBe (columnCount is still the OLD
     // count there, so the positions are pre-removal and include the doomed span), splice,
-    // re-assert after. _toggleColumn's hide branch does NOT touch widths anymore; both
+    // re-assert after. _toggleColumn's hide branch does NOT touch widths; both
     // paths fixing up would splice twice.
     property var _widthsAcrossColumnRemoval: null
     Connections {
@@ -590,7 +591,7 @@ Item {
     // from the current view to the target reads as intent. Restores, the
     // launch positioning, and the cross-tab reveal stay INSTANT: they run
     // right after a model swap, where an animation would fly in from an
-    // arbitrary carryover position (the original from-the-top glitch), and
+    // arbitrary carryover position, and
     // TableView.animate stays false so nothing here can be canceled by
     // relayout churn; this animation drives contentY directly and is stopped
     // explicitly at every instant-positioning site and on switch-away. A
@@ -820,12 +821,12 @@ Item {
         return (root.model && first >= 0) ? root.model.mapRowToSource(first) : -1
     }
 
-    // The launch positioning, corrected after a real-world miss: playlist reads
+    // The launch positioning: playlist reads
     // are ASYNC, so restoreSession only STARTS them before the engine loads
     // this file; at completion time here the active tab is usually still
     // loading and both activeScrollRow() and the CURR focus row read -1, so
     // this parker finds nothing and the REAL launch restore is parked by
-    // onActiveTabLoadCompleted (the Connections above) when the load lands.
+    // onActiveTabLoadCompleted (the Connections below) when the load lands.
     // This parker still matters for the cases where the state IS already
     // here: a tiny playlist whose read won the race, and any synchronous
     // load path. Precedence when it does park: the persisted
@@ -904,7 +905,7 @@ Item {
         var hi = Math.max(anchor, row)
         model.selectRowRange(selectionModel, lo, hi, !additive)
         selectionModel.setCurrentIndex(_rowIndex(row), ItemSelectionModel.NoUpdate)
-        // anchor stays put for shift-range (matches FileQueue).
+        // anchor stays put for shift-range.
     }
 
     // Ctrl/Cmd click: toggle this row, leave others, make current.
@@ -1013,9 +1014,10 @@ Item {
     // --- Column-layout persistence surface ---------------------------------
     // Three functions, read and written by the hosts: PlaylistDialogs
     // snapshots currentColumnOrder() + currentColumnWidths() into a saved
-    // .rwfpl / preset, the tab bar and this file stash currentColumnWidths()
-    // on a tab switch (PlaylistTabs.stashActiveWidths), and applyWidths()
-    // seeds the header from a tab's parked widths on activation.
+    // .rwfpl and MainWindow into the column preset, the tab bar stashes
+    // currentColumnWidths() on a tab switch and this file after every column
+    // change (PlaylistTabs.stashActiveWidths), and applyWidths() seeds the
+    // header from a tab's parked widths on activation.
 
     // Read the current (possibly resized) widths, in VISUAL order, for saving
     // alongside the order below.
@@ -1040,7 +1042,7 @@ Item {
         return root.model ? root.model.currentColumnOrder() : []
     }
 
-    // Width-only seed, for a TAB SWITCH. The model swap (model: activeModel) has
+    // Width-only seed, for a TAB SWITCH. The model swap (model: activeView) has
     // already rebuilt the header's columns to the new tab's order; here we just
     // push that tab's PARKED widths onto the single header (which isn't
     // per-model) and relayout. No model reset, the order is already correct.
@@ -1055,7 +1057,7 @@ Item {
         root._layoutRevision++ // re-evaluate alignment bindings for the new model
     }
 
-    // When the bound model changes (a tab switch swapped activeModel underneath
+    // When the bound model changes (a tab switch swapped activeView underneath
     // us), re-seed the header from the now-active tab's parked widths. The
     // OUTGOING tab's widths were stashed by the tab bar just before the switch,
     // so they are safe in PlaylistTabs by the time we read activeWidths() here.
@@ -1245,7 +1247,7 @@ Item {
     }
 
     // The rounded frame. The content sits inside, rounded and clipped; the
-    // 1px stroke is drawn LAST as a sibling overlay on top of the content, so
+    // 2px stroke is drawn LAST as a sibling overlay on top of the content, so
     // opaque cells (e.g. the header) can never paint over the corner arc.
     // 10% opacity at rest, animating to 25% on hover over the whole area.
     Item {
@@ -1318,7 +1320,7 @@ Item {
                         id: headerCell
                         // Header has no rowHeightProvider, so this implicitHeight
                         // DOES set the header height (unlike the body cells). The
-                        // wrapper is now a plain Item; the visible cell is the
+                        // wrapper is a plain Item; the visible cell is the
                         // shared HeaderCell below, with the reorder and right-click
                         // MouseAreas layered on top as siblings. That keeps the
                         // load-bearing interaction here and the look in one shared
@@ -1333,10 +1335,10 @@ Item {
                         // atomically per cell.
                         required property int columnAlignment
 
-                        // Shared header-cell visual: the Theme.headerBand band, bold
-                        // elided title, and right-edge divider, identical to what it drew
-                        // inline before (and to the metadata header). showDivider is on
-                        // for the playlist's inter-column boundaries.
+                        // Shared header-cell visual (the metadata header uses it
+                        // too): the Theme.headerBand band, bold elided title, and
+                        // right-edge divider. showDivider is on for the playlist's
+                        // inter-column boundaries.
                         HeaderCell {
                             anchors.fill: parent
                             display: headerCell.display
@@ -1421,8 +1423,8 @@ Item {
                                     var b = root._dropBoundary
                                     var from = root._dragColumn
                                     var to = (b <= from) ? b : b - 1
-                                    // Defer the commit one tick. reorderColumn no
-                                    // longer resets the model (no empty-reset path),
+                                    // Defer the commit one tick. reorderColumn does
+                                    // not reset the model (no empty-reset path),
                                     // but moveVisualColumn emits columnsMoved, and
                                     // running that synchronously from inside THIS
                                     // delegate's own handler risks the view churning
@@ -1722,7 +1724,7 @@ Item {
                         }
                     }
 
-                    // The body does not own widths anymore, it reads the
+                    // The body does not own widths; it reads the
                     // header's explicit widths (the single source). The
                     // follow-trigger Connections below relayouts the body whenever
                     // the header's total width changes (a resize or applyWidths),
@@ -1803,7 +1805,7 @@ Item {
                             text: cell.display
                             // Precedence: the now-playing row reads green (tying
                             // it to the player bar's green status line), then a
-                            // selected row gets the lavender FileQueue look, then
+                            // selected row gets the lavender look, then
                             // an unavailable (missing-file) row is dimmed, then the
                             // normal gray. The green is gated on rowAvailable: a row
                             // the engine is "on" but that is missing/unreadable (a
@@ -1890,8 +1892,7 @@ Item {
                     // shows through. Bounded by the view's row count: a
                     // current index that a removal left past the last row
                     // (it happens between a queue cull and the focus-row
-                    // restore) must outline nothing, as a cell-drawn outline
-                    // had nothing to draw it with.
+                    // restore) must outline nothing.
                     Rectangle {
                         z: 2
                         visible: root._currentRow >= 0
@@ -1918,7 +1919,7 @@ Item {
             // We map the press into the table's content space and ask
             // cellAtPosition which cell (if any) is under the cursor:
             //   - no cell (y < 0)        -> empty space -> clear selection
-            //   - a cell, with modifiers -> the FileQueue selection flow:
+            //   - a cell, with modifiers -> the selection flow:
             //       plain      -> exclusive select
             //       ctrl/cmd   -> toggle that row
             //       shift      -> range from anchor (replace)
@@ -2622,13 +2623,13 @@ Item {
 
     // The custom-columns manager window ("Manage custom columns..."). A
     // frameless, NON-MODAL tool Window hosted here because this view owns the
-    // header menu that opens it and the `CustomColumnRegistry` registry it edits; its
-    // transient parent resolves to the main window automatically (the Loader
-    // is a child of the view), so it floats and competes for focus alongside
-    // the Properties and Settings windows. Single reused instance (show/hide),
-    // created on the first open and kept from then on: it is not on screen
-    // at startup, so it is not built at startup. See CustomColumnsWindow.qml;
-    // opened via _openCustomColumns(fieldId).
+    // header menu that opens it; its transient parent resolves to the main
+    // window automatically (the Loader is a child of the view), so it floats
+    // and competes for focus alongside the Properties and Settings windows.
+    // Single reused instance (show/hide), created on the first open and kept
+    // from then on: it is not on screen at startup, so it is not built at
+    // startup. See CustomColumnsWindow.qml; opened via
+    // _openCustomColumns(fieldId).
     Loader {
         id: customColumnsLoader
         active: false
@@ -2680,7 +2681,7 @@ Item {
     // is passed as a createObject INITIAL VALUE, deliberately a capture rather
     // than a binding: root.reloader tracks the ACTIVE tab, and a later tab
     // switch must not retarget an open window's post-apply reload. Fonts come
-    // from the Theme singleton, so nothing font-related is passed anymore.
+    // from the Theme singleton, so nothing font-related is passed.
     Component {
         id: propertiesWindowComponent
         PropertiesWindow {}

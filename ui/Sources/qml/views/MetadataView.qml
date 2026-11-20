@@ -21,9 +21,9 @@
 // MetadataView.qml
 //
 // Metadata pane: a two-column Name/Value table, grouped into sections
-// ("Metadata", "Location") with purple section-header rows, matching the
-// Figma design. Driven by MetadataModel, which is populated in C++ whenever
-// the playlist's current (anchor) row changes.
+// ("Metadata", "Location", "General") with purple section-header rows. Driven by
+// MetadataModel, which C++ populates from a selection: the active tab's for the
+// dock pane, the window's snapshot for the Properties Details tab.
 //
 // Section rows are flagged via the isSection role; the delegate renders those
 // as a full-width purple label and the field rows as Name | Value.
@@ -70,7 +70,7 @@ Item {
     // Natural pixel width of the WIDEST Value cell across all rows. Drives the
     // Value column width below: when this exceeds the leftover viewport, the
     // Value column grows past the pane and the horizontal scrollbar engages.
-    // Recomputed off the model's dataChanged() (which fires on every selection),
+    // Recomputed off the model's dataChanged() and modelReset() (see _remeasure),
     // not from the delegates, so it stays correct even when a row is scrolled
     // out of the loaded set (delegate-reported widths would not).
     property int _valueContentWidth: 0
@@ -214,7 +214,7 @@ Item {
                 required property bool isSection
 
                 // --- Section header row ------------------------------------
-                // #232323 band, 26px visual height. For sections after the
+                // #232323 band, 22px tall in a 26px row. For sections after the
                 // first, the row is 3px taller and the band is pushed down by
                 // that amount, so the extra space lands ABOVE the title.
                 Rectangle {
@@ -256,7 +256,7 @@ Item {
                         anchors.leftMargin: 8
                         anchors.rightMargin: 8
                         text: mcell.display
-                        // Name column dimmer than the value, matching the design.
+                        // Name column dimmer than the value.
                         color: mcell.column === 0 ? Theme.textMuted : Theme.textPrimary
                         font.family: root.uiFont
                         font.pixelSize: Theme.fontSizeBody

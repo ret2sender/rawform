@@ -39,7 +39,7 @@
 // STAGING (no live apply): edits are held in a local `staged` object and pushed to
 // the controller only on Apply or OK. Apply commits and stays open; OK commits and
 // closes; Cancel and the close button revert to the last applied state and close.
-// Apply/OK enable only when `dirty` (staged differs from the applied controller
+// Apply enables only when `dirty` (staged differs from the applied controller
 // state). This is distinct from the per-row modified marker in the pane, which
 // flags a value that differs from its factory DEFAULT.
 //
@@ -92,8 +92,8 @@ Window {
     // neither onActivated when two enabled shortcuts match; it rotates
     // activatedAmbiguously), observed as dead Escape in Properties / Custom
     // Columns and double-press deselect in the playlist after this window had
-    // been shown and hidden once. Disabling ungrabs from the map. The first
-    // attempt gated on Window.active and failed with two windows open:
+    // been shown and hidden once. Disabling ungrabs from the map. A gate on
+    // Window.active fails with two windows open:
     // Window.active is QWindow::isActive(), which is transient-GROUP
     // activation, so every visible secondary window reports active together
     // and all their grabs stayed ambiguous. WindowFocus.focusWindow is
@@ -150,7 +150,7 @@ Window {
 
     function _near(a, b) { return Math.abs(a - b) < 1e-9 }
 
-    // staged differs from what is currently applied: gates Apply/OK.
+    // staged differs from what is currently applied: gates Apply.
     readonly property bool dirty:
            staged.bitPerfect !== AudioController.bitPerfect
         || staged.outputDeviceId !== AudioController.outputDeviceId

@@ -157,7 +157,7 @@ Window {
     onClosing: {
         // Persist the size for the next instance, windowed frames only
         // (the visibility guard, same as the main window). Several instances closing
-        // just means last write wins. Then destruction, as before.
+        // just means last write wins. Then destruction.
         if (propertiesWindow.visibility === Window.Windowed)
             WindowGeometryStore.saveSize("properties",
                                     propertiesWindow.width,
@@ -357,8 +357,9 @@ Window {
     MetadataEditor { id: metaEditor; audio: AudioController }
     ReplayGainEditor { id: rgEditor; audio: AudioController }
 
-    // Backing models for the two read-only tabs. Both are fed in openFor and copy
-    // their TrackData, so they survive selection changes while the window is open.
+    // Backing models for the Metadata and Details tabs. Both are fed in openFor
+    // and copy their TrackData, so they survive selection changes while the
+    // window is open.
     //  - metaModel:    the editable tag schema (the base model renders it read-only).
     //  - detailsModel: a MetadataModel in Details mode (Location + General only,
     //                  no "Metadata" section and no "Items Selected" row, since the

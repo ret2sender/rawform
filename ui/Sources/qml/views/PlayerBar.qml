@@ -131,9 +131,8 @@ Item {
         id: playerBarMainRow
         anchors.fill: parent
         // 16 px between items so the volume control sits 16 px from its
-        // neighbors on both sides. The wider transport-to-track gap (30) is
-        // restored with currentTrackColumn's leftMargin below, so only the
-        // volume's two gaps tighten.
+        // neighbors on both sides. The wider transport-to-track gap (30) comes
+        // from currentTrackColumn's leftMargin below.
         spacing: 16
 
         // Transport, left to right: stop, previous, play/pause, next. The middle
@@ -179,8 +178,7 @@ Item {
 
         ColumnLayout {
             id: currentTrackColumn
-            // 14 + the row's 16 spacing = the original 30 px gap to the transport
-            // buttons, kept while the volume's own gaps tightened to 16.
+            // 14 + the row's 16 spacing = the 30 px gap to the transport buttons.
             Layout.leftMargin: 14
             Layout.bottomMargin: 22
             spacing: 6
@@ -250,7 +248,7 @@ Item {
                 // the slot rather than overflowing it. The digit count, not the
                 // digits: the live rate changes at every 100 ms position tick on a
                 // VBR stream, and a metrics object re-measures on every text change,
-                // so measuring the value itself was a text layout per tick for a
+                // so measuring the value itself would be a text layout per tick for a
                 // width that only moves when a digit comes or goes. A string of
                 // eights of the same length is at least as wide (eight is the
                 // widest digit) and changes only then.
@@ -292,8 +290,6 @@ Item {
             // click/drag/release state machine. We feed it the live
             // position/duration/seekable (its hover bubble defaults to Theme.monoFont on
             // its own) and commit its one-shot seekRequested straight to the controller.
-            // seekSeconds is the only engine call here, and it already existed: no new
-            // controller surface.
             SeekBar {
                 id: seekBar
                 Layout.fillWidth: true
@@ -427,9 +423,10 @@ Item {
 
         // Spectrum view: the live analyzer. A dumb SpectrumView fed the smoothed
         // bar values and the stable bar count from the SpectrumProvider, which
-        // owns the 60 Hz timer, the FFT, the attack/decay smoothing, and the
-        // analyzer-source preference (Settings > Spectrum view). Its geometry
-        // and bottom margin are what the surrounding bar layout is built around.
+        // owns the refresh timer (60 or 30 Hz), the FFT, the attack/decay
+        // smoothing, and the analyzer-source and refresh-rate preferences
+        // (Settings > Spectrum view). Its geometry and bottom margin are what
+        // the surrounding bar layout is built around.
         SpectrumView {
             id: spectrumView
             Layout.bottomMargin: 26

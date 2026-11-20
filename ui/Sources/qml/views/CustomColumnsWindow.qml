@@ -43,9 +43,8 @@
 // like Properties. It is one manager over the shared `CustomColumnRegistry` registry;
 // reusing the instance keeps its position and size across opens, as Settings
 // does. Resizable through WindowResizeGrips, and the size persists in
-// window.yaml under the `CustomColumnRegistry` key (size only, never position; one
-// instance per tab all share the key, last hide wins). There is no staging:
-// edits commit straight to the registry (name and
+// window.yaml under the `customColumns` key (size only, never position). There
+// is no staging: edits commit straight to the registry (name and
 // pattern on editing-finished, align on combo change), which persists and
 // refreshes any SHOWN custom column live. `rows` is a SNAPSHOT taken on open
 // and re-taken only on add/remove (structural changes); a field edit updates
@@ -103,8 +102,7 @@ Window {
     // the component (which references no outer ids by contract). Gates the
     // Escape shortcut below: the window-phase Shortcut matches BEFORE Keys
     // delivery, so without the gate Escape during an edit would close the
-    // window instead of reaching the editor's discard handler (the Escape
-    // phase-ordering trap, in reverse).
+    // window instead of reaching the editor's discard handler.
     property int _editingCells: 0
 
     // Escape deselects first, then closes. Window context, so this map
@@ -121,8 +119,8 @@ Window {
     // still-enabled shortcut in a HIDDEN window keeps matching, every Escape
     // anywhere goes ambiguous (Qt fires neither onActivated, rotating
     // activatedAmbiguously instead), and other windows' Escape reads as dead
-    // or double-press. Disabling ungrabs. The first attempt used Window.active
-    // and failed with two windows open: that is QWindow::isActive(), a
+    // or double-press. Disabling ungrabs. A gate on Window.active fails
+    // with two windows open: that is QWindow::isActive(), a
     // transient-GROUP activation every visible secondary window reports
     // together. WindowFocus.focusWindow (QGuiApplication::focusWindow()) is
     // singular, so identity against it keeps the grab exclusive: at most one

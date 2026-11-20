@@ -28,7 +28,7 @@
 // playlist mutation after opening can never redirect a rename.
 //
 // Layout: pattern field; preset dropdown (editable:
-// its text is the save-as name) with Save / Load; the old-name vs new-name
+// its text is the save-as name) with Load / Save / Delete; the old-name vs new-name
 // preview table with per-row status flags; Cancel / Apply / OK.
 //
 // The preview is recomputed through RenamePreviewer (C++) on every pattern
@@ -89,8 +89,8 @@ Window {
     //
     // The visible && strict-focus gate. This instance dies on close,
     // so it cannot linger hidden like the reused windows, but SEVERAL Rename
-    // (and Properties) windows can be open at once, and Window.active (the
-    // first attempt here) is QWindow::isActive(), a transient-GROUP activation every
+    // (and Properties) windows can be open at once, and Window.active is
+    // QWindow::isActive(), a transient-GROUP activation every
     // visible secondary window reports together, which left multi-window
     // presses ambiguous (ambiguity fires neither window's onActivated).
     // WindowFocus.focusWindow (QGuiApplication::focusWindow()) is singular,
@@ -110,7 +110,7 @@ Window {
     property var _previewRows: []  // last RenamePreviewer result
     property bool _applying: false
     property string _statusText: ""
-    // Transient (flash) statuses: preset Load/Save confirmations show in the
+    // Transient (flash) statuses: preset Load/Save/Delete confirmations show in the
     // hint gray for 10 s, then the footer reverts to the rename count.
     // Persistent statuses (apply progress/results) never set this.
     property bool _statusFlash: false
@@ -256,7 +256,7 @@ Window {
     }
 
     // Persist the size for the next instance, windowed frames only (the
-    // visibility guard, same as the main window), then destruction as before.
+    // visibility guard, same as the main window), then destruction.
     onClosing: {
         if (renameDialog.visibility === Window.Windowed)
             WindowGeometryStore.saveSize("rename",
