@@ -27,9 +27,9 @@
 // No model, no view, no TagLib, no yaml-cpp.
 //
 // Build it via the optional CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_pattern_test
-//     ctest --test-dir build            # or run ./build/rawform_pattern_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_pattern_test
+//     ctest --test-dir build/app        # or run ./build/app/rawform_pattern_test
 //
 // or by hand (macOS/Homebrew Qt example, from ui/):
 //     c++ -std=c++20 -fPIC

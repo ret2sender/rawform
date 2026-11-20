@@ -54,9 +54,9 @@
 //     sidecar to all-null origins.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_queue_test
-//     ctest --test-dir build            # or run ./build/rawform_queue_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_queue_test
+//     ctest --test-dir build/app        # or run ./build/app/rawform_queue_test
 
 #include "playback/PlaybackQueue.h"
 
@@ -97,8 +97,8 @@ TrackData track(const char* list, int row) {
     return t;
 }
 
-/// A fresh model with @p n tracks named after @p list. Schema and registry
-/// as main.cpp sets them (code-built schema, no custom columns).
+/// A fresh model with @p n tracks named after @p list. The schema as main.cpp
+/// sets it (code-built), and no custom-column registry.
 std::unique_ptr<PlaylistModel> makeModel(const char* list, int n) {
     auto m = std::make_unique<PlaylistModel>();
     m->setSchema(ColumnSchema::load());

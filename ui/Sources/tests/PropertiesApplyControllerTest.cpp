@@ -59,9 +59,9 @@
 //     token, and re-pulls on completion.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_apply_test
-//     ctest --test-dir build -L ui
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_apply_test
+//     ctest --test-dir build/app -L ui
 
 #include "metadata/PropertiesApplyController.h"
 

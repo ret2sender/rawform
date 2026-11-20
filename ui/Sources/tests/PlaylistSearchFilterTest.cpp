@@ -25,9 +25,9 @@
 // Qt-Quick-FREE like its siblings: Qt6::Core plus PlaylistSearchFilter.cpp,
 // PatternEvaluator.cpp, ColumnSchema.cpp and Formats.cpp. No model, no view,
 // no TagLib. Build via the optional CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_search_test
-//     ctest --test-dir build            # or run ./build/rawform_search_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_search_test
+//     ctest --test-dir build/app        # or run ./build/app/rawform_search_test
 //
 // Exits non-zero if any check fails (so it doubles as a CI gate).
 

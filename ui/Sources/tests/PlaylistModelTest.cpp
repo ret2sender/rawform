@@ -53,14 +53,15 @@
 //  7. SCALE. 15k rows: every other row removed through the proxy with the rows
 //     selected and with the selection cleared first (the Delete key's order),
 //     a 5000-row block moved to the middle, and a search over the 15k rows
-//     (the off-thread haystack build). The numbers are printed; the
-//     only assertion is a loose tripwire (one second) that the old per-run and
-//     per-element paths exceed by an order of magnitude at this size.
+//     (the off-thread haystack build). The numbers are printed; the timing
+//     checks are loose tripwires (one second each, on the two removals and
+//     the move) that the old per-run and per-element paths exceed by an
+//     order of magnitude at this size.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_model_test
-//     ctest --test-dir build -L ui       # or run ./build/rawform_model_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_model_test
+//     ctest --test-dir build/app -L ui   # or run ./build/app/rawform_model_test
 
 #include "playlist/PlaylistModel.h"
 

@@ -30,9 +30,9 @@
 // exit on failure). No Qt: the gate is plain C++.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_position_gate_test
-//     ctest --test-dir build -L ui       # or run ./build/rawform_position_gate_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_position_gate_test
+//     ctest --test-dir build/app -L ui   # or run ./build/app/rawform_position_gate_test
 
 #include "playback/PositionNotifyGate.h"
 

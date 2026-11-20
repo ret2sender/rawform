@@ -43,8 +43,8 @@
 //     wrong magic (Magic), higher format version and out-of-range stream
 //     version (UnsupportedVersion), truncated header / truncated chunk header
 //     / overlong chunk claim (Truncated), a track chunk with a lying record
-//     length or an absurd count, and a file with no track chunk at all
-//     (Corrupt).
+//     length, an absurd record count or an absurd list count inside a
+//     record, and a file with no track chunk at all (Corrupt).
 //  4. TOLERANCE. An unknown chunk in the middle of the file is skipped and
 //     parsing continues after it; short optional chunks (META/LAYO/CURR/SCRL)
 //     degrade to defaults instead of failing the load.
@@ -58,9 +58,9 @@
 //     enforce.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_playlist_test
-//     ctest --test-dir build            # or run ./build/rawform_playlist_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_playlist_test
+//     ctest --test-dir build/app        # or run ./build/app/rawform_playlist_test
 
 #include "playlist/PlaylistFile.h"
 #include "media/TrackData.h"
@@ -417,10 +417,9 @@ int main() {
         check(writePlaylist(ref, doc), "tolerance_ref_write");
         const QByteArray refBytes = readBytes(ref);
 
-        // Rebuild by hand: header + TRKS (reuse nothing from refBytes; craft
-        // a minimal one-track payload through the public writer would couple
-        // the test to chunk order, so instead splice an unknown chunk into
-        // the real file right after the 12-byte header).
+        // Splice an unknown chunk into the real file right after the 12-byte
+        // header; a hand-built file would couple the test to the writer's chunk
+        // order.
         QByteArray spliced = refBytes.left(12);
         spliced += rawChunk(fourcc('X', 'T', 'R', 'A'),
                             QByteArray(37, '\xA5'));  // junk payload
@@ -444,11 +443,9 @@ int main() {
         QByteArray bytes = refBytes.left(12);
         bytes += rawChunk(fourcc('M', 'E', 'T', 'A'), QByteArray(2, 'x'));  // garbled
         bytes += rawChunk(fourcc('C', 'U', 'R', 'R'), QByteArray(1, 'y'));  // short
-        // Reuse the real TRKS chunk from the reference file: it is the first
-        // chunk the writer emits after META, so locate it by scanning for the
-        // id. Simpler and less coupled: append the reference's chunks minus
-        // its 12-byte header; the reader takes the LAST occurrence of the
-        // optional chunks, so the garbled ones above must NOT win.
+        // Append the reference's chunks minus its 12-byte header, TRKS among
+        // them; the reader takes the LAST occurrence of the optional chunks, so
+        // the garbled ones above must NOT win.
         bytes += refBytes.mid(12);
         writeBytes(path, bytes);
         const PlaylistReadResult r = readPlaylist(path);

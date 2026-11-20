@@ -32,9 +32,9 @@
 // stray delivery happen.
 //
 // Build via the CMake switch:
-//     cmake -B build -DRAWFORM_BUILD_TESTS=ON
-//     cmake --build build --target rawform_future_test
-//     ctest --test-dir build -L ui       # or run ./build/rawform_future_test
+//     cmake -S ui -B build/app -DRAWFORM_BUILD_TESTS=ON
+//     cmake --build build/app --target rawform_future_test
+//     ctest --test-dir build/app -L ui   # or run ./build/app/rawform_future_test
 
 #include "utils/FutureRelease.h"
 

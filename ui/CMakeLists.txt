@@ -130,8 +130,8 @@ find_package(Qt6 REQUIRED COMPONENTS Concurrent Core Gui Network Quick QuickCont
 # ---------------------------------------------------------------------------
 # yaml-cpp: the format of every per-user store under userConfigDir()
 # (settings.yaml, window.yaml, playback.yaml, rate_ledger.yaml, spectrum.yaml,
-# rename_patterns.yaml, playlist_custom_columns.yaml), read and written through
-# the shared utils/YamlFile.h pair.
+# rename_patterns.yaml, search_filters.yaml, playlist_custom_columns.yaml),
+# read and written through the shared utils/YamlFile.h pair.
 # ---------------------------------------------------------------------------
 # Provided by Homebrew (`brew install yaml-cpp`) and most Linux distros
 # (`apt install libyaml-cpp-dev`, `dnf install yaml-cpp-devel`). The CONFIG
@@ -409,7 +409,7 @@ endif()
 # ---------------------------------------------------------------------------
 # QML module
 # ---------------------------------------------------------------------------
-# Theme.qml and TitleBarStyle.qml are module singletons (one instance per
+# Theme.qml, Format.qml and TitleBarStyle.qml are module singletons (one instance per
 # engine, resolvable by type name from any document in the module, including
 # other top-level Windows). The property below is the CMake half of the
 # contract; each file's `pragma Singleton` is the QML half. Both halves are
@@ -697,7 +697,7 @@ unset(_rawform_qmlcache_sources)
 # source files under test (plus the shared Formats helpers they call), so it
 # builds and runs without standing up the GUI. No yaml-cpp: ColumnSchema.cpp
 # is pure code (the YAML stores are CustomColumnRegistry and the preset
-# stores, none of which these tests compile).
+# stores, which it does not compile).
 # ---------------------------------------------------------------------------
 option(RAWFORM_BUILD_TESTS "Build rawform unit tests" OFF)
 if(RAWFORM_BUILD_TESTS)

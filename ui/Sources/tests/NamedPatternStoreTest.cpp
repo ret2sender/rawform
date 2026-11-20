@@ -169,7 +169,7 @@ QString useConfigHome(const QString& base) {
     return base + QStringLiteral("/rawform");
 }
 
-// The finding's case and its neighbors: while writes are refused, a save, the
+// The refused save and its neighbors: while writes are refused, a save, the
 // same save again, a remove and a last-used change each report the failure
 // and leave the store as it was; the identical preset already on disk is no
 // write and no failure. Once writes are accepted, the save that failed writes,
