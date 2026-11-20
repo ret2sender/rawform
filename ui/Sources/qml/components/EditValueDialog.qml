@@ -121,7 +121,7 @@ Item {
     // A ListModel notifies on setProperty (dataChanged), so each cell's read-only
     // display Text, bound to model.value, always reflects the current value,
     // including after a Cancel reverts it on reopen. A JS array mutated in place
-    // never notifies, which is why an edit could linger on screen after Cancel.
+    // never notifies, so an edit would linger on screen after Cancel.
     ListModel { id: cellModel }
 
     // Snapshot the model's values into a plain array (for commit / copy).

@@ -89,7 +89,7 @@ Item {
     property real  barGap: 2
 
     // The smallest height a bar ever shows, so even a silent band keeps a visible
-    // nub (the reference shows this) rather than vanishing.
+    // nub rather than vanishing.
     property real  minBarHeight: 2
 
     // -----------------------------------------------------------------------

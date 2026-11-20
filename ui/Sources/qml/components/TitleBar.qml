@@ -131,10 +131,9 @@ Item {
         // On macOS the traffic-light controls (drawn natively by AppKit, see
         // applyMacOSStyling) take the place of these, so the themed QML
         // controls are hidden and disabled there. Linux and Windows keep
-        // them. The logo inset above is left at the SAME
-        // value on every platform, so the rawform logo lands in the same spot
-        // regardless of OS; on macOS that same inset also clears the traffic
-        // lights at the top-left.
+        // them. The logo inset above is set per platform (see logoInset); on
+        // macOS windowed its 80 px also clears the traffic lights at the
+        // top-left.
         TitleBarControls {
             id: titleBarControls
             Layout.fillHeight: true

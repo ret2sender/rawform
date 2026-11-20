@@ -137,8 +137,7 @@ MenuItem {
                                      + (root.subMenu ? 26 : 12)
 
     // The hint column's contribution to the row width: the hint's advance plus
-    // the gap, or nothing for an item without a shortcut or hint, which stays
-    // pixel-identical to a row that predates hints.
+    // the gap, or nothing for an item without a shortcut or hint.
     readonly property real _hintColumnWidth:
         root._hintText !== "" ? Math.ceil(_hintMetrics.advanceWidth) + root.shortcutGap
                               : 0

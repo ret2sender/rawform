@@ -29,7 +29,7 @@
 // Overflow / scrolling:
 //   The tabs live in a CLIPPED viewport. When their total width exceeds the
 //   room the strip can give them, a clustered pair of scroll arrows (chevrons)
-//   appears just left of the status panel, and the off-screen tabs tuck behind
+//   appears at the strip's right end, and the off-screen tabs tuck behind
 //   that cluster. The viewport itself is NOT an interactive Flickable: the tab
 //   drag-reorder is a horizontal drag on each tab's MouseArea, and an
 //   interactive Flickable would steal that gesture. Instead the Row is shifted
@@ -79,8 +79,8 @@ Rectangle {
     // Strip height. Matched to ThemedMenuBar (also 24): the playlist column and
     // the left-hand menu/album-art column share the same top edge inside
     // mainSplit, so an equal-height top item on each side lands the playlist top
-    // flush with the album-art top. (Was 30, which pushed the playlist 6 px low.)
-    // Tabs are verticalCenter-anchored with a 12 px font, so 24 stays uncramped.
+    // flush with the album-art top. Tabs are verticalCenter-anchored with a 12 px
+    // font, so 24 stays uncramped.
     implicitHeight: 24
 
     property PlaylistTabs tabs
@@ -186,7 +186,7 @@ Rectangle {
     // with no MouseArea, so the wheel reaches the TableView's Flickable.
     //
     // The full WheelEvent is available here (both axes, and no orientation gate
-    // like WheelHandler had), so one path covers a vertical wheel, a vertical
+    // like WheelHandler has), so one path covers a vertical wheel, a vertical
     // swipe, and a horizontal swipe alike.
     //   pixelDelta present -> continuous free scroll (trackpad), no snapping
     //   pixelDelta zero     -> one snap-to-tab step per notch (mouse wheel)
@@ -352,9 +352,8 @@ Rectangle {
         _dragTo = _boundaryAt(_dragSx)
     }
 
-    // 2 s hover -> proactive empty tab (the original "drop into a fresh
-    // playlist" behavior). A quick drop before this fires takes the smart-name
-    // path in the DropArea below.
+    // 2 s hover -> proactive empty tab. A quick drop before this fires takes the
+    // smart-name path in the DropArea below.
     Timer {
         id: hoverTimer
         interval: 2000
@@ -389,9 +388,9 @@ Rectangle {
     // --- Tabs viewport (clipped) -------------------------------------------
     //
     // Fills from the strip's left to the arrow cluster's left. When the cluster
-    // collapses (no overflow) its left edge sits at the status panel's left, so
-    // the viewport simply extends to the status panel. clip:true is what tucks
-    // the off-screen tabs out of sight behind the cluster.
+    // collapses (no overflow) its left edge sits at the strip's right inset, so
+    // the viewport simply extends there. clip:true is what tucks the off-screen
+    // tabs out of sight behind the cluster.
     Item {
         id: tabsViewport
         anchors.left: parent.left
@@ -686,7 +685,7 @@ Rectangle {
 
     // Insertion indicator during a reorder drag. Lives on `strip` (NOT inside the
     // clipped viewport) so it draws cleanly, but its x is clamped to the viewport
-    // bounds so it can never paint over the arrow cluster or the status panel.
+    // bounds so it can never paint over the arrow cluster.
     Rectangle {
         id: dropMarker
         width: 2
@@ -704,7 +703,7 @@ Rectangle {
         }
     }
 
-    // --- Scroll arrow cluster (left / right chevrons), by the status -------
+    // --- Scroll arrow cluster (left / right chevrons), at the right end ----
     //
     // Both arrows appear together while overflowing and collapse to zero width
     // otherwise (so the viewport reclaims the space). Each dims to inert at its

@@ -59,7 +59,7 @@ RowLayout {
     /// control in the row disables.
     property bool busy: false
 
-    /// The typed or picked preset name, trimmed as Save would store it.
+    /// The typed or picked preset name, untrimmed (Save trims before storing).
     readonly property string presetName: combo.editText
 
     /// Load pressed: `pattern` is the stored pattern for the picked name.

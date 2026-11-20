@@ -107,7 +107,7 @@ Rectangle {
     }
 
     // The message. Truncates with an ellipsis on a narrow pane; the full text
-    // will be readable in the expanded console.
+    // reads in the expanded console.
     Text {
         anchors.left: prompt.right
         anchors.leftMargin: 8

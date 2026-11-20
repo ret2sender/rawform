@@ -23,8 +23,8 @@
 // Close "x" for the frameless tool dialogs.
 //
 // One fixed look shared by every dialog that carries a slim custom title
-// bar (Settings, About, Properties, Custom Columns, Rename Files, Edit
-// Value): a 22 x 22 cell, a 20 x 20 AppIcon glyph, a danger plate on
+// bar (Settings, About, Properties, Custom Columns, Rename Files, Find,
+// Edit Value): a 22 x 22 cell, a 20 x 20 AppIcon glyph, a danger plate on
 // hover, and a colorization chain that tracks the enabled/hovered state
 // through Theme. The glyph goes through AppIcon so its logical size is
 // pinned on every screen; a plain Image rasterizes the svg at 20 device

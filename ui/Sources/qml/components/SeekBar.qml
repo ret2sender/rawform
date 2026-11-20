@@ -21,7 +21,7 @@
 // SeekBar.qml
 //
 // The interactive seek scrubber for the PlayerBar: a progress track you can click and
-// drag, driving nothing but the controller's existing seek() through the host. This
+// drag, driving nothing but the controller's seekSeconds() through the host. This
 // component is a pure, dumb interactive bar: it does NOT know about AudioController. It
 // takes position / duration / seekable IN and emits seekRequested(seconds) OUT, so the
 // playback wiring stays up in PlayerBar and this bar stays reusable and testable. (That
@@ -242,7 +242,7 @@ Item {
     }
 
     // -----------------------------------------------------------------------
-    // The bar: track plus fill, same look as before.
+    // The bar: track plus fill.
     // -----------------------------------------------------------------------
     Rectangle {
         id: track
@@ -259,7 +259,7 @@ Item {
             height: parent.height
             radius: parent.radius
             color: root.fillColor
-            // The suppression in one line, now with the commit pin: while
+            // The suppression in one line, with the commit pin: while
             // scrubbing read the drag target; just after release read the pinned
             // target (_pendingRatio) until the seek lands; otherwise track the live
             // position. The pin is what keeps the fill from snapping back to the old

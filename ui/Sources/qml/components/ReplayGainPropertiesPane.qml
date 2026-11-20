@@ -24,9 +24,9 @@
 // table over a Summary.
 //
 // State: everything row-shaped lives in ReplayGainRowsModel (C++),
-// bound in as `model` by the host window, which also owns the model's
-// lifecycle (setSelection on open and re-pull, collectEdits / adoptEdits on
-// the apply path, clearAllReplayGain from the Tools menu).
+// bound in as `model` by the host window. The window's PropertiesApplyController
+// owns the model's lifecycle (setSelection on open and re-pull, collectEdits /
+// adoptEdits on the apply path), and the Tools menu calls clearAllReplayGain.
 // This file keeps only what belongs to Items: gestures (click modifiers,
 // drag-select resolving pointer to row in view space, keyboard focus
 // juggling), the right-click menu, the cell editors, and the scanNoop
@@ -83,11 +83,11 @@ Item {
     property string uiFont: Theme.uiFont
 
     // Scanning. scanRequested asks the host to run an off-thread RG scan over the
-    // given { row, path, name } items in the given mode (0 = track, 1 = album);
-    // the host stages the result back through stageScanResults. scanNoop fires
-    // when the scope had nothing to scan (e.g. everything already tagged and
-    // skip-existing is on), so the host can show a brief reason instead of
-    // appearing to do nothing.
+    // given { row, path, name } items in the given mode (0 = track, 1 = album,
+    // 2 = albums by tags); the host stages the result back through
+    // stageScanResults. scanNoop fires when the scope had nothing to scan (e.g.
+    // everything already tagged and skip-existing is on), so the host can show a
+    // brief reason instead of appearing to do nothing.
     signal scanRequested(var items, int mode)
     signal scanNoop(string message)
 
@@ -143,7 +143,7 @@ Item {
     // host's log bar displays. "selected (or all)" is the scope rule of this
     // menu (the selection, falling back to every row when nothing is
     // selected), as opposed to the window-wide Tools entries; the hints stay
-    // within 72 characters so they fit the bar at the window's minimum width.
+    // within 80 characters so they fit the bar at the window's minimum width.
     ThemedMenu {
         id: rgRowMenu
         onClosed: pane.menuHint = ""

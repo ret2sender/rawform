@@ -28,9 +28,9 @@
 // button owes the keyboard and assistive technology: Tab focus, Space and
 // Return/Enter to activate, the button role with the label as its name, and
 // the default-button flag on the accent variant (the dialog roots route an
-// unclaimed Enter to it). The focus ring follows ThemedSwitch and
-// ThemedComboBox: a 1 px Theme.textPrimary stroke, shown for keyboard focus
-// only (visualFocus), never for a click.
+// unclaimed Enter to it). The focus ring follows ThemedSwitch: a 1 px
+// Theme.textPrimary stroke, shown for keyboard focus only (visualFocus),
+// never for a click.
 //
 // The instantiation site owns only what varies: `label`, `accent`, `enabled`,
 // `onClicked`, and its layout attachment.

@@ -23,9 +23,8 @@
 // Caption buttons for the frameless title bar.
 //
 // Minimize, maximize/restore, and close, in that visual order. The maximize button is
-// profile-gated (TitleBarStyle.showMaximize): present on the Linux profiles, absent on
-// the Windows profile (its icon set carries no maximize artwork). macOS is not handled
-// here, as the parent supplies the native traffic lights instead.
+// profile-gated (TitleBarStyle.showMaximize): every current profile shows it. macOS is
+// not handled here, as the parent supplies the native traffic lights instead.
 //
 // This is a Control so the whole caption chunk can be padded with the
 // stock leftPadding/rightPadding/topPadding/bottomPadding contract: the

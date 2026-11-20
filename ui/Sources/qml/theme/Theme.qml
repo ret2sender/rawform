@@ -228,8 +228,9 @@ QtObject {
 
     // Title bar caption buttons (frameless-window minimize/close), consumed
     // through TitleBarStyle's Profile system. The default pair styles the
-    // Linux profiles; the windows* pair matches the stock Win11 caption
-    // treatment and applies only under the Windows profile.
+    // default profile; the windows* pair matches the stock Win11 caption
+    // treatment and applies only under the Windows profile; the breeze* pair
+    // below serves the Breeze profile.
     // minimize hover fill
     readonly property color controlHover: "#4E4E4E"
     // close hover fill; shares #C42B1C with windowsCloseHover
@@ -247,7 +248,8 @@ QtObject {
     // Breeze close hover plate
     readonly property color breezeCloseHover: "#FF98A2"
 
-    // Text ramp extensions, below tier 1's textDim.
+    // Text ramp extensions: textInactive sits between textMuted and textDim,
+    // the other two below textDim.
     // inactive icons, secondary window chrome text
     readonly property color textInactive: "#9A9A9A"
     // muted glyphs, empty-state hints

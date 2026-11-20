@@ -28,8 +28,8 @@
 //  - It reads `display` as a required delegate property (the view injects it),
 //    never an ancestor id, so it is not tied to one host's scope.
 //  - `alignment`, `showDivider`, and `dividerColor` cover the per-column
-//    differences between the two headers (the playlist right-aligns some
-//    columns and draws a divider; the metadata pane wants neither by default).
+//    differences between the two headers (the playlist draws a divider; the
+//    metadata pane keeps the defaults).
 //  - It owns NO interaction. A host that needs a draggable/reorderable header
 //    composes this cell with its own MouseArea as a sibling in the delegate,
 //    rather than this component growing a content slot it cannot test in
@@ -77,7 +77,7 @@ Rectangle {
     }
 
     // Optional column divider on the right edge (off by default; the playlist
-    // header will switch it on for its inter-column boundaries).
+    // header switches it on for its inter-column boundaries).
     Rectangle {
         visible: cell.showDivider
         anchors.right: parent.right

@@ -701,10 +701,10 @@ Item {
                             // captures the value cell while this still catches the
                             // name side. Always enabled, so clicking the same row's
                             // name (or any non-editor part) commits an open editor.
-                            // Selection moved from onClicked to onPressed:
-                            // the press itself selects (matching the playlist) and
-                            // arms the drag-select; holding and moving ranges from
-                            // here. The context menu rides the press too.
+                            // Selection happens on press, not click: the press itself
+                            // selects (matching the playlist) and arms the drag-select;
+                            // holding and moving ranges from here. The context menu
+                            // rides the press too.
                             MouseArea {
                                 id: rowMA
                                 anchors.fill: parent
