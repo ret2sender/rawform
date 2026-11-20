@@ -392,11 +392,12 @@ QList<int> MetadataReloader::selectedRowNumbers() const {
     QList<int> rows;
     if (!m_selection)
         return rows;
-    // selectedRows(0) yields one index per fully-selected row (we always select
-    // with the Rows flag), so these are already distinct. The selection model
-    // is bound to the tab's filter proxy, not to m_model, so each index is
-    // mapped back to the SOURCE row every m_model call here expects; a row the
-    // filter hides cannot be selected, so nothing is lost in the mapping.
+    // selectedRows(0) yields one index per fully-selected row (every selection
+    // selects whole rows, by the Rows flag or a full-width range), so these are
+    // already distinct. The selection model is bound to the tab's filter proxy,
+    // not to m_model, so each index is mapped back to the SOURCE row every
+    // m_model call here expects; a row the filter hides cannot be selected, so
+    // nothing is lost in the mapping.
     const QModelIndexList indexes = m_selection->selectedRows(0);
     const auto* proxy = qobject_cast<const QAbstractProxyModel*>(m_selection->model());
     rows.reserve(indexes.size());

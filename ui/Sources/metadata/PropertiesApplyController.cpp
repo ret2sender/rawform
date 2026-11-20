@@ -18,6 +18,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// PropertiesApplyController.cpp
+//
+// Implementation of the Properties window's apply and reload sequencer: the
+// open-time snapshot of the playlist and its rows, the Remove-tags staging,
+// the write phases and the reload of the touched paths, Tools > Reload info,
+// and the re-pull or adopt that ends a pass. The contract, the sequence and
+// the lifetime rules are documented in the header.
+
 #include "metadata/PropertiesApplyController.h"
 
 #include <QSet>
@@ -267,7 +275,7 @@ void PropertiesApplyController::finishApply() {
     // The strip intent is consumed by the pass that carried it, success or
     // not; a failure is reported above and Remove tags can be re-invoked.
     // (The METADATA staging's survival on total failure is a separate
-    // mechanism and unchanged: setSelection was skipped above.)
+    // mechanism: setSelection was skipped above.)
     if (!m_pendingStripPaths.isEmpty()) {
         m_pendingStripPaths.clear();
         m_stripStaged = false;
@@ -326,7 +334,7 @@ void PropertiesApplyController::onPathsReloaded(int token) {
     // finisher (apply vs Tools reload; the tokens come from the same reloader
     // counter, so they can never collide). refreshed() is not used here on
     // purpose: it fires for any pass that changed something and stays silent
-    // for one that did not (see the banner).
+    // for one that did not (see the header).
     if (m_busy && token == m_reloadToken)
         finishApply();
     else if (m_busy && token == m_infoReloadToken)

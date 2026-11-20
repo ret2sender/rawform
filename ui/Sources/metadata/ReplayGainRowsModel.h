@@ -190,7 +190,7 @@ public:
     // --- apply / revert ----------------------------------------------------
 
     /// Diff current vs original; only changed fields are reported (empty means
-    /// remove). Same map shape the window already consumes: { row, path,
+    /// remove). The map shape ReplayGainEditor::apply consumes: { row, path,
     /// trackGain?, albumGain?, trackPeak?, albumPeak? }.
     Q_INVOKABLE [[nodiscard]] QVariantList collectEdits() const;
 

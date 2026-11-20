@@ -534,9 +534,9 @@ QString MetadataModel::joinDeduped(FieldId id, const QString& sep) const {
     //     so a field nobody tags costs one cheap pass and nothing else.
     // Exactly kMaxDistinctValues distinct values show in full (no ellipsis).
     // Reaching the cap implies at least kMaxDistinctValues - 1 real values, so
-    // the early return never has to re-check the mix rule. (The former shape
-    // materialized every per-track value into a list first, then de-duped it:
-    // for a 15k-row select-all that was a 15k-string list per Join field.)
+    // the early return never has to re-check the mix rule. (Materializing every
+    // per-track value before de-duping would build a 15k-string list per Join
+    // field on a 15k-row select-all.)
     constexpr int kMaxDistinctValues = 20;
     static const QString kUnknown = QStringLiteral("(unknown)");
     QStringList ordered;

@@ -54,8 +54,9 @@
 // MetadataEditor. The role surface (the row-kind and multiple roles, plus the
 // isSectionRow / isAddRow probes) serves both halves.
 //
-// Fed from QML via setSelection(PlaylistModel*, rows), the same way the Details
-// tab feeds its MetadataModel. TrackData stays in C++; QML reads display strings.
+// Fed by PropertiesApplyController through setSelection(PlaylistModel*, rows),
+// the same way it feeds the Details tab's MetadataModel. TrackData stays in C++;
+// QML reads display strings.
 
 #pragma once
 
@@ -64,7 +65,7 @@
                                     // Q_INVOKABLE taking PlaylistModel*, which
                                     // moc must see fully defined to build the
                                     // QML-marshaled meta-type. (Same reason
-                                    // MetadataModel / ReplayGainEditor include it.)
+                                    // MetadataModel includes it.)
 
 #include <QAbstractTableModel>
 #include <QHash>
@@ -80,7 +81,7 @@ class PropertiesMetadataModel : public QAbstractTableModel {
     Q_OBJECT
     QML_ELEMENT
     // True when any field has a staged edit differing from its on-disk value.
-    // Drives the window's Apply button and the commit sequencer.
+    // Drives the window's Apply button.
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
 
 public:
@@ -114,8 +115,8 @@ public:
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     /// Snapshot the given playlist rows as the editing selection and rebuild the
-    /// visible rows + values. Q_INVOKABLE so the Properties window (pure QML) can
-    /// feed it on open.
+    /// visible rows + values. PropertiesApplyController calls it on open and on
+    /// every re-pull.
     Q_INVOKABLE void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
 
     // Row-kind probes for the pane's delegate (plain ints, no meta-type concerns).
@@ -232,7 +233,7 @@ public:
 
     /// Remove the given field/custom rows (the pane's Remove action / Del key). Each
     /// schema field or on-disk custom field is staged empty, so collectEdits writes
-    /// a removal on Apply with the Track/Total, Disc, and Date coupling intact; a
+    /// a removal on Apply with the Track/Total and Disc coupling intact; a
     /// custom row that was only added this session (empty on-disk baseline, never
     /// written) is dropped from the model outright. Rows are processed high-index
     /// first so an outright drop never invalidates a not-yet-processed index.

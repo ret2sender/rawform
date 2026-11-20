@@ -132,9 +132,9 @@ public:
     void setDetailsMode(bool on);
 
     /// Sets the selection to the given rows, then rebuilds the visible rows and
-    /// their values (a reset only if the visible shape changed). Q_INVOKABLE so
-    /// the Properties window's Details tab (pure QML) can feed this directly with
-    /// its snapshot; the dock pane still calls it from C++ in main.cpp.
+    /// their values (a reset only if the visible shape changed). The dock pane
+    /// calls it from main.cpp, and PropertiesApplyController calls it for the
+    /// Properties window's Details tab.
     Q_INVOKABLE void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
 
     /// Clear the selection (drops to the no-selection visible set: always-on
