@@ -377,12 +377,12 @@ ctest --test-dir build/app -L ui
 - Timing lines live in the `rawform.perf` logging category, off by default:
   `QT_LOGGING_RULES="rawform.perf.debug=true"` turns them on (add
   `QT_LOGGING_TO_CONSOLE=1` when stderr is not a terminal on a systemd
-  distribution, or Qt routes them to the journal). Each line names the
-  operation, its count and its elapsed time: playlist removals and moves,
-  the reloader's drain slices, the Find index build, the audio sink's
-  construction at startup, the spectrum display parking and resuming with
-  the window's exposure, each scan's enumeration and read, and each cover
-  decode.
+  distribution, or Qt routes them to the journal). Each timing line names
+  the operation and its elapsed time, with a count or size where one
+  applies: playlist removals and moves, the reloader's drain slices, the
+  Find index build, the audio sink's construction at startup, each scan's
+  enumeration and read, and each cover decode. The spectrum display's
+  parking and resuming with the window's exposure is logged there too.
 - Engine knobs read from the environment: `RAWFORM_OUTPUT_STALL_MS` (the
   output stall watchdog in milliseconds, default 10000, 0 disables),
   `RAWFORM_NO_GAPLESS` (any value other than empty or 0 disables the

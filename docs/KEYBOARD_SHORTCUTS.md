@@ -114,7 +114,7 @@ discards.
 
 | Key | Action |
 | --- | --- |
-| `Escape` | Settings: discard unapplied changes and close. About, Rename Files: close. Custom Columns: clear the selection, then close (edits there are live). Log console: hide it. Edit Value dialog: cancel |
+| `Escape` | Settings: discard unapplied changes and close. About, Rename Files: close. Custom Playlist Columns: clear the selection, then close (edits there are live). Log console: hide it. Edit Value dialog: cancel |
 | `Ctrl+A` / `Ctrl+C` / `Ctrl+V` | Edit Value dialog: select all / copy / paste in the value field |
 | `Enter` | Settings, Properties (outside the Metadata field list) and Rename Files (also from the pattern field): run OK. Edit Value dialog and the ReplayGain settings fields: commit |
 | `Tab` / `Shift+Tab` | Move between the dialog's controls: the footer buttons, the segmented selectors, the Properties tab strip, the Settings navigation. On macOS, Tab reaches buttons only with System Settings > Keyboard > Keyboard navigation turned on (the platform rule) |
@@ -129,7 +129,9 @@ Not shortcuts, but the pointer equivalents of the keys above.
 Playlist rows: click selects; `Ctrl`+click toggles a row; `Shift`+click selects
 a range from the anchor; `Ctrl+Shift`+click adds a range; double-click plays the
 row (clearing the Playback Queue; in the queue tab it jumps the line instead);
-drag moves the selected rows; right-click opens the row menu (Add to Playback
+a drag from a selected row moves the selected rows, a drag from another row or
+with `Shift` selects a range, `Ctrl`+drag adds one, and a drag on empty space
+selects the rows it frames; right-click opens the row menu (Add to Playback
 Queue, Play Next, Reload info, Rename Files, Properties, ...). Header: drag
 reorders columns, drag the edge resizes, right-click opens the column menu.
 

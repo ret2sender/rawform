@@ -21,7 +21,7 @@ at the repository root for every asset that carries no header of its own.
 
 | Component | License | Project |
 |-----------|---------|---------|
-| Qt 6 (Core, Gui, Quick, QuickControls2, Svg, Concurrent) | LGPL v3 / GPL v3 | https://www.qt.io |
+| Qt 6 (Core, Gui, Network, Quick, QuickControls2, Svg, Concurrent) | LGPL v3 / GPL v3 | https://www.qt.io |
 | TagLib 2.x | LGPL v2.1 / MPL 1.1 (dual) | https://taglib.org |
 | yaml-cpp | MIT | https://github.com/jbeder/yaml-cpp |
 

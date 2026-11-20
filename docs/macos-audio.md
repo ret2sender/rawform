@@ -92,7 +92,8 @@ and the device is restored when it comes back, in that run or a later one,
 by the rules above. An entry for a device that never returns stays in the
 file and changes nothing; deleting `rate_ledger.yaml` while rawform is
 closed drops it. A rate changed by another application while rawform held
-it is treated as that application's choice and is not undone. Linux never writes this file; the PipeWire backend's
+it is treated as that application's choice and is not undone.
+Linux never writes this file; the PipeWire backend's
 rate force lifts with the stream.
 
 ## Diagnostics
