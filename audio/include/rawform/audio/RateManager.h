@@ -38,8 +38,8 @@
 // They usually agree, but real hardware can accept a rate set, report success
 // at every layer, and still misclock, so the measured value is the authority
 // for "was this really bit-perfect" and the predicted value is the authority
-// for "what did the policy choose to attempt". The Engine logs the prediction;
-// the sink logs the measurement; the Engine publishes measurement-first.
+// for "what did the policy choose to attempt". The sink logs the decision it
+// executes and the rate it measures; the Engine publishes measurement-first.
 //
 // What this policy does NOT decide: whether two consecutive tracks can share
 // one open stream. The sink's stream format is the SOURCE format (interleaved
@@ -126,9 +126,8 @@ struct RateRange {
 /// because the decision needs three things, not one: the advertised set, the
 /// device's CURRENT rate (so the resample branch can name the rate the device
 /// will keep running at), and whether the device permits a nominal-rate change
-/// at all. deviceName rides along only for diagnostics: the Engine's decision
-/// log names the device so a logged outcome is attributable across a device
-/// change; the policy itself ignores it.
+/// at all. deviceName rides along only for diagnostics (the CLI's rates report
+/// prints it); the policy itself ignores it.
 struct SinkCapabilities {
     std::string            deviceName;          ///< for logging; ignored by the policy
     std::vector<RateRange> rates;               ///< advertised nominal-rate spans

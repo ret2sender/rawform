@@ -138,8 +138,8 @@ public:
     /// album peak, writing them to @p out. Returns false when no measurable track
     /// has been added (an all-silence or empty batch), in which case @p out is left
     /// untouched and the caller writes no album value. Unmeasurable tracks are
-    /// excluded from the loudness combine but their (zero) peaks are harmless to the
-    /// peak maximum.
+    /// excluded from the loudness combine; their sample peaks still count toward the
+    /// album peak.
     [[nodiscard]] bool albumResult(AlbumResult* out) const;
 
     /// Drop every retained track state and reset the album peak, so one scanner can

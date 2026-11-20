@@ -23,9 +23,10 @@
 // Lock-free single-producer / single-consumer (SPSC) ring buffer holding
 // interleaved float32 frames. This is the buffering boundary between the
 // engine/decode thread (the single producer, thread 2) and the sink RT thread
-// (the single consumer, thread 3). It is the only data structure those two
-// threads share, and the entire point of it is to let them hand off audio with
-// no mutex and no allocation on either side.
+// (the single consumer, thread 3). It is the only buffer those two threads
+// share (the ring source around it adds only atomic counters and flags), and
+// the entire point of it is to let them hand off audio with no mutex and no
+// allocation on either side.
 //
 // Concurrency contract:
 //   - Exactly one thread may call write()/writableFrames() (the producer).
@@ -43,8 +44,8 @@
 //
 // Wrap arithmetic: the write/read positions are monotonically increasing
 // absolute frame counts that never wrap. The physical storage offset is
-// (pos % capacity), computed at most twice per call (once per contiguous
-// segment), not once per sample. We accept that single integer division per
+// (pos % capacity), computed once per call (a second contiguous segment starts
+// at offset 0), not once per sample. We accept that single integer division per
 // call deliberately: it lets capacity be exactly the requested value rather
 // than a rounded-up power of two, and at block-transfer granularity its cost is
 // negligible next to the memcpy beside it.

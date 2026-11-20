@@ -26,7 +26,7 @@
 // advance, and it drives any IAudioSink through a small internal real-time
 // source.
 //
-// Three threads touch an Engine, and the split is the whole point:
+// Four kinds of thread touch an Engine, and the split is the whole point:
 //   1. The controlling thread (the CLI or the Qt UI) calls the transport
 //      methods below. Every one of them is non-blocking: it enqueues a command
 //      and returns. It also reads the observable atomics (state, currentFormat,
@@ -36,6 +36,9 @@
 //      fires Listener notifications. It is the ONLY thread that touches the sink.
 //   3. The sink's real-time thread calls pull() on the engine's internal ring
 //      source and nothing else; it never sees the command queue.
+//   4. The sink's platform threads (the PipeWire loop thread, a CoreAudio
+//      notification queue) deliver ISinkEventListener events; the Engine only
+//      posts each one onto its command queue, for the engine thread to handle.
 //
 // Pimpl, like the decoders and the sinks: every thread, lock, queue, and
 // atomic lives in Engine::Impl in the .cpp, so this header stays as clean as the
@@ -198,7 +201,7 @@ public:
         /// UI's suffix should show. `alterations` is the OutputAlteration mask
         /// (Types.h); bitPerfect is true exactly when it is empty. Only fired
         /// between onTrackChanged announcements; each announcement carries its
-        /// own outcome through the pull pair below.
+        /// own outcome through the pull set below.
         virtual void onDeviceOutcomeChanged(std::uint32_t /*deviceRateHz*/,
                                             bool /*bitPerfect*/,
                                             OutputAlterations /*alterations*/) {}
@@ -345,7 +348,8 @@ public:
     /// reads 0.0 while Stopped. Device output latency is ignored (sub-buffer,
     /// irrelevant to a progress readout). Readable from any thread; the engine
     /// also pushes the same value through Listener::onPositionChanged on a fixed
-    /// cadence while Playing, plus once on a seek and once on entering Pause.
+    /// cadence while Playing, plus once on each seek, each held cut to another
+    /// track, and each entry into Paused (a pause, or a start that opens paused).
     [[nodiscard]] double position() const noexcept;
 
     /// The track the engine currently has loaded, as a whole TrackInfo:
@@ -372,7 +376,7 @@ public:
     /// The moment-to-moment decode bitrate in kbps for the status line:
     /// a variable-rate stream's value as it is right now, distinct from the fixed
     /// currentTrackInfo().source.bitrateKbps nominal. The engine refreshes it on the
-    /// position cadence while Playing (and once on a seek or on entering Pause),
+    /// position cadence while Playing (and with each extra position push above),
     /// from the active decoder's own per-frame measurement, falling back to the
     /// track nominal for sources that report no live figure (PCM). 0 while Stopped.
     /// Readable from any thread; pair it with position() inside onPositionChanged to
@@ -409,9 +413,9 @@ public:
     /// over the engine's life: every one of them reached the device as
     /// silence (the sink zero-pads a short pull), so a non-zero count is an
     /// audible dropout tally. The engine also reports each increment through
-    /// Listener::onInfo ("underrun: N frames") on the position cadence as it
-    /// happens; this is the pull companion for an end-of-run summary (the
-    /// CLI's Done line). Not counted: the final short pull of a track (the EOS
+    /// Listener::onInfo ("underrun: N frames of silence inserted") on the position
+    /// cadence as it happens; this is the pull companion for an end-of-run summary
+    /// (the CLI's Done line). Not counted: the final short pull of a track (the EOS
     /// drain) and anything while Paused or Stopped. Readable from any thread.
     [[nodiscard]] std::uint64_t underrunFrames() const noexcept;
 

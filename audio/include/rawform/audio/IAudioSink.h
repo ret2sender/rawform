@@ -161,10 +161,11 @@ struct IPullSource {
 ///   - onOutputFailed: the open session cannot continue: the bound or pinned
 ///     device disappeared, the stream entered an error state, or the daemon
 ///     connection was lost. `reason` is a short human-readable phrase the
-///     engine prepends to its error. Emitted only while the sink is open and
-///     never for the sink's own stop()/close() transitions; the engine treats
-///     it as the end of the listening session (teardown, Stopped, onError),
-///     and tolerates duplicates and late arrivals racing its own close.
+///     engine reports after its own "output failed: " prefix. Emitted only
+///     while the sink is open and never for the sink's own stop()/close()
+///     transitions; the engine treats it as the end of the listening session
+///     (teardown, Stopped, onError), and tolerates duplicates and late arrivals
+///     racing its own close.
 ///   - onOutputAlterationsChanged: what the sink reports through
 ///     outputAlterations() or realizedDepthBits() changed (a system volume
 ///     moved off or back to unity, the device format changed depth). A nudge
@@ -365,10 +366,10 @@ public:
     [[nodiscard]] virtual OutputAlterations outputAlterations() const { return 0; }
 
     /// The sample depth, in bits, of the format the device is actually being
-    /// fed (the PipeWire target node's realized Format, the CoreAudio physical
-    /// stream format), or 0 when unknown (not open, or a sink that cannot see
-    /// the device format; the default). A float device format reports 32. Same
-    /// read discipline as outputAlterations(); engine thread, never the RT path.
+    /// fed (the PipeWire target node's realized Format), or 0 when unknown (not
+    /// open, or a sink that does not read the device format; the default). A float
+    /// device format reports 32. Same read discipline as outputAlterations();
+    /// engine thread, never the RT path.
     [[nodiscard]] virtual std::uint16_t realizedDepthBits() const { return 0; }
 };
 
