@@ -39,10 +39,10 @@
 // documented in the .cpp. It is one of a small, deliberate set of process-wide
 // touches in the audio library, all one-shot or read-only: the FFmpeg decoder
 // and the metadata probe each set the libav log level once (their own
-// once_flags), and a few environment knobs are read once (RAWFORM_NO_GAPLESS
-// and RAWFORM_OUTPUT_STALL_MS in the engine, RAWFORM_DECODER_LOG in the
-// factory, RAWFORM_PW_PODS in the PipeWire sink). Nothing else in the library
-// owns a global.
+// once_flags), the PipeWire sink runs pw_init once, and a few environment knobs
+// are read (RAWFORM_NO_GAPLESS and RAWFORM_OUTPUT_STALL_MS at each engine's
+// construction, RAWFORM_PW_PODS once in the PipeWire sink, RAWFORM_DECODER_LOG
+// on each factory open). Nothing else in the library owns a global.
 //
 // Pull model: unlike libFLAC, libmpg123 is already a pull decoder (mpg123_read
 // hands back as many bytes as asked for), so there is no staging buffer here.

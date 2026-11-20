@@ -43,13 +43,13 @@
 //   2. Many native sample formats bridged to our one canonical format. FFmpeg
 //      decoders emit planar or packed samples in s16/s32/fltp/dbl and so on.
 //      libswresample converts each frame to PACKED float32. It is configured to
-//      convert the sample format and the channel LAYOUT only: the output rate is
-//      pinned equal to the input rate (never resampled) and the output layout is
-//      pinned equal to the input layout (never downmixed), so the bit-perfect,
-//      native-rate, native-channel invariant holds exactly as for sndfile, FLAC,
-//      and mpg123. With equal in/out rates and a packed-float target, swresample
-//      runs one-to-one with zero internal delay, which keeps the frame-count math
-//      exact and means there is no resampler tail to drain.
+//      convert the sample format and the planar/packed arrangement only: the
+//      output rate is pinned equal to the input rate (never resampled) and the
+//      output layout is pinned equal to the input layout (never downmixed), so
+//      the bit-perfect, native-rate, native-channel invariant holds exactly as
+//      for sndfile, FLAC, and mpg123. With equal in/out rates and a packed-float
+//      target, swresample runs one-to-one with zero internal delay, which keeps
+//      the frame-count math exact and means there is no resampler tail to drain.
 //
 // Seek mirrors FlacDecoder's shape: a raw seek lands at or before the target, we
 // flush the decoder, then decode-and-discard forward to the exact target frame
@@ -202,10 +202,9 @@ struct FfmpegDecoder::Impl {
     // index into pts space and SUBTRACT it when rescaling a frame's pts back to
     // a sample index; without both, every seek on such a container lands early
     // by exactly this many samples and the frame-accuracy contract silently
-    // breaks. Music-library files usually carry 0, which is why the skew
-    // never showed in listening tests; the long tail is where it bites. Cached
-    // at open; duration math is untouched (st->duration is a span, not a
-    // position).
+    // breaks. Music-library files usually carry 0; the long tail is where it
+    // bites. Cached at open; duration math is untouched (st->duration is a span,
+    // not a position).
     std::int64_t     startTime = 0;
 
     // ---- facts cached once at open -----------------------------------------

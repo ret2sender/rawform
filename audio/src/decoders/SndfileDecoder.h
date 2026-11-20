@@ -21,9 +21,9 @@
 // SndfileDecoder.h
 //
 // IDecoder backed by libsndfile, covering the uncompressed reference formats
-// (WAV, AIFF, and the other linear-PCM containers libsndfile reads). The
-// DecoderFactory dispatches to it by format; it can also be constructed
-// directly through its own factory.
+// (WAV, AIFF, and the other linear-PCM containers libsndfile reads), plus Ogg
+// Vorbis and Opus on a build without FFmpeg. The DecoderFactory dispatches to it
+// by format; it can also be constructed directly through its own factory.
 //
 // Dependency containment: <sndfile.h> appears in NONE of this header. The
 // SNDFILE handle and SF_INFO live behind a pimpl whose definition sits in the
