@@ -20,9 +20,8 @@
 
 // PlaylistFilterProxy.cpp
 //
-// See the header for the coordinate rule. The selection ops at the bottom are
-// PlaylistModel's former bodies, moved here because the selection model they
-// operate on is bound to this proxy; their rationale comments came with them.
+// See the header for the coordinate rule. The selection ops at the bottom live
+// here because the selection model they operate on is bound to this proxy.
 
 #include "playlist/PlaylistFilterProxy.h"
 

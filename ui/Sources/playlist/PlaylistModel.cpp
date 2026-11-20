@@ -408,7 +408,7 @@ QVariantList PlaylistModel::applyColumnLayout(const QStringList& fieldIds,
     }
 
     // Load-time structural change: reset (there is no live selection to keep
-    // across a playlist load, unlike an interactive moveColumn()).
+    // across a playlist load, unlike an interactive moveVisualColumn()).
     beginResetModel();
     m_columns = std::move(newOrder);
     endResetModel();
@@ -957,7 +957,7 @@ QString PlaylistModel::artUrlForRow(int row) const {
     const QString path = trackFilePath(row);
     if (path.isEmpty())
         return {};
-    // Percent-encoded the same way QML's encodeURIComponent did; the provider
+    // Percent-encoded the same way QML's encodeURIComponent does; the provider
     // decodes with QUrl::fromPercentEncoding. The "?v=" tag is the audio
     // file's mtime+size PLUS the art epoch: the former catches a changed
     // track file, the latter (bumped per reloader refresh) catches a changed

@@ -59,9 +59,9 @@
 //                          lazy (AlbumArtProvider), so covers never bloat the file
 //                          or the in-RAM list.
 //
-// This translation unit is pure, Qt-object-free and thread-safe: PlaylistStore
-// runs readPlaylist()/writePlaylist() on the global thread pool so neither a big
-// load nor a save blocks the GUI.
+// This translation unit is pure, Qt-object-free and thread-safe: PlaylistTabs
+// reads and autosaves on the global thread pool, and PlaylistStore runs a Save
+// there, so neither a big load nor a save blocks the GUI.
 
 #pragma once
 

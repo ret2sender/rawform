@@ -69,7 +69,7 @@
 // registry, and the full per-tab subtree, then handed to PlaybackQueue by
 // main.cpp), and the tab outlives its place in the strip: closing it HIDES
 // it (removed from m_tabs, never destroyed, contents untouched), and
-// Playback > Playback Queue shows it again. It has no live file, no
+// Playback > Show Playback Queue shows it again. It has no live file, no
 // autosave, no dirty flag, cannot be renamed, and its contents are
 // session-transient. Its column layout is seeded from the queue column
 // preset (queue_columns.rwftp, falling back to the new-tab default) and
@@ -138,7 +138,7 @@ class PlaylistTabs : public QAbstractListModel {
     Q_PROPERTY(rawform::PlaylistSearch* activeSearch READ activeSearch
                    WRITE setActiveSearch NOTIFY activeSearchChanged)
     /// Whether the Playback Queue tab is in the strip right now (the Playback
-    /// menu's checkable entry binds to it). Flips on show/hide only.
+    /// menu's Show/Hide Playback Queue entry binds to it). Flips on show/hide only.
     Q_PROPERTY(bool queueVisible READ queueVisible NOTIFY queueVisibleChanged)
     /// Whether the ACTIVE tab is the Playback Queue: the menu bar relabels
     /// "Save Column Layout" and the host routes it to the queue preset. Shares
@@ -250,7 +250,8 @@ public:
     /// re-resolved exactly as closeTab does. A no-op when hidden.
     Q_INVOKABLE void hideQueueTab();
 
-    /// The Playback menu's checkable entry: hide when shown, show otherwise.
+    /// The Playback menu's Show/Hide Playback Queue entry: hide when shown, show
+    /// otherwise.
     Q_INVOKABLE void toggleQueueTab();
 
     /// Reorder tabs: move the tab at @p from so it lands at @p to. A
@@ -379,8 +380,9 @@ public:
     // --- Startup -----------------------------------------------------------
 
     /// Restore the previous session: open every userConfigDir()/live_playlist/
-    /// *.rwfpl as a tab (titles from their saved file names). If none exist,
-    /// seed one empty "New Playlist". Call once, after the dependencies are set.
+    /// *.rwfpl as a tab (titles from each file's saved META title). If none
+    /// exist, seed one empty "New Playlist". Call once, after the dependencies
+    /// are set.
     void restoreSession();
 
     // --- Shutdown ----------------------------------------------------------

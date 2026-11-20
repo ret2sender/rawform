@@ -34,8 +34,8 @@
 // mapRowsToSource for the dialogs, mapGapToSource for a drop). A consumer
 // that reads rows off the selection model and hands them to the source
 // model directly is a bug, and it only shows while a filter is active
-// (unfiltered, the two spaces coincide), which is why the source's
-// selection-taking helpers were moved here rather than left as traps.
+// (unfiltered, the two spaces coincide), which is why the selection-taking
+// helpers live here rather than on the source, where they would be traps.
 //
 // FILTER SOURCE. A PlaylistSearch (Edit > Find) installed through setSearch
 // decides row visibility: filterAcceptsRow is its accepts(row). No search, an
@@ -192,8 +192,8 @@ public:
     Q_INVOKABLE [[nodiscard]] int anchorRowAfterRemoval(int sourceRow) const;
 
     // --- Selection ops (the selection model is bound to THIS model) --------
-    // The bodies and contracts are PlaylistModel's former ones, moved here
-    // unchanged apart from the coordinate space; see each for the why.
+    // These live here because the selection model is bound to THIS model;
+    // see each for the why.
 
     /// The selection's distinct row numbers, ascending, from its RANGES (never
     /// per-cell: a library-sized selection materialized cell by cell in JS

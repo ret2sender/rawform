@@ -449,8 +449,6 @@ PlaylistTabs::Tab* PlaylistTabs::makeTab(const QString& title) {
     // Granular column toggles (showColumn/hideColumn) and the registry-driven
     // custom-column removal are begin/endInsert/RemoveColumns, NOT resets, so
     // they need their own dirty hooks or a toggled layout never autosaves.
-    // (The registry-removal path predates these connects and silently relied
-    // on some later edit to trigger the save; this closes that hole too.)
     connect(model, &QAbstractItemModel::columnsInserted, this, dirty);
     connect(model, &QAbstractItemModel::columnsRemoved, this, dirty);
     connect(model, &QAbstractItemModel::modelReset, this, dirty);
@@ -693,9 +691,9 @@ void PlaylistTabs::openInNewTab(const QUrl& fileUrl) {
     //
     // The new tab takes the user's default column preset (newPlaylist applies
     // it), which is the right answer here: an M3U stores no layout, so there is
-    // nothing of the source's to honor. An unrecognized suffix keeps the
-    // pre-existing behavior and is attempted as .rwfpl, since identity travels
-    // with the MAGIC and a renamed rawform playlist should still open.
+    // nothing of the source's to honor. An unrecognized suffix is attempted as
+    // .rwfpl, since identity travels with the MAGIC and a renamed rawform
+    // playlist should still open.
     if (formatForPath(src, PlaylistFormat::Rwfpl) != PlaylistFormat::Rwfpl) {
         newPlaylist(title);              // creates AND activates the destination
         scanIntoActive({ fileUrl }, -1); // captures that tab as the scan target
@@ -772,8 +770,8 @@ bool isRwfplUrl(const QUrl& url) {
 } // namespace
 
 int PlaylistTabs::dropUrlsIntoActive(const QList<QUrl>& urls, int at) {
-    // Same routing order the QML loop had: each .rwfpl concatenated as it is
-    // encountered, the rest gathered and dispatched once. Both land at the same
+    // The routing order: each .rwfpl concatenated as it is encountered, the rest
+    // gathered and dispatched once. Both land at the same
     // drop row; the scanner and the concat reads are all async, so this returns
     // as soon as the split is done.
     QList<QUrl> rest;

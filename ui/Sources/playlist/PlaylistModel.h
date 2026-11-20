@@ -145,7 +145,7 @@ public:
     /// Seed widths, in visual order, for the view to apply as initial explicit
     /// column widths (from defaultColumnArrangement(), or kDefaultColumnWidth for
     /// any other field toggled on). User resizing overrides and persists per
-    /// playlist (.rwftp); this is only the starting point.
+    /// playlist (.rwfpl); this is only the starting point.
     Q_INVOKABLE [[nodiscard]] QVariantList defaultColumnWidths() const;
 
     // --- Per-playlist layout persistence (.rwfpl) --------------------------
@@ -289,8 +289,8 @@ public:
     /// The absolute file path at @p row (empty if out of range). The key the
     /// album-art provider is addressed by (artUrlForRow builds the URL), and
     /// the identity the reloader and the playback controller compare rows by.
-    /// C++ callers only (MetadataReloader, AudioController); no QML caller, so
-    /// not invokable.
+    /// C++ callers only (MetadataReloader, AudioController, PlaybackQueue); no QML
+    /// caller, so not invokable.
     [[nodiscard]] QString trackFilePath(int row) const;
 
     /// ReplayGain data for the given rows, for the Properties window's

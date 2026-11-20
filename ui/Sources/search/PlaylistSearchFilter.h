@@ -21,7 +21,7 @@
 // PlaylistSearchFilter.h
 //
 // The pure half of Edit > Find: the Filter-box grammar, its validation, and
-// the per-track match test the playlist filter proxy runs.
+// the per-track match test PlaylistSearch runs.
 //
 // Qt-Quick-free (QtCore + ColumnSchema + PatternEvaluator + TrackData only),
 // for the same reason PatternEvaluator is: one place decides what a Filter
@@ -51,8 +51,9 @@
 // the set); comparison is case- and diacritic-insensitive (foldForSearch).
 // The per-track values are joined into one HAYSTACK string on U+001F, a
 // character no term can contain (terms are whitespace-split, and U+001F is a
-// control character), so a term can never match across two values. The proxy
-// caches one haystack per row, and a keystroke costs one contains() per row.
+// control character), so a term can never match across two values.
+// PlaylistSearch caches one haystack per row, and a keystroke costs one
+// contains() per row.
 
 #pragma once
 
