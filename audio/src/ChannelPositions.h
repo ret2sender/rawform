@@ -65,7 +65,7 @@ enum class ChannelPosition : std::uint8_t {
 };
 
 /// The largest channel count with a defined order. Beyond it a sink declares
-/// the stream unpositioned, as before.
+/// the stream unpositioned.
 inline constexpr std::uint16_t kMaxPositionedChannels = 8;
 
 namespace detail {

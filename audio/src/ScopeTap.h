@@ -34,9 +34,9 @@
 //     monotonic write counter with a release store. push() never locks, never
 //     allocates (the ring is allocated once at construction), and makes no system
 //     call, so it honors the strict pull() contract.
-//   - The CONSUMER is the GUI thread, by way of a 60 Hz visualizer timer. It calls
-//     copyLatest() to take a consistent snapshot of the most recent N mono
-//     samples. It reads the write counter with an acquire load, copies the window
+//   - The CONSUMER is the GUI thread, by way of the visualizer timer (60 or 30 Hz).
+//     It calls copyLatest() to take a consistent snapshot of the most recent N
+//     mono samples. It reads the write counter with an acquire load, copies the window
 //     ending at it, then re-reads the counter; if the producer could have lapped
 //     the copied window in between, it retries a bounded number of times. With the
 //     capacity comfortably larger than the window this never actually fires (the
@@ -183,8 +183,8 @@ public:
     /// one atomic store, no scrub of the storage.
     void reset() noexcept { m_written.store(0, std::memory_order_relaxed); }
 
-    /// Storage size in mono samples (a power of two). The visualizer reads this to
-    /// clamp its window to something the ring can actually hold.
+    /// Storage size in mono samples (a power of two). copyLatest() clamps its
+    /// window to it.
     [[nodiscard]] std::size_t capacity() const noexcept { return m_capacity; }
 
 private:

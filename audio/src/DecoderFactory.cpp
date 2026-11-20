@@ -48,10 +48,11 @@
 //   4. The frozen-decoder rule is structural: when the file is FLAC or MP3,
 //      libsndfile is removed from the candidate list entirely, so its own
 //      optional FLAC/MP3 support can never shadow libFLAC or libmpg123. "FLAC or
-//      MP3" is decided by content sniff always, and by a .flac/.mp3 extension
-//      UNLESS the content unmistakably says a sndfile container (the one
-//      mislabel case: a real WAV named ".mp3" should still play through sndfile,
-//      because that is not libsndfile decoding an MP3).
+//      MP3" is decided by content sniff always, and by a .flac/.mp3/.mp2
+//      extension UNLESS the content unmistakably says a sndfile container or an
+//      Ogg container (the two mislabel cases: a real WAV named ".mp3" should
+//      still play through sndfile, because that is not libsndfile decoding an
+//      MP3, and an Ogg FLAC named ".flac" is libsndfile's Ogg job).
 //
 //   5. When nothing opens, return nullptr and report the most-likely decoder's
 //      own error, so the user sees a relevant reason rather than the last
@@ -360,7 +361,7 @@ std::unique_ptr<IDecoder> DecoderFactory::open(const std::string& path,
     }
 
     // Frozen-decoder rule. Exclude sndfile when the file is FLAC or MP3 by
-    // content, or by a .flac/.mp3 extension that the content does not contradict.
+    // content, or by a .flac/.mp3/.mp2 extension that the content does not contradict.
     // An Ogg sniff is a second contradiction that keeps sndfile IN: the rule
     // exists to keep libsndfile away from raw FLAC/MP3 BITSTREAMS, where its own
     // optional support would shadow the reference decoders, and an Ogg container

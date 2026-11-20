@@ -22,9 +22,9 @@
 //
 // Implementation of the engine's real-time surface. The consumer side (pull) is
 // the part that runs on the sink's RT thread, so it is held to the strict
-// contract: one ring read, one consumed-counter add, and on a short read either
-// one relaxed counter add or one release store, with no lock, allocation, or
-// system call. The producer side runs on the engine thread and is plain.
+// contract: the ring copy, atomic counter and flag updates, the gain multiply and
+// the scope push, with no lock, allocation, or system call. The producer side
+// runs on the engine thread and is plain.
 //
 // The end-of-stream handshake:
 //   - The producer writes its final frames into the ring (RingBuffer::write does

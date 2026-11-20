@@ -37,8 +37,12 @@
 //     thread that touches the sink.
 //   - thread 3 (RT, inside the sink): EngineRingSource::pull() only, which also
 //     advances the consumed counter by the real frames it delivers.
+//   - platform threads (inside the sink: the PipeWire loop thread, a CoreAudio
+//     notification queue): the ISinkEventListener overrides only, each of which
+//     posts a Command the way thread 1 does.
 //
-// The command mutex is the ONLY lock in the engine. The play queue, the decoder,
+// The command mutex is the only engine lock; the one other, CurrentTrackBox's
+// private mutex on libc++, never nests with it. The play queue, the decoder,
 // the staging state, and the seam-marker queue are all engine-thread-private, so
 // there is no second lock and no shared playlist structure. The mutex is never
 // held across a decode, a ring write, or any call into the sink: sinks post
@@ -528,7 +532,7 @@ private:
 }  // namespace
 
 // ===========================================================================
-// Impl: everything that is not the four-line public forwarding layer.
+// Impl: everything that is not the thin public forwarding layer.
 // Impl doubles as the sink's ILogOutput and ISinkEventListener: the sink's
 // diagnostic lines land in logLine (engine thread, per the ILogOutput
 // contract) and are forwarded to Listener::onInfo; the sink's events land in
@@ -791,7 +795,7 @@ struct Engine::Impl : ILogOutput, ISinkEventListener {
 
     // --- publication / notification (engine thread) ---
     void      setState(State s);
-    // Clear the gate origin + go Stopped.
+    // Release a parked device, clear the outcome, go Stopped, settle debts.
     void      enterStopped();
     void      publishFormat(const AudioFormat& f);
     /// The device outcome word (see outcomeBits). publishOutcome composes the
@@ -953,8 +957,9 @@ void Engine::Impl::run() {
         // 4. Position tick. Fire onPositionChanged on cadence while Playing.
         // Re-read the state: a completion in step 3 may have just dropped us to
         // Stopped, in which case there is nothing to report. Paused emits no
-        // periodic tick; its single fire happened in doPause. The gate keeps this
-        // to ~10 Hz despite the loop iterating far more often.
+        // periodic tick; its single fire happened on entering Paused (doPause, or
+        // a start that opens paused). The gate keeps this to ~10 Hz despite the
+        // loop iterating far more often.
         if (stateAtomic.load(std::memory_order_relaxed) == State::Playing) {
             const auto now = std::chrono::steady_clock::now();
             if (now - lastPositionFire >=
@@ -1950,7 +1955,7 @@ std::size_t Engine::Impl::produceOneStep() {
 // The producer-logical current track has reached end of stream. Decide
 // whether to stitch the next pending track gaplessly (the gate: identical source
 // format) or to mark the input exhausted and let the drain -> finished ->
-// teardown -> advance path run (a genuine boundary, or the end of the queue).
+// park -> advance path run (a genuine boundary, or the end of the queue).
 //
 // On a stitch this opens the next decoder at EOS and keeps writing into the SAME
 // running ring, relying on the outgoing ring tail as runway (local files only;
@@ -2025,7 +2030,7 @@ void Engine::Impl::handleProducerEos() {
     }
 
     // Queue empty: the genuine end of playback. Mark exhausted so the existing
-    // finished -> teardown -> advanceToPendingOrStop (-> enterStopped) path runs.
+    // finished -> park -> advanceToPendingOrStop (-> enterStopped) path runs.
     ringSource.markInputExhausted();
 }
 
@@ -2198,8 +2203,8 @@ void Engine::Impl::notifyDeviceOutcome() const {
 // listener. The order matters: make currentTrackInfo()/duration() readable
 // BEFORE firing onTrackChanged, so a listener that reacts by pulling
 // currentTrackInfo() sees exactly the track it was just told about. Engine-thread
-// only; called from startTrack, crossSeam, and the cutOrStartTo HOLD-CUT, the same
-// three points a track becomes current.
+// only; called from startTrack, crossSeam, the cutOrStartTo HOLD-CUT, and a seek
+// that lands in a stitched track, the four points a track becomes current.
 void Engine::Impl::announceTrack(const TrackInfo& info) {
     currentInfo.publish(info);
     totalFramesAtomic.store(info.totalFrames, std::memory_order_release);
@@ -2213,8 +2218,9 @@ void Engine::Impl::announceTrack(const TrackInfo& info) {
     }
     // Seed the live bitrate with this track's nominal so the status
     // line shows a figure at once, before the first position tick refreshes it
-    // from the decoder. This single funnel (startTrack, crossSeam, the HOLD-CUT)
-    // keeps the nominal correct across gapless seams too.
+    // from the decoder. This single funnel (startTrack, crossSeam, the HOLD-CUT,
+    // a seek into a stitched track) keeps the nominal correct across gapless
+    // seams too.
     currentNominalKbps = info.source.bitrateKbps;
     liveBitrateAtomic.store(currentNominalKbps, std::memory_order_release);
     notifyTrackChanged(info);
@@ -2254,9 +2260,9 @@ void Engine::Impl::logLine(const std::string& line) {
 }
 
 // Push the current position to the listener now. Called on the engine thread
-// from the cadence tick, from doPause, from doSeek, and from cutOrStartTo's
-// HOLD-CUT, every one of which holds a valid `format`, so
-// currentPositionSeconds() reads a real rate.
+// from the cadence tick, from doPause, from doSeek, from cutOrStartTo's HOLD-CUT,
+// and from startTrack's paused start, every one of which holds a valid `format`,
+// so currentPositionSeconds() reads a real rate.
 void Engine::Impl::firePosition() {
     publishUnderruns();  // the same cadence: one line per tick at most
     // Refresh the live decode bitrate on the same cadence as position.

@@ -31,7 +31,7 @@
 // wrong sniff self-correcting. The frozen-decoder rule is enforced structurally:
 // a file identified as FLAC or MP3 is never offered to libsndfile (whose own
 // optional FLAC/MP3 support would otherwise shadow the reference libraries). The
-// full policy, including the one mislabel exception, is documented in the .cpp.
+// full policy, including its two mislabel exceptions, is documented in the .cpp.
 //
 // Statelessness: the factory holds nothing, so the Engine can own one by value
 // as its default and the CLI can stack-construct one for its info path. It is

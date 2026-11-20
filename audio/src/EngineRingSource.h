@@ -91,7 +91,7 @@
 // immediate and lock-free, never wait behind the transport queue) and read once
 // per pull on the RT thread. The contract is deliberately narrow: this is a
 // LINEAR gain, not a percentage and not a curve. The UI owns the perceptual taper
-// (the cubic slider->gain mapping) and any ReplayGain composition; the source
+// (its slider->gain mapping) and any ReplayGain composition; the source
 // only multiplies. Two consequences worth stating because they are the whole
 // point of putting it here:
 //   - At exactly 1.0f, pull() SKIPS the multiply entirely, so unity volume is a
