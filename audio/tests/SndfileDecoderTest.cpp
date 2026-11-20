@@ -38,6 +38,7 @@
 //   - seek(frame) then read returns the pattern from that offset
 //   - read at EOS returns 0; a read straddling the end returns the true remainder
 //   - an AIFF round-trip exercises a second container through the same path
+//   - a nonexistent path yields nullptr and a non-empty error
 //
 // The pattern values are exactly representable in float32 and bounded to [-1, 1),
 // so the same generator serves the exact float test and the bounded integer

@@ -26,18 +26,20 @@
 // to compare against. Two real MP3 streams are therefore EMBEDDED below as byte
 // arrays (generated once with LAME, committed here so the test needs no fixture
 // files and no network): a 128 kbps CBR clip that keeps its ID3v2 tag, and a VBR
-// clip stripped to a bare MPEG frame so the two together exercise both dispatch
-// entry points as well as both rate modes. Both are 44100 Hz mono, about an
-// eighth of a second.
+// clip stripped to a bare MPEG frame, so the two together exercise mpg123's tag
+// skipping and a bare frame-sync start, as well as both rate modes. Both are
+// 44100 Hz mono, about an eighth of a second.
 //
 // Because libmpg123's float output is not bit-identical across library versions
 // or SIMD paths, the test does NOT assert a baked golden hash. Instead it asserts
 // DETERMINISM and STRUCTURE, which hold regardless of build:
 //   - format() and sourceInfo() report 44100 Hz mono, codec Mp3, bitsPerSample 0,
 //     and (for CBR) the exact 128 kbps nominal bitrate
-//   - totalFrames() is positive (the Xing/Info header gives length with no scan)
-//   - decoding the stream twice yields the same FNV-1a hash, and decoding after
-//     seek(0) reproduces the from-open hash (decode is deterministic)
+//   - totalFrames() is positive (the Xing/Info header gives length with no scan),
+//     and a CBR decode's length agrees with it within a frame
+//   - decoding the stream twice yields the same FNV-1a hash (decode is
+//     deterministic), and seek(0) rewinds to about the full length again (a
+//     layer-III seek is not bit-identical to a fresh decode, so this is structural)
 //   - seek(target) lands near the request: reading to EOS afterwards leaves about
 //     totalFrames - target frames, so larger targets leave fewer frames
 //     (monotonic), and repeating a seek reproduces the same decoded bytes
@@ -79,10 +81,9 @@ int g_failures = 0;
 
 // --- embedded MPEG fixtures -------------------------------------------------
 // kCbrMp3: 128 kbps CBR, 44100 Hz mono, ID3v2 tag intact (starts "ID3", so it
-// drives the ID3 dispatch route and mpg123's tag skipping).
+// drives mpg123's tag skipping).
 // kVbrMp3: VBR (LAME -q:a 5), 44100 Hz mono, ID3 stripped (starts 0xFF Ex frame
-// sync, so it drives the frame-sync dispatch route and carries a Xing header for
-// scan-free length).
+// sync and carries a Xing header for scan-free length).
 // 2969 bytes
 const unsigned char kCbrMp3[] = {
     0x49,0x44,0x33,0x04,0x00,0x00,0x00,0x00,0x00,0x23,0x54,0x53,

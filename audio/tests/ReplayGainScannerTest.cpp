@@ -33,9 +33,10 @@
 // about 6.02 dB, and an album's combined gain must fall strictly between its
 // loudest and quietest members'. A single generous absolute band guards against a
 // sign flip or an order-of-magnitude scale error without over-fitting libebur128's
-// exact numbers. The remaining checks pin the exact-fact corners: silence is
-// unmeasurable and excluded from the album combine, a failed open is reported, and
-// a cancel discards the in-flight track.
+// exact numbers. The remaining checks pin the exact-fact corners: the sample peak
+// of a known sine, silence is unmeasurable and excluded from the album combine, a
+// failed open is reported, a cancel discards the in-flight track, and a reset
+// starts a fresh album.
 
 #include "rawform/audio/IDecoder.h"
 #include "rawform/audio/IDecoderFactory.h"

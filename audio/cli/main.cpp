@@ -48,10 +48,10 @@
 //       device, queue advance and clear, seek with a live m:ss / m:ss readout,
 //       and output device selection with the track resuming where it was.
 //
-//   rawform_audio_cli rates [--device <id|n>] [--resample|--force-rate] [file]
-//       The rate-policy diagnostic: print what an output device advertises and,
-//       given a file, the RateDecision the engine would make for it under the
-//       chosen mode, without opening the device.
+//   rawform_audio_cli rates|device [--device <id|n>] [--resample|--force-rate] [file]
+//       The rate-policy diagnostic (device is an alias): print what an output
+//       device advertises and, given a file, the RateDecision the engine would
+//       make for it under the chosen mode, without opening the device.
 //
 //   rawform_audio_cli probe <file>
 //       The metadata-probe diagnostic: what MetadataProbe reads for one file
@@ -242,11 +242,11 @@ void printUsage(const char* argv0) {
     std::fprintf(stderr,
                  "usage:\n"
                  "  %s <file> [--dump <out.raw>]        decode, hash, optional PCM dump\n"
-                 "  %s play [--resample|--force-rate] <file>\n"
+                 "  %s play [--resample|--force-rate] [--no-gapless] <file>\n"
                  "                                      play one file through the sink\n"
-                 "  %s interactive [--resample|--force-rate]\n"
+                 "  %s interactive [--resample|--force-rate] [--no-gapless]\n"
                  "                                      transport REPL (play/pause/stop/seek/...)\n"
-                 "  %s rates [--device <id|n>] [--resample|--force-rate] [file]\n"
+                 "  %s rates|device [--device <id|n>] [--resample|--force-rate] [file]\n"
                  "                                      print an output device's rates, and\n"
                  "                                      the rate decision for a file if given\n"
                  "  %s probe <file>                     read metadata via the engine's\n"
@@ -435,7 +435,7 @@ void onInterrupt(int /*sig*/) {
 // Install the handlers with sigaction and SA_RESTART deliberately CLEARED,
 // not with std::signal: glibc's signal() installs BSD semantics (SA_RESTART
 // set), which transparently restarts the terminal read the REPL blocks in, so
-// on Linux Ctrl-C only ever echoed and the flag was never polled (an early finding).
+// on Linux Ctrl-C only ever echoed and the flag was never polled.
 // The Mac exiting cleanly was its libc's differing legacy behavior, not
 // something the code had actually arranged. Clearing SA_RESTART makes the
 // interrupted read fail with EINTR on both platforms by construction, which is
@@ -531,10 +531,9 @@ struct PlaylistState {
 };
 
 // Parse the argument of enqueue/add/play into one or more paths. A bare argument
-// is a SINGLE path, so a path with spaces still works unquoted (the previous
-// behavior). A bracketed argument, [a b c], is a LIST split on whitespace, with
-// double quotes to protect any element that itself contains spaces:
-// ["a b.flac" c.flac].
+// is a SINGLE path, so a path with spaces still works unquoted. A bracketed
+// argument, [a b c], is a LIST split on whitespace, with double quotes to
+// protect any element that itself contains spaces: ["a b.flac" c.flac].
 std::vector<std::string> parsePathList(const std::string& arg) {
     std::vector<std::string> out;
     if (arg.size() >= 2 && arg.front() == '[' && arg.back() == ']') {
@@ -866,16 +865,11 @@ int runInteractive(PlayRateFlag rateFlag) {
     // Start playback at playlist index j, with the remainder queued behind it so a
     // same-format album plays gaplessly from there.
     //
-    // This is now a single, state-independent gesture. The engine's
-    // playNow/setQueue primitives replace the old four-branch dance that had to
-    // reason about Playing vs Paused vs fresh vs Stopped-on-this vs
-    // Stopped-on-another, and they eliminate its documented wrinkle: jumping from a
-    // Stopped state onto a DIFFERENT track used to briefly play the remembered
-    // track before cutting. setQueue replaces the pending queue with the tail after
-    // j (what auto-advances, gaplessly when the format matches); playNow makes j
-    // current and plays it immediately, from any state, with no remembered-replay
-    // blip. The two land in one engine-thread command pass, so no advance slips
-    // between them.
+    // A single, state-independent gesture built on the engine's playNow/setQueue
+    // primitives: setQueue replaces the pending queue with the tail after j (what
+    // auto-advances, gaplessly when the format matches); playNow makes j current
+    // and plays it immediately, from any state, with no remembered-replay blip. The
+    // two land in one engine-thread command pass, so no advance slips between them.
     const auto startAt = [&](int j) {
         const int n = static_cast<int>(playlist.size());
         if (j < 0 || j >= n) {
@@ -935,7 +929,7 @@ int runInteractive(PlayRateFlag rateFlag) {
                 // Add the given file(s) to the playlist and jump to the first.
                 const std::vector<std::string> paths = parsePathList(arg);
                 if (paths.empty()) {
-                    std::puts("usage: play <file>");
+                    std::puts("usage: play <file>   |   play [a b c]");
                 } else {
                     const int firstNew = static_cast<int>(playlist.size());
                     for (const std::string& p : paths) {
@@ -1229,11 +1223,12 @@ int runRates(const std::string& /*filePath*/, PlayRateFlag /*rateFlag*/,
 
 #endif  // RAWFORM_HAVE_COREAUDIO || RAWFORM_HAVE_PIPEWIRE
 
-// Parses the optional rate flags shared by play and interactive. Returns false
-// on an unrecognized option, having printed an error. On success, `positional`
-// receives any single non-flag argument (the file for play; unused otherwise),
-// and `noGapless` is set if --no-gapless was given (the caller maps it to the
-// RAWFORM_NO_GAPLESS environment knob before constructing the Engine).
+// Parses the optional rate flags shared by play, interactive and rates. Returns
+// false on an unrecognized option, having printed an error. On success,
+// `positional` receives any single non-flag argument (the file for play and
+// rates; unused for interactive), and `noGapless` is set if --no-gapless was
+// given (the caller maps it to the RAWFORM_NO_GAPLESS environment knob before
+// constructing the Engine).
 // deviceSel: where --device is meaningful (the rates report), the caller
 // passes a string to receive the selector; callers that pass nullptr reject
 // the flag with a clear message rather than silently ignoring it.

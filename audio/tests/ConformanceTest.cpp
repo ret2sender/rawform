@@ -57,9 +57,10 @@
 // when the library was built with FFmpeg (RAWFORM_HAVE_FFMPEG); without it they
 // are skipped with a single notice and the suite still runs the three native
 // decoders. The blobs live in tests/fixtures/<Codec>Blob.h, included below;
-// each header records the one-line ffmpeg command that produced it. A probe
-// battery (checkProbe) runs beside the decode battery on the same fixtures, so
-// MetadataProbe's read of each file is held to the decoder's facts.
+// each header records the ffmpeg command that produced it, except Mp3Blob.h,
+// whose command was not kept. A probe battery (checkProbe) runs beside the
+// decode battery on the same fixtures, so MetadataProbe's read of each file is
+// held to the decoder's facts.
 
 #include "DecoderFactory.h"
 

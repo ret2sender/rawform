@@ -116,11 +116,11 @@ find_package(Threads REQUIRED)
 # ---------------------------------------------------------------------------
 # libsndfile discovery. Two supported paths, both ending at a uniform
 # SndFile::sndfile target so the rest of this file does not care which fired:
-#   - CONFIG mode: modern libsndfile ships SndFileConfig.cmake (Homebrew on macOS,
-#     which is the dev environment, installs exactly this).
-#   - pkg-config fallback: Debian/Ubuntu's libsndfile1-dev ships only a .pc file,
-#     so when the config package is absent we wrap PkgConfig::SNDFILE in an alias
-#     of the same name.
+#   - CONFIG mode: modern libsndfile ships SndFileConfig.cmake (Homebrew on macOS
+#     installs exactly this).
+#   - pkg-config fallback: Debian/Ubuntu's libsndfile1-dev and Fedora's
+#     libsndfile-devel ship only a .pc file, so when the config package is absent
+#     we wrap PkgConfig::SNDFILE in an alias of the same name.
 find_package(SndFile CONFIG QUIET)
 if(NOT SndFile_FOUND)
     find_package(PkgConfig REQUIRED)
@@ -348,13 +348,13 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# The CLI. The info/hash/--dump modes plus the "play <file>" and
-# "interactive" transport paths, all driving the Engine. It reaches the Engine
-# through its public header and SndfileDecoder / CoreAudioSink through their
+# The CLI. The info/hash/--dump mode, the play and interactive transport paths,
+# and the rates and probe diagnostics, all on the engine. It reaches the Engine
+# through its public header and DecoderFactory and the platform sink through their
 # headers under src/, so it adds src/ to its include path and links only the
-# library; the RAWFORM_HAVE_COREAUDIO define arrives through the library's
-# PUBLIC usage requirements and the sanitizer flags through the directory-scoped
-# profile block at the top of this file.
+# library; the RAWFORM_HAVE_COREAUDIO and RAWFORM_HAVE_PIPEWIRE defines arrive
+# through the library's PUBLIC usage requirements and the sanitizer flags through
+# the directory-scoped profile block at the top of this file.
 add_executable(rawform_audio_cli cli/main.cpp)
 target_link_libraries(rawform_audio_cli PRIVATE rawform_audio)
 target_include_directories(rawform_audio_cli
@@ -395,11 +395,11 @@ target_compile_options(EngineTest PRIVATE ${_rawform_warnings})
 add_test(NAME EngineTest COMMAND EngineTest)
 
 # The rate policy truth table. Pure and portable: it exercises
-# RateManager::decide() across modes, capability sets, and the gapless gate with no
-# sink, no threads, and no audio dependency, so it links only the library (for
-# RateManager.cpp) and reaches the policy through the PUBLIC header alone, needing
-# no src/ include. The matching engine-level wiring (capabilities -> decide ->
-# open and the cross-track gate) is covered inside EngineTest.
+# RateManager::decide() across modes, capability sets, and the nearest-best fallback
+# ladder with no sink, no threads, and no audio dependency, so it links only the
+# library (for RateManager.cpp) and reaches the policy through the PUBLIC header
+# alone, needing no src/ include. The matching engine-level wiring (capabilities
+# -> decide -> open and the cross-track gate) is covered inside EngineTest.
 add_executable(RateManagerTest tests/RateManagerTest.cpp)
 target_link_libraries(RateManagerTest PRIVATE rawform_audio)
 target_compile_options(RateManagerTest PRIVATE ${_rawform_warnings})
@@ -444,10 +444,11 @@ add_test(NAME Mp3DecoderTest COMMAND Mp3DecoderTest)
 # run against EVERY real decoder through the real DecoderFactory, so it doubles as
 # a dispatch test and asserts each fixture routes to the decoder it should. It
 # CREATES its WAV and FLAC fixtures (hence it links SndFile::sndfile and FLAC::FLAC
-# like those decoders' own tests) and writes its MP3 and AAC fixtures from embedded
-# byte blobs (no encoder needed, matching Mp3DecoderTest). The AAC case compiles in
+# like those decoders' own tests) and writes its MP3, AAC, AC3, DTS, WMA and ALAC
+# fixtures from embedded byte blobs (no encoder needed, matching Mp3DecoderTest);
+# Vorbis and Opus come from libsndfile's Ogg writers. The FFmpeg cases compile in
 # only when the library was built with FFmpeg (the PUBLIC RAWFORM_HAVE_FFMPEG define
-# propagates here), and the AAC decode runs inside the library, so this target
+# propagates here), and their decode runs inside the library, so this target
 # links NO libav* directly. Needs src/ on its include path for DecoderFactory.h.
 add_executable(ConformanceTest tests/ConformanceTest.cpp)
 target_link_libraries(ConformanceTest PRIVATE
