@@ -24,7 +24,7 @@
 # is the no-rebuild STAGING overlay for triage, added ON TOP of the baked
 # list when pointed at through the environment of the RUN (not the build):
 #
-#   LSAN_OPTIONS=suppressions=/path/to/rawform/ui/tools/lsan.supp
+#   LSAN_OPTIONS=suppressions=/path/to/rawform/ui/Sources/tools/lsan.supp
 #
 # An entry that proves out here graduates into SanitizerSuppressions.cpp.
 #
@@ -49,8 +49,7 @@
 # plugin (QWaylandDisplay::setupConnection and the text-input compose table
 # the first time a text field takes a key). Held for the life of the process
 # and not released by the Wayland client teardown path; reported at exit.
-# Typing in any text field "triggers" the compose-table half, which is why it
-# first surfaced against the rename dialog's pattern field; the field is
+# Typing in any text field "triggers" the compose-table half; the field is
 # incidental. Graduated into SanitizerSuppressions.cpp; kept here so a run
 # with a stale binary still has it.
 leak:libxkbcommon

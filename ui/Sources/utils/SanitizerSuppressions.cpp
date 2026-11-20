@@ -145,9 +145,9 @@ extern "C" const char* __tsan_default_suppressions() {
         // is Qt's event-queue mutex plus implicit-sharing refcounts, futex/
         // inlined atomics on Linux, INVISIBLE to TSan with uninstrumented
         // Qt, so every handoff reports as our-frame races (~20 per
-        // session, observed). This is the documented exception to the
-        // admission criteria, licensed by the tiebreaker: the identical
-        // paths run TSan-CLEAN on macOS.
+        // session, observed). This is an exception to the admission criteria
+        // beyond the one tools/tsan.supp states, licensed by the tiebreaker:
+        // the identical paths run TSan-CLEAN on macOS.
         // COST, stated plainly: a genuine Linux-only race involving these
         // two symbols would be masked here; macOS and the engine's own
         // instrumented tests remain the sighted coverage for them. Making

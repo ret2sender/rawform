@@ -29,9 +29,6 @@
 //
 //   - TrackIndex -> "disc.track", e.g. "1.01"
 //   - AlbumGroup -> "AlbumArtist - Album"
-//
-// The string spellings (fieldFromString) match MetadataModel::FieldId where they
-// overlap; this enum is a superset (it adds the two composites).
 
 #pragma once
 
@@ -122,9 +119,9 @@ struct ColumnSchema {
 /// via a custom column instead). Total over the enum.
 [[nodiscard]] QString humanTitleFor(ColumnField field);
 
-/// The code baseline alignment for a field (the analog of humanTitleFor). Only
-/// track index and year are AlignRight; everything else, numeric fields
-/// included, is AlignLeft. Total over the enum.
+/// The code baseline alignment for a field (the analog of humanTitleFor). Track
+/// index, length and bitrate are AlignRight, channels is AlignHCenter, and every
+/// other field, date included, is AlignLeft. Total over the enum.
 [[nodiscard]] Qt::Alignment defaultAlignmentFor(ColumnField field);
 
 /// True for the COMPOSITE presentation fields: columns whose value is derived
@@ -173,7 +170,7 @@ struct DefaultColumn {
 /// A single user-defined custom column. Pure data; the pattern is interpreted by
 /// PatternEvaluator::evaluatePattern, the alignment by the model + QML delegates.
 struct CustomColumn {
-    QString       id;                       ///< stable generated identity ("custom:<id>")
+    QString       id;                       ///< stable generated identity (a bare UUID)
     /// Header label (display only; freely renamable).
     QString       name;
     Qt::Alignment alignment = Qt::AlignLeft; ///< Left / HCenter / Right

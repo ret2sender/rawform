@@ -84,8 +84,8 @@ race:QtConcurrent::
 # real happens-before never reaches TSan. Both racing stacks are the
 # generated TU plus libQt6Qml; called_from_lib does not cover it because the
 # accesses are issued from the (instrumented) generated code, not from inside
-# the library. Linux/GCC only; the macOS runtime sees the join. Baked into
-# SanitizerSuppressions.cpp once the macOS run confirmed it absent there.
+# the library. Linux/GCC only; the macOS runtime sees the join. Also baked
+# into SanitizerSuppressions.cpp, licensed by its absence from macOS runs.
 race:rawform_qmlcache_loader.cpp
 
 # The scene graph render thread's teardown against QQuickItem subclasses

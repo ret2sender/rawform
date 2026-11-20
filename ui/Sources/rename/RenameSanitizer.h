@@ -76,7 +76,7 @@ namespace rawform {
 ///  - Unicode NFKD, then combining marks stripped ("Motorhead" from
 ///    "Mot\u00f6rhead");
 ///  - a small fold table for the Latin letters NFKD cannot decompose
-///    (ae oe o a-ring ss d th l from their aeligature/oslash/eth/thorn/stroke
+///    (ae oe o ss d th l from their aeligature/oslash/eth/thorn/stroke
 ///    forms), so "M\u00f8" -> "mo" rather than "m";
 ///  - lowercase;
 ///  - every char outside [a-z0-9] -> '_' ('.' and '-' included; see DOTS in

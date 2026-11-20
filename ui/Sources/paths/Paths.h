@@ -35,9 +35,10 @@ namespace rawform {
 /// be copied between machines as-is. The single place this path is computed:
 /// every app-managed file lives beneath it (settings.yaml, window.yaml,
 /// playback.yaml, rate_ledger.yaml, spectrum.yaml, rename_patterns.yaml,
-/// playlist_custom_columns.yaml, the columns.rwftp column preset, and the
-/// live_playlist/ session directory). May not exist yet; each writer creates
-/// it on its first save.
+/// search_filters.yaml, playlist_custom_columns.yaml, the columns.rwftp and
+/// queue_columns.rwftp column presets, the instance.lock single-instance lock,
+/// and the live_playlist/ session directory). May not exist yet; each writer
+/// creates it on its first save.
 [[nodiscard]] QString userConfigDir();
 
 } // namespace rawform

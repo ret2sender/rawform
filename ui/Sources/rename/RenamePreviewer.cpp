@@ -43,7 +43,8 @@
 namespace rawform {
 namespace {
 
-/// Hash key for (path, subsong) identity; '\n' cannot occur in either half.
+/// Hash key for (path, subsong) identity. A path may hold '\n', but the subsong
+/// half never does, so the last '\n' always splits the key unambiguously.
 QString identityKey(const QString& path, int subsong) {
     return path + QLatin1Char('\n') + QString::number(subsong);
 }

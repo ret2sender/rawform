@@ -36,7 +36,7 @@ namespace rawform {
 
 std::optional<ColumnField> fieldFromString(const QString& name) {
     // Built once; the spellings are the canonical field ids (round-trip with
-    // stringFromField) and align with MetadataModel::FieldId where they overlap.
+    // stringFromField).
     static const QHash<QString, ColumnField> kTable = {
         { QStringLiteral("artist"),        ColumnField::Artist },
         { QStringLiteral("album_artist"),  ColumnField::AlbumArtist },

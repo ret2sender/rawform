@@ -21,15 +21,17 @@
 // PerfLog.h
 //
 // The "rawform.perf" logging category: timing lines around the operations
-// whose cost scales with the playlist (bulk removals and moves, the reloader's
-// result drain, the search haystack build). Off by default; the lines cost one
-// category check when disabled. Enable with
+// whose cost scales with the playlist (bulk removals and moves, the scanner's
+// enumeration and reads, the reloader's result drain, the search haystack
+// build), plus the album-art decode, the audio sink's construction and the
+// spectrum's park and resume. Off by default; the lines cost one category
+// check when disabled. Enable with
 //
 //     QT_LOGGING_RULES="rawform.perf.debug=true"
 //
 // (and QT_LOGGING_TO_CONSOLE=1 when stderr is not a terminal, or the lines go
-// to the journal). Each line names the operation, the row or result count and
-// the elapsed milliseconds, so a before/after pair reads off one grep.
+// to the journal). Each timing line names the operation, its count or size and
+// the elapsed time, so a before/after pair reads off one grep.
 
 #pragma once
 

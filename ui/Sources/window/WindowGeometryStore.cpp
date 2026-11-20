@@ -242,7 +242,7 @@ void WindowGeometryStore::saveSize(const QString& key, int width, int height) {
 // ---------------------------------------------------------------------------
 void WindowGeometryStore::writeFile() const {
     // Emit everything the store holds and hand it to the shared atomic
-    // writer. No debounce: each caller runs once, from a window's onClosing.
+    // writer. No debounce: each caller runs once per close or hide of its window.
     const QString   path = windowSettingsPath();
 
     YAML::Emitter out;

@@ -53,7 +53,7 @@
 //     every platform and stays unconditional.
 //
 //   - Keyed TOOL-WINDOW sizes: per-window `width`/`height` sub-maps
-//     under a name key (`properties:`, `rename:`, `settings:`,
+//     under a name key (`properties:`, `rename:`, `settings:`, `find:`,
 //     `customColumns:`), for the frameless tool windows (they resize
 //     through WindowResizeGrips). SIZE ONLY, never position: the
 //     fresh-instance windows cascade from the host at open, and a stored
@@ -131,8 +131,8 @@ public:
     /// Keyed tool-window sizes. savedWidth/savedHeight return the stored
     /// value for `key`, else `fallback` (the window's built-in default); the
     /// caller clamps against its own minimums, which the store does not know.
-    /// saveSize records the size and rewrites the file; call it from the
-    /// window's onClosing, guarded to windowed visibility.
+    /// saveSize records the size and rewrites the file; call it when the window
+    /// closes or hides, guarded to windowed visibility.
     [[nodiscard]] Q_INVOKABLE int savedWidth(const QString& key, int fallback) const;
     [[nodiscard]] Q_INVOKABLE int savedHeight(const QString& key, int fallback) const;
     Q_INVOKABLE void saveSize(const QString& key, int width, int height);
@@ -169,7 +169,7 @@ private:
     bool m_fileHasPosition    = false;
     bool m_platformCanPosition = true;
 
-    /// Keyed tool-window sizes, by name (`properties`, `rename`, `settings`,
+    /// Keyed tool-window sizes, by name (`properties`, `rename`, `settings`, `find`,
     /// `customColumns`). QMap so the emit order (and therefore the file) is
     /// stable across runs.
     QMap<QString, QSize> m_toolSizes;
