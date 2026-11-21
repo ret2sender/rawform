@@ -110,8 +110,9 @@ Codec codecForSubtype(int sfFormat, std::uint16_t bits) noexcept {
 }
 
 // The WAVEFORMATEXTENSIBLE bit of one libsndfile channel-map entry, 0 for a
-// speaker the position table has no bit for (mono, left or right of center, the
-// top layer, ambisonic components), which leaves the whole file without a mask.
+// speaker the position table has no bit for (mono, ambisonic components, any
+// other speaker the table does not name), which leaves the whole file without
+// a mask.
 // Apple's names and Microsoft's for the same speaker give the same bit, since
 // which pair libsndfile reports is its own choice. The entries are plain ints
 // from an unnamed enum, hence the default label.
@@ -129,6 +130,19 @@ std::uint64_t speakerBit(int sfChannel) noexcept {
         case SF_CHANNEL_MAP_REAR_CENTER:  return channelBit(ChannelPosition::BackCenter);
         case SF_CHANNEL_MAP_SIDE_LEFT:    return channelBit(ChannelPosition::SideLeft);
         case SF_CHANNEL_MAP_SIDE_RIGHT:   return channelBit(ChannelPosition::SideRight);
+        case SF_CHANNEL_MAP_FRONT_LEFT_OF_CENTER:
+            return channelBit(ChannelPosition::FrontLeftOfCenter);
+        case SF_CHANNEL_MAP_FRONT_RIGHT_OF_CENTER:
+            return channelBit(ChannelPosition::FrontRightOfCenter);
+        case SF_CHANNEL_MAP_TOP_CENTER:   return channelBit(ChannelPosition::TopCenter);
+        case SF_CHANNEL_MAP_TOP_FRONT_LEFT:
+            return channelBit(ChannelPosition::TopFrontLeft);
+        case SF_CHANNEL_MAP_TOP_FRONT_CENTER:
+            return channelBit(ChannelPosition::TopFrontCenter);
+        case SF_CHANNEL_MAP_TOP_FRONT_RIGHT:
+            return channelBit(ChannelPosition::TopFrontRight);
+        case SF_CHANNEL_MAP_TOP_REAR_LEFT:
+            return channelBit(ChannelPosition::TopBackLeft);
         default:                          return 0;
     }
 }

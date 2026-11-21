@@ -695,20 +695,32 @@ void checkChannelPositions() {
     CHECK(positionsAre(fmt(6, 0), {P::FrontLeft, P::FrontRight, P::FrontCenter,
                                    P::Lfe, P::BackLeft, P::BackRight}));
 
-    // Masks: 4.0 (FL FR FC BC), and 5.1 with side surrounds.
+    // Masks: 4.0 (FL FR FC BC), 5.1 with side surrounds, 7.1(wide) with the
+    // front left and right of center, 5.1.2(back) with the top front pair, and
+    // the remaining height speakers over a stereo pair.
     CHECK(positionsAre(fmt(4, 0x0107), {P::FrontLeft, P::FrontRight,
                                         P::FrontCenter, P::BackCenter}));
     CHECK(positionsAre(fmt(6, 0x060F), {P::FrontLeft, P::FrontRight, P::FrontCenter,
                                         P::Lfe, P::SideLeft, P::SideRight}));
+    CHECK(positionsAre(fmt(8, 0x00FF),
+                       {P::FrontLeft, P::FrontRight, P::FrontCenter, P::Lfe,
+                        P::BackLeft, P::BackRight, P::FrontLeftOfCenter,
+                        P::FrontRightOfCenter}));
+    CHECK(positionsAre(fmt(8, 0x503F),
+                       {P::FrontLeft, P::FrontRight, P::FrontCenter, P::Lfe,
+                        P::BackLeft, P::BackRight, P::TopFrontLeft,
+                        P::TopFrontRight}));
+    CHECK(positionsAre(fmt(5, 0xA803), {P::FrontLeft, P::FrontRight, P::TopCenter,
+                                        P::TopFrontCenter, P::TopBackLeft}));
+    CHECK(positionsAre(fmt(3, 0x0043),
+                       {P::FrontLeft, P::FrontRight, P::FrontLeftOfCenter}));
 
     // A mask equal to the default order declares what 0 declares.
     CHECK(positionsAre(fmt(6, 0x003F), {P::FrontLeft, P::FrontRight, P::FrontCenter,
                                         P::Lfe, P::BackLeft, P::BackRight}));
 
-    // Ignored masks: four bits on three channels, and front-left-of-center
-    // (0x40), which the table cannot name.
+    // Ignored masks: four bits on three channels.
     CHECK(positionsAre(fmt(3, 0x0107), {P::FrontLeft, P::FrontRight, P::FrontCenter}));
-    CHECK(positionsAre(fmt(3, 0x0043), {P::FrontLeft, P::FrontRight, P::FrontCenter}));
 
     // Nothing to declare.
     CHECK(channelPositionsFor(fmt(0, 0)).empty());
@@ -725,11 +737,12 @@ void checkChannelPositions() {
 
     // The mask a decoder reports for a source's own mask: the mask when it
     // differs from the default order, 0 for the default order itself, and 0 for
-    // anything the table cannot declare (an unnamed speaker, a bit count that
-    // disagrees with the channel count, mono, more than eight channels).
+    // anything the table cannot declare (an unnamed speaker, bit 18, a bit count
+    // that disagrees with the channel count, mono, more than eight channels).
     CHECK(sourceChannelMask(0x0107, 4) == 0x0107);
     CHECK(sourceChannelMask(0x0033, 4) == 0);
-    CHECK(sourceChannelMask(0x0043, 3) == 0);
+    CHECK(sourceChannelMask(0x0043, 3) == 0x0043);
+    CHECK(sourceChannelMask(0x40003, 3) == 0);
     CHECK(sourceChannelMask(0x0107, 3) == 0);
     CHECK(sourceChannelMask(0x0004, 1) == 0);
     CHECK(sourceChannelMask(0x073F, 9) == 0);
@@ -737,9 +750,10 @@ void checkChannelPositions() {
     // A source that names a speaker per channel, in stream order. 4.0 in
     // ascending order needs no reorder. 4.0 as C L R Cs is moved: output FL
     // takes source channel 1, FR 2, FC 0, BC 3. 5.1 as L C R Ls Rs LFE is moved
-    // to the default order, so it reports no mask. The default order itself, an
-    // unnamed speaker (FLC), a speaker with no bit and a repeated speaker get no
-    // mask, and none of them moves.
+    // to the default order, so it reports no mask. FLC ahead of L R is moved
+    // behind them. The default order itself, an unnamed speaker (bit 18), a
+    // speaker with no bit and a repeated speaker get no mask, and none of them
+    // moves.
     const auto orderOf = [](std::initializer_list<std::uint64_t> speakers) {
         return rawform::audio::channelOrderFor(
             std::span<const std::uint64_t>(speakers.begin(), speakers.size()));
@@ -755,7 +769,10 @@ void checkChannelPositions() {
     const auto defaultQuad = orderOf({0x001, 0x002, 0x010, 0x020});
     CHECK(defaultQuad.mask == 0 && !defaultQuad.reorder);
     const auto flc = orderOf({0x040, 0x001, 0x002});
-    CHECK(flc.mask == 0 && !flc.reorder);
+    CHECK(flc.mask == 0x0043 && flc.reorder);
+    CHECK(flc.from[0] == 1 && flc.from[1] == 2 && flc.from[2] == 0);
+    const auto unnamed = orderOf({0x40000, 0x001, 0x002});
+    CHECK(unnamed.mask == 0 && !unnamed.reorder);
     const auto noBit = orderOf({0x004, 0x001, 0x000});
     CHECK(noBit.mask == 0 && !noBit.reorder);
     const auto repeated = orderOf({0x004, 0x001, 0x001});
@@ -774,11 +791,11 @@ void checkChannelPositions() {
 // speaker: the AC3 streams in fixtures/Ac3LayoutBlob.h, and the FLAC files
 // written below. checkDecodedLayout opens one through the factory, takes the
 // positions a sink would declare for the decoded format, and listens to every
-// decoded channel: the strongest of the nine tones below must be the tone of the
+// decoded channel: the strongest of the tones below must be the tone of the
 // position declared for that channel.
 
-// The tone each position carries in the fixtures. All nine are listened for, so
-// a channel declared at the wrong position hears the wrong tone.
+// The tone each position carries in the fixtures. All of them are listened for,
+// so a channel declared at the wrong position hears the wrong tone.
 struct PositionTone {
     ChannelPosition position;
     double          hz;
@@ -789,6 +806,13 @@ constexpr PositionTone kPositionTones[] = {
     {ChannelPosition::BackLeft, 900.0},   {ChannelPosition::BackRight, 1100.0},
     {ChannelPosition::BackCenter, 1300.0}, {ChannelPosition::SideLeft, 1500.0},
     {ChannelPosition::SideRight, 1700.0},
+    {ChannelPosition::FrontLeftOfCenter, 1900.0},
+    {ChannelPosition::FrontRightOfCenter, 2100.0},
+    {ChannelPosition::TopCenter, 2300.0},
+    {ChannelPosition::TopFrontLeft, 2500.0},
+    {ChannelPosition::TopFrontCenter, 2700.0},
+    {ChannelPosition::TopFrontRight, 2900.0},
+    {ChannelPosition::TopBackLeft, 3100.0},
 };
 
 const char* positionName(ChannelPosition p) noexcept {
@@ -803,6 +827,13 @@ const char* positionName(ChannelPosition p) noexcept {
         case ChannelPosition::BackCenter:  return "BC";
         case ChannelPosition::SideLeft:    return "SL";
         case ChannelPosition::SideRight:   return "SR";
+        case ChannelPosition::FrontLeftOfCenter:  return "FLC";
+        case ChannelPosition::FrontRightOfCenter: return "FRC";
+        case ChannelPosition::TopCenter:          return "TC";
+        case ChannelPosition::TopFrontLeft:       return "TFL";
+        case ChannelPosition::TopFrontCenter:     return "TFC";
+        case ChannelPosition::TopFrontRight:      return "TFR";
+        case ChannelPosition::TopBackLeft:        return "TBL";
     }
     return "?";
 }
@@ -1113,10 +1144,18 @@ constexpr std::uint32_t kLabelLeft                 = 1;
 constexpr std::uint32_t kLabelRight                = 2;
 constexpr std::uint32_t kLabelCenter               = 3;
 constexpr std::uint32_t kLabelCenterSurround       = 9;
+constexpr std::uint32_t kLabelTopCenterSurround    = 12;
+constexpr std::uint32_t kLabelVerticalHeightCenter = 14;
+constexpr std::uint32_t kLabelTopBackLeft          = 16;
 constexpr std::uint32_t kLabelUnknown              = 0xFFFFFFFFu;
 constexpr std::uint32_t kBitLeft                   = 1u << 0;
 constexpr std::uint32_t kBitRight                  = 1u << 1;
 constexpr std::uint32_t kBitCenter                 = 1u << 2;
+constexpr std::uint32_t kBitLFEScreen              = 1u << 3;
+constexpr std::uint32_t kBitLeftSurround           = 1u << 4;
+constexpr std::uint32_t kBitRightSurround          = 1u << 5;
+constexpr std::uint32_t kBitLeftCenter             = 1u << 6;
+constexpr std::uint32_t kBitRightCenter            = 1u << 7;
 constexpr std::uint32_t kBitCenterSurround         = 1u << 8;
 constexpr std::uint32_t kTagUseChannelDescriptions = 0;
 constexpr std::uint32_t kTagUseChannelBitmap       = 1u << 16;
@@ -1386,22 +1425,33 @@ void checkReorderExact() {
 }
 
 #if RAWFORM_HAVE_FFMPEG
-// The out-of-order CAF (C L R Cs) through FFmpeg, which reads such a layout as
-// a custom order. Opened directly: the factory hands CAF to libsndfile.
-void checkFfmpegCustomOrder() {
-    using P                = ChannelPosition;
-    const std::string path = "rawform_layout_ffmpeg_custom.caf";
-    writeSndfileLayout("ffmpeg_custom", path, SF_FORMAT_CAF | SF_FORMAT_FLOAT,
-                       {SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT,
-                        SF_CHANNEL_MAP_REAR_CENTER},
-                       {P::FrontCenter, P::FrontLeft, P::FrontRight, P::BackCenter});
+// A libsndfile layout fixture (writeSndfileLayout) opened by FFmpeg directly,
+// since the factory hands these containers to libsndfile. FFmpeg must report
+// mask and declare the declared positions, each channel holding its own tone.
+void checkFfmpegSndfileLayout(const char* name, const char* ext, int sfFormat,
+                              std::initializer_list<int> map, std::uint16_t mask,
+                              std::initializer_list<ChannelPosition> source,
+                              std::initializer_list<ChannelPosition> declared) {
+    const std::string path = std::string("rawform_layout_") + name + ext;
+    writeSndfileLayout(name, path, sfFormat, map, source);
     std::string               err;
     std::unique_ptr<IDecoder> dec = rawform::audio::FfmpegDecoder::open(path, &err);
     if (!dec) {
         std::fprintf(stderr, "open failed for %s: %s\n", path.c_str(), err.c_str());
     }
-    checkLayoutOf("ffmpeg_custom", path, std::move(dec), DecoderKind::Ffmpeg, 0x0107,
-                  {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
+    checkLayoutOf(name, path, std::move(dec), DecoderKind::Ffmpeg, mask, declared);
+}
+
+// The out-of-order CAF (C L R Cs) through FFmpeg, which reads such a layout as
+// a custom order.
+void checkFfmpegCustomOrder() {
+    using P = ChannelPosition;
+    checkFfmpegSndfileLayout(
+        "ffmpeg_custom", ".caf", SF_FORMAT_CAF | SF_FORMAT_FLOAT,
+        {SF_CHANNEL_MAP_CENTER, SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT,
+         SF_CHANNEL_MAP_REAR_CENTER},
+        0x0107, {P::FrontCenter, P::FrontLeft, P::FrontRight, P::BackCenter},
+        {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
 }
 
 void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
@@ -1457,10 +1507,11 @@ int main() {
 
     {
         // FLAC files that name 4.0 in a WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment,
-        // natively and in Ogg, with the field name in either case. Then files
-        // whose comment, or its absence, leaves the default order for the count:
-        // the default mask itself, a speaker the table cannot name, a bit count
-        // that disagrees with the channel count, and a value not written in hex.
+        // natively and in Ogg, with the field name in either case, and one that
+        // names FL FR FLC. Then files whose comment, or its absence, leaves the
+        // default order for the count: the default mask itself, a speaker the
+        // table cannot name (bit 18), a bit count that disagrees with the
+        // channel count, and a value not written in hex.
         using P = ChannelPosition;
         constexpr const char* k40 = "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0107";
         const std::initializer_list<P> p40 = {P::FrontLeft, P::FrontRight,
@@ -1477,7 +1528,10 @@ int main() {
         checkFlacLayout("flac_quad_mask", Container::Native,
                         "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0033", 0, quad);
         checkFlacLayout("flac_flc_mask", Container::Native,
-                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0043", 0, p30);
+                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0043", 0x0043,
+                        {P::FrontLeft, P::FrontRight, P::FrontLeftOfCenter});
+        checkFlacLayout("flac_unnamed_mask", Container::Native,
+                        "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x40003", 0, p30);
         checkFlacLayout("flac_40_mask_on_3", Container::Native, k40, 0, p30);
         checkFlacLayout("flac_decimal_mask", Container::Native,
                         "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=263", 0, quad);
@@ -1579,6 +1633,64 @@ int main() {
                                 p40);
             },
             0, quad, p40);
+
+        // Layouts with the speakers left and right of center and the height
+        // layer: 7.1(wide) and 5.1.2(back) in WAVEX, 7.1(wide) as a CAF channel
+        // bitmap, and TFC L R TBL TC as CAF descriptions, moved to ascending
+        // order. libsndfile's CAF and AIFF layout tags name none of them.
+        const std::initializer_list<P> p71wide = {
+            P::FrontLeft, P::FrontRight, P::FrontCenter,       P::Lfe,
+            P::BackLeft,  P::BackRight,  P::FrontLeftOfCenter, P::FrontRightOfCenter};
+        const std::initializer_list<P> p512back = {
+            P::FrontLeft, P::FrontRight, P::FrontCenter,  P::Lfe,
+            P::BackLeft,  P::BackRight,  P::TopFrontLeft, P::TopFrontRight};
+        const std::initializer_list<int> map71wide = {
+            SF_CHANNEL_MAP_LEFT,      SF_CHANNEL_MAP_RIGHT,
+            SF_CHANNEL_MAP_CENTER,    SF_CHANNEL_MAP_LFE,
+            SF_CHANNEL_MAP_REAR_LEFT, SF_CHANNEL_MAP_REAR_RIGHT,
+            SF_CHANNEL_MAP_FRONT_LEFT_OF_CENTER, SF_CHANNEL_MAP_FRONT_RIGHT_OF_CENTER};
+        const std::initializer_list<int> map512back = {
+            SF_CHANNEL_MAP_LEFT,          SF_CHANNEL_MAP_RIGHT,
+            SF_CHANNEL_MAP_CENTER,        SF_CHANNEL_MAP_LFE,
+            SF_CHANNEL_MAP_REAR_LEFT,     SF_CHANNEL_MAP_REAR_RIGHT,
+            SF_CHANNEL_MAP_TOP_FRONT_LEFT, SF_CHANNEL_MAP_TOP_FRONT_RIGHT};
+        checkSndfileLayout("wavex_71wide", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT,
+                           map71wide, 0x00FF, p71wide, p71wide);
+        checkSndfileLayout("wavex_512back", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT,
+                           map512back, 0x503F, p512back, p512back);
+        checkByteLayout(
+            "caf_bitmap_71wide", ".caf",
+            [&](const std::string& p) {
+                return writeCaf(p,
+                                bitmapLayout(kBitLeft | kBitRight | kBitCenter |
+                                             kBitLFEScreen | kBitLeftSurround |
+                                             kBitRightSurround | kBitLeftCenter |
+                                             kBitRightCenter),
+                                p71wide);
+            },
+            0x00FF, p71wide);
+        checkByteLayout(
+            "caf_desc_height", ".caf",
+            [&](const std::string& p) {
+                return writeCaf(p,
+                                descriptionLayout({kLabelVerticalHeightCenter, kLabelLeft,
+                                                   kLabelRight, kLabelTopBackLeft,
+                                                   kLabelTopCenterSurround}),
+                                {P::TopFrontCenter, P::FrontLeft, P::FrontRight,
+                                 P::TopBackLeft, P::TopCenter});
+            },
+            0xA803,
+            {P::FrontLeft, P::FrontRight, P::TopCenter, P::TopFrontCenter,
+             P::TopBackLeft});
+#if RAWFORM_HAVE_FFMPEG
+        // FFmpeg names both WAVEX layouts natively; opened directly, it agrees.
+        checkFfmpegSndfileLayout("ffmpeg_wavex_71wide", ".wav",
+                                 SF_FORMAT_WAVEX | SF_FORMAT_FLOAT, map71wide, 0x00FF,
+                                 p71wide, p71wide);
+        checkFfmpegSndfileLayout("ffmpeg_wavex_512back", ".wav",
+                                 SF_FORMAT_WAVEX | SF_FORMAT_FLOAT, map512back, 0x503F,
+                                 p512back, p512back);
+#endif
 
         // Ogg Vorbis and Opus in Vorbis order (3.0 as L C R, 5.1 as L C R BL BR
         // LFE), delivered in the default order for their count, so with no mask.

@@ -1415,6 +1415,13 @@ std::uint32_t spaChannelFor(ChannelPosition p) {
         case ChannelPosition::BackCenter:  return SPA_AUDIO_CHANNEL_RC;
         case ChannelPosition::SideLeft:    return SPA_AUDIO_CHANNEL_SL;
         case ChannelPosition::SideRight:   return SPA_AUDIO_CHANNEL_SR;
+        case ChannelPosition::FrontLeftOfCenter:  return SPA_AUDIO_CHANNEL_FLC;
+        case ChannelPosition::FrontRightOfCenter: return SPA_AUDIO_CHANNEL_FRC;
+        case ChannelPosition::TopCenter:          return SPA_AUDIO_CHANNEL_TC;
+        case ChannelPosition::TopFrontLeft:       return SPA_AUDIO_CHANNEL_TFL;
+        case ChannelPosition::TopFrontCenter:     return SPA_AUDIO_CHANNEL_TFC;
+        case ChannelPosition::TopFrontRight:      return SPA_AUDIO_CHANNEL_TFR;
+        case ChannelPosition::TopBackLeft:        return SPA_AUDIO_CHANNEL_TRL;
     }
     return SPA_AUDIO_CHANNEL_UNKNOWN;
 }

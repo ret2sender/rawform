@@ -76,6 +76,13 @@ enum class ChannelPosition : std::uint8_t {
     BackCenter,
     SideLeft,
     SideRight,
+    FrontLeftOfCenter,
+    FrontRightOfCenter,
+    TopCenter,
+    TopFrontLeft,
+    TopFrontCenter,
+    TopFrontRight,
+    TopBackLeft,
 };
 
 /// The largest channel count with a defined order. Beyond it a sink declares
@@ -97,6 +104,13 @@ inline constexpr std::uint16_t kMaxPositionedChannels = 8;
         case ChannelPosition::BackCenter:  return 0x0100;
         case ChannelPosition::SideLeft:    return 0x0200;
         case ChannelPosition::SideRight:   return 0x0400;
+        case ChannelPosition::FrontLeftOfCenter:  return 0x0040;
+        case ChannelPosition::FrontRightOfCenter: return 0x0080;
+        case ChannelPosition::TopCenter:          return 0x0800;
+        case ChannelPosition::TopFrontLeft:       return 0x1000;
+        case ChannelPosition::TopFrontCenter:     return 0x2000;
+        case ChannelPosition::TopFrontRight:      return 0x4000;
+        case ChannelPosition::TopBackLeft:        return 0x8000;
     }
     return 0;
 }
@@ -155,12 +169,15 @@ inline constexpr std::array<PositionRow, kMaxPositionedChannels> kPositionRows{{
 
 // The positions a mask can name, in ascending bit order: the order the channels
 // of a masked stream are interleaved in.
-inline constexpr std::array<ChannelPosition, 9> kMaskOrder{{
-    ChannelPosition::FrontLeft, ChannelPosition::FrontRight,
-    ChannelPosition::FrontCenter, ChannelPosition::Lfe,
-    ChannelPosition::BackLeft, ChannelPosition::BackRight,
-    ChannelPosition::BackCenter, ChannelPosition::SideLeft,
-    ChannelPosition::SideRight,
+inline constexpr std::array<ChannelPosition, 16> kMaskOrder{{
+    ChannelPosition::FrontLeft,         ChannelPosition::FrontRight,
+    ChannelPosition::FrontCenter,       ChannelPosition::Lfe,
+    ChannelPosition::BackLeft,          ChannelPosition::BackRight,
+    ChannelPosition::FrontLeftOfCenter, ChannelPosition::FrontRightOfCenter,
+    ChannelPosition::BackCenter,        ChannelPosition::SideLeft,
+    ChannelPosition::SideRight,         ChannelPosition::TopCenter,
+    ChannelPosition::TopFrontLeft,      ChannelPosition::TopFrontCenter,
+    ChannelPosition::TopFrontRight,     ChannelPosition::TopBackLeft,
 }};
 
 }  // namespace detail

@@ -171,6 +171,15 @@ static_assert(AV_CH_BACK_RIGHT == channelBit(ChannelPosition::BackRight));
 static_assert(AV_CH_BACK_CENTER == channelBit(ChannelPosition::BackCenter));
 static_assert(AV_CH_SIDE_LEFT == channelBit(ChannelPosition::SideLeft));
 static_assert(AV_CH_SIDE_RIGHT == channelBit(ChannelPosition::SideRight));
+static_assert(AV_CH_FRONT_LEFT_OF_CENTER ==
+              channelBit(ChannelPosition::FrontLeftOfCenter));
+static_assert(AV_CH_FRONT_RIGHT_OF_CENTER ==
+              channelBit(ChannelPosition::FrontRightOfCenter));
+static_assert(AV_CH_TOP_CENTER == channelBit(ChannelPosition::TopCenter));
+static_assert(AV_CH_TOP_FRONT_LEFT == channelBit(ChannelPosition::TopFrontLeft));
+static_assert(AV_CH_TOP_FRONT_CENTER == channelBit(ChannelPosition::TopFrontCenter));
+static_assert(AV_CH_TOP_FRONT_RIGHT == channelBit(ChannelPosition::TopFrontRight));
+static_assert(AV_CH_TOP_BACK_LEFT == channelBit(ChannelPosition::TopBackLeft));
 
 // The source's speakers, for AudioFormat::channelMask, and the reorder that
 // brings its channels to ascending bit order, the order a mask describes

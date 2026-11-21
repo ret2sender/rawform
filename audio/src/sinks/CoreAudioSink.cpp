@@ -350,6 +350,17 @@ AudioChannelLabel labelFor(ChannelPosition p) {
         case ChannelPosition::BackCenter:  return kAudioChannelLabel_CenterSurround;
         case ChannelPosition::SideLeft:    return kAudioChannelLabel_LeftSurroundDirect;
         case ChannelPosition::SideRight:   return kAudioChannelLabel_RightSurroundDirect;
+        case ChannelPosition::FrontLeftOfCenter:  return kAudioChannelLabel_LeftCenter;
+        case ChannelPosition::FrontRightOfCenter: return kAudioChannelLabel_RightCenter;
+        case ChannelPosition::TopCenter:
+            return kAudioChannelLabel_TopCenterSurround;
+        case ChannelPosition::TopFrontLeft:
+            return kAudioChannelLabel_VerticalHeightLeft;
+        case ChannelPosition::TopFrontCenter:
+            return kAudioChannelLabel_VerticalHeightCenter;
+        case ChannelPosition::TopFrontRight:
+            return kAudioChannelLabel_VerticalHeightRight;
+        case ChannelPosition::TopBackLeft:        return kAudioChannelLabel_TopBackLeft;
     }
     return kAudioChannelLabel_Unknown;
 }
