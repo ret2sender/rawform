@@ -1008,6 +1008,24 @@ void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
     checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, declared);
 }
 
+// An Ogg Vorbis or Opus layout fixture, written by libsndfile with its channels
+// in Vorbis order, the order libvorbis and libopus take them in; no channel map,
+// since Ogg carries none. Without FFmpeg libsndfile decodes it. With FFmpeg the
+// factory hands it to FFmpeg, which reorders Vorbis order itself, so there the
+// same row proves the fixture carries true Vorbis order.
+void checkVorbisOrderLayout(const char* name, const char* ext, int sfFormat,
+                            std::initializer_list<ChannelPosition> source,
+                            std::initializer_list<ChannelPosition> declared) {
+    const std::string path = std::string("rawform_layout_") + name + ext;
+    writeSndfileLayout(name, path, sfFormat, {}, source);
+#if RAWFORM_HAVE_FFMPEG
+    constexpr DecoderKind decoder = DecoderKind::Ffmpeg;
+#else
+    constexpr DecoderKind decoder = DecoderKind::Sndfile;
+#endif
+    checkDecodedLayout(name, path, decoder, 0, declared);
+}
+
 // A float ramp in a CAF whose map is out of ascending order (C L R Cs). The
 // decoder must deliver every sample bit for bit, only moved to its speaker's
 // place: output channel i holds source channel from[i].
@@ -1205,6 +1223,21 @@ int main() {
             {P::FrontLeft, P::FrontRight, P::FrontCenter, P::Lfe, P::BackLeft,
              P::BackRight});
         checkReorderExact();
+
+        // Ogg Vorbis and Opus in Vorbis order (3.0 as L C R, 5.1 as L C R BL BR
+        // LFE), delivered in the default order for their count, so with no mask.
+        const std::initializer_list<P> vorbis51 = {P::FrontLeft, P::FrontCenter,
+                                                   P::FrontRight, P::BackLeft,
+                                                   P::BackRight, P::Lfe};
+        const std::initializer_list<P> p51 = {P::FrontLeft, P::FrontRight,
+                                              P::FrontCenter, P::Lfe,
+                                              P::BackLeft, P::BackRight};
+        checkVorbisOrderLayout("vorbis_30", ".ogg", SF_FORMAT_OGG | SF_FORMAT_VORBIS,
+                               {P::FrontLeft, P::FrontCenter, P::FrontRight}, p30);
+        checkVorbisOrderLayout("vorbis_51", ".ogg", SF_FORMAT_OGG | SF_FORMAT_VORBIS,
+                               vorbis51, p51);
+        checkVorbisOrderLayout("opus_51", ".opus", SF_FORMAT_OGG | SF_FORMAT_OPUS,
+                               vorbis51, p51);
     }
 
 #if RAWFORM_HAVE_FFMPEG

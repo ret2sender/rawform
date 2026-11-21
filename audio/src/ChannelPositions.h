@@ -33,7 +33,8 @@
 // FC BC) is not declared as quad (FL FR BL BR), nor AC3's side surrounds (SL SR)
 // as back surrounds (BL BR). A source whose channels come in some other order
 // than ascending bit order (a CAF or AIFF layout such as C L R Cs, an FFmpeg
-// custom order) is moved to it as it is decoded (channelOrderFor,
+// custom order, Ogg Vorbis or Opus as libsndfile decodes them, in the Vorbis
+// order L C R) is moved to it as it is decoded (channelOrderFor,
 // reorderChannels): the samples only change places, so a mask always describes
 // the order the channels arrive in. The layout rides in AudioFormat rather
 // than beside it because every path that must agree on it already carries one:

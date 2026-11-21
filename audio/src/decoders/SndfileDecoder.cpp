@@ -128,23 +128,59 @@ std::uint64_t speakerBit(int sfChannel) noexcept {
     }
 }
 
-// The speakers a file names, when its header carries a channel map: WAVE's
-// channel mask (WAVEX, RF64) or a CAF or AIFF channel layout chunk. The map
-// lists the channels in the order sf_readf_float delivers them, which a CAF or
-// AIFF layout need not keep ascending. No mask and no reorder when the file
-// carries no map, and for anything the table cannot declare.
-ChannelOrder channelOrderOf(SNDFILE* snd, int channels) {
+using Row = std::array<ChannelPosition, kMaxPositionedChannels>;
+
+// The Vorbis I channel order, which Opus channel mapping 1 shares: row n-2 holds
+// the n-channel order, for 2 to 8 channels; unused tail slots are never read.
+// libsndfile hands Vorbis and Opus channels back as libvorbis and libopus decode
+// them, in this order, and reports no channel map for them, so this table is
+// what tells the decoder where they go.
+constexpr std::array<Row, kMaxPositionedChannels - 1> kVorbisOrder{{
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontRight},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
+     ChannelPosition::FrontRight},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontRight,
+     ChannelPosition::BackLeft, ChannelPosition::BackRight},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
+     ChannelPosition::FrontRight, ChannelPosition::BackLeft,
+     ChannelPosition::BackRight},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
+     ChannelPosition::FrontRight, ChannelPosition::BackLeft,
+     ChannelPosition::BackRight, ChannelPosition::Lfe},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
+     ChannelPosition::FrontRight, ChannelPosition::SideLeft,
+     ChannelPosition::SideRight, ChannelPosition::BackCenter, ChannelPosition::Lfe},
+    {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
+     ChannelPosition::FrontRight, ChannelPosition::SideLeft,
+     ChannelPosition::SideRight, ChannelPosition::BackLeft,
+     ChannelPosition::BackRight, ChannelPosition::Lfe},
+}};
+
+// The speakers a file names, in the order sf_readf_float delivers its channels.
+// A header's channel map comes first: WAVE's channel mask (WAVEX, RF64) or a CAF
+// or AIFF channel layout chunk, which need not list the channels in ascending
+// order. Ogg Vorbis and Opus carry no map but a fixed order, the Vorbis one. No
+// mask and no reorder for any other file, and for anything the table cannot
+// declare.
+ChannelOrder channelOrderOf(SNDFILE* snd, const SF_INFO& info) {
+    const int channels = info.channels;
     if (channels < 2 || channels > kMaxPositionedChannels) {
         return {};
     }
-    std::array<int, kMaxPositionedChannels> map{};
+    const auto count   = static_cast<std::size_t>(channels);
+    const int  subtype = info.format & SF_FORMAT_SUBMASK;
+    std::array<int, kMaxPositionedChannels>           map{};
+    std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
     if (sf_command(snd, SFC_GET_CHANNEL_MAP_INFO, map.data(),
-                   static_cast<int>(sizeof(int)) * channels) != SF_TRUE) {
+                   static_cast<int>(sizeof(int)) * channels) == SF_TRUE) {
+        std::ranges::transform(std::span(map).first(count), speakers.begin(),
+                               speakerBit);
+    } else if (subtype == SF_FORMAT_VORBIS || subtype == SF_FORMAT_OPUS) {
+        std::ranges::transform(std::span(kVorbisOrder[count - 2]).first(count),
+                               speakers.begin(), channelBit);
+    } else {
         return {};
     }
-    const auto count = static_cast<std::size_t>(channels);
-    std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
-    std::ranges::transform(std::span(map).first(count), speakers.begin(), speakerBit);
     return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count));
 }
 
@@ -231,7 +267,7 @@ std::unique_ptr<IDecoder> SndfileDecoder::open(const std::string& path,
     auto impl      = std::make_unique<Impl>();
     impl->snd      = snd;
     impl->channels = info.channels;
-    impl->order    = channelOrderOf(snd, info.channels);
+    impl->order    = channelOrderOf(snd, info);
     impl->fmt      = AudioFormat{
         .sampleRate  = static_cast<std::uint32_t>(info.samplerate),
         .channels    = static_cast<std::uint16_t>(info.channels),
@@ -277,9 +313,9 @@ std::string   SndfileDecoder::lastError()   const { return m_impl->lastError; }
 // library returns nothing more. For a regular file libsndfile satisfies the
 // request in a single call until the final partial block, but looping costs
 // nothing and makes the EOS semantics independent of libsndfile's chunking.
-// Each block then moves to ascending speaker order when the file's channel map
-// lists its channels in another order, so they arrive in the order format()'s
-// mask describes.
+// Each block then moves to ascending speaker order when the file's channels come
+// in another order (a channel map that says so, Ogg Vorbis and Opus), so they
+// arrive in the order format()'s mask describes.
 std::size_t SndfileDecoder::read(float* dst, std::size_t frames) {
     if (frames == 0) {
         return 0;
