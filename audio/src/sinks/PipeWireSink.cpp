@@ -1422,6 +1422,8 @@ std::uint32_t spaChannelFor(ChannelPosition p) {
         case ChannelPosition::TopFrontCenter:     return SPA_AUDIO_CHANNEL_TFC;
         case ChannelPosition::TopFrontRight:      return SPA_AUDIO_CHANNEL_TFR;
         case ChannelPosition::TopBackLeft:        return SPA_AUDIO_CHANNEL_TRL;
+        case ChannelPosition::TopBackCenter:      return SPA_AUDIO_CHANNEL_TRC;
+        case ChannelPosition::TopBackRight:       return SPA_AUDIO_CHANNEL_TRR;
     }
     return SPA_AUDIO_CHANNEL_UNKNOWN;
 }
@@ -1431,11 +1433,11 @@ std::uint32_t spaChannelFor(ChannelPosition p) {
 // position declared from the format (ChannelPositions.h: its speaker mask, or
 // the default order for its channel count) so the graph's channel mixer can
 // downmix or upmix it (a 5.1 track on a stereo sink keeps its center and
-// surrounds; a mono track reaches both speakers). A channel count the table
-// does not cover is declared unpositioned, honestly, rather than given an
-// invented layout. Used by open() and reconfigure(), so the two can never
-// describe the stream differently. The builder's buffer must outlive the
-// returned pod.
+// surrounds; a mono track reaches both speakers). A stream the table cannot
+// position (more than 8 channels with no speakers named, or more than 18) is
+// declared unpositioned, honestly, rather than given an invented layout. Used
+// by open() and reconfigure(), so the two can never describe the stream
+// differently. The builder's buffer must outlive the returned pod.
 const struct spa_pod* buildFormatPod(struct spa_pod_builder* builder,
                                      const AudioFormat&      format) {
     struct spa_audio_info_raw raw{};

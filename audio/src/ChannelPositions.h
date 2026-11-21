@@ -25,7 +25,9 @@
 // AudioFormat::channelMask: a set of WAVEFORMATEXTENSIBLE speaker bits, with the
 // channels interleaved in ascending bit order. A mask of 0 means the default
 // order for the channel count, the table below: for 1 to 8 channels FLAC's
-// channel assignment and WAVE's default order agree. A decoder whose source
+// channel assignment and WAVE's default order agree. Beyond 8 channels there is
+// no default order, so such a stream is positioned only when its source names
+// every speaker, up to the 18 a mask can name. A decoder whose source
 // names its speakers (FFmpeg's channel layout, a FLAC file's
 // WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment, the channel map libsndfile reads
 // from a WAVE, CAF or AIFF header) reports them when they differ from that
@@ -83,16 +85,23 @@ enum class ChannelPosition : std::uint8_t {
     TopFrontCenter,
     TopFrontRight,
     TopBackLeft,
+    TopBackCenter,
+    TopBackRight,
 };
 
-/// The largest channel count with a defined order. Beyond it a sink declares
-/// the stream unpositioned.
-inline constexpr std::uint16_t kMaxPositionedChannels = 8;
+/// The largest channel count with a default order, the table below. Beyond it a
+/// stream is positioned only by a mask.
+inline constexpr std::uint16_t kMaxDefaultOrderChannels = 8;
+
+/// The largest channel count a sink declares positions for: the number of
+/// distinct speakers a mask can name. Beyond it a sink declares the stream
+/// unpositioned.
+inline constexpr std::uint16_t kMaxPositionedChannels = 18;
 
 /// The position's WAVEFORMATEXTENSIBLE speaker bit, its bit in
 /// AudioFormat::channelMask. Mono has none: it exists only as the one-channel
 /// row of the table.
-[[nodiscard]] constexpr std::uint16_t channelBit(ChannelPosition p) noexcept {
+[[nodiscard]] constexpr std::uint32_t channelBit(ChannelPosition p) noexcept {
     switch (p) {
         case ChannelPosition::Mono:        return 0x0000;
         case ChannelPosition::FrontLeft:   return 0x0001;
@@ -111,6 +120,8 @@ inline constexpr std::uint16_t kMaxPositionedChannels = 8;
         case ChannelPosition::TopFrontCenter:     return 0x2000;
         case ChannelPosition::TopFrontRight:      return 0x4000;
         case ChannelPosition::TopBackLeft:        return 0x8000;
+        case ChannelPosition::TopBackCenter:      return 0x10000;
+        case ChannelPosition::TopBackRight:       return 0x20000;
     }
     return 0;
 }
@@ -141,10 +152,10 @@ private:
 
 namespace detail {
 
-using PositionRow = std::array<ChannelPosition, kMaxPositionedChannels>;
+using PositionRow = std::array<ChannelPosition, kMaxDefaultOrderChannels>;
 
 // Row n-1 holds the n-channel order; unused tail slots are never read.
-inline constexpr std::array<PositionRow, kMaxPositionedChannels> kPositionRows{{
+inline constexpr std::array<PositionRow, kMaxDefaultOrderChannels> kPositionRows{{
     {ChannelPosition::Mono},
     {ChannelPosition::FrontLeft, ChannelPosition::FrontRight},
     {ChannelPosition::FrontLeft, ChannelPosition::FrontRight,
@@ -169,7 +180,7 @@ inline constexpr std::array<PositionRow, kMaxPositionedChannels> kPositionRows{{
 
 // The positions a mask can name, in ascending bit order: the order the channels
 // of a masked stream are interleaved in.
-inline constexpr std::array<ChannelPosition, 16> kMaskOrder{{
+inline constexpr std::array<ChannelPosition, kMaxPositionedChannels> kMaskOrder{{
     ChannelPosition::FrontLeft,         ChannelPosition::FrontRight,
     ChannelPosition::FrontCenter,       ChannelPosition::Lfe,
     ChannelPosition::BackLeft,          ChannelPosition::BackRight,
@@ -178,16 +189,17 @@ inline constexpr std::array<ChannelPosition, 16> kMaskOrder{{
     ChannelPosition::SideRight,         ChannelPosition::TopCenter,
     ChannelPosition::TopFrontLeft,      ChannelPosition::TopFrontCenter,
     ChannelPosition::TopFrontRight,     ChannelPosition::TopBackLeft,
+    ChannelPosition::TopBackCenter,     ChannelPosition::TopBackRight,
 }};
 
 }  // namespace detail
 
 /// Every bit a mask may carry; any other bit is a speaker this table cannot
 /// name, and a decoder whose source has one reports no mask.
-inline constexpr std::uint16_t kNamedChannelMask = [] {
-    std::uint16_t mask = 0;
+inline constexpr std::uint32_t kNamedChannelMask = [] {
+    std::uint32_t mask = 0;
     for (const ChannelPosition p : detail::kMaskOrder) {
-        mask = static_cast<std::uint16_t>(mask | channelBit(p));
+        mask |= channelBit(p);
     }
     return mask;
 }();
@@ -196,15 +208,14 @@ inline constexpr std::uint16_t kNamedChannelMask = [] {
 /// row. 0 for mono, for no channels, and beyond the table. A decoder compares a
 /// source's mask against it and reports 0 when they agree, so one layout has
 /// one representation.
-[[nodiscard]] constexpr std::uint16_t
+[[nodiscard]] constexpr std::uint32_t
 defaultChannelMask(std::uint16_t channels) noexcept {
-    if (channels == 0 || channels > kMaxPositionedChannels) {
+    if (channels == 0 || channels > kMaxDefaultOrderChannels) {
         return 0;
     }
-    std::uint16_t mask = 0;
+    std::uint32_t mask = 0;
     for (std::size_t i = 0; i < channels; ++i) {
-        mask = static_cast<std::uint16_t>(
-            mask | channelBit(detail::kPositionRows[channels - 1u][i]));
+        mask |= channelBit(detail::kPositionRows[channels - 1u][i]);
     }
     return mask;
 }
@@ -214,24 +225,25 @@ defaultChannelMask(std::uint16_t channels) noexcept {
 /// from the count's default order, and 0 otherwise. 0 also for anything the
 /// table cannot declare: fewer than 2 or more than kMaxPositionedChannels
 /// channels, a speaker the table cannot name, or a bit count that disagrees
-/// with the channel count. Every decoder goes through this one rule, so two
-/// sources with the same speakers carry the same mask and compare equal at the
-/// stitch and hold gates.
-[[nodiscard]] constexpr std::uint16_t
+/// with the channel count. Beyond kMaxDefaultOrderChannels there is no default
+/// order to agree with, so the mask is always reported. Every decoder goes
+/// through this one rule, so two sources with the same speakers carry the same
+/// mask and compare equal at the stitch and hold gates.
+[[nodiscard]] constexpr std::uint32_t
 sourceChannelMask(std::uint64_t speakers, std::uint16_t channels) noexcept {
     if (channels < 2 || channels > kMaxPositionedChannels ||
         (speakers & ~std::uint64_t{kNamedChannelMask}) != 0 ||
         std::popcount(speakers) != channels) {
         return 0;
     }
-    const auto mask = static_cast<std::uint16_t>(speakers);
+    const auto mask = static_cast<std::uint32_t>(speakers);
     return mask == defaultChannelMask(channels) ? 0 : mask;
 }
 
 /// What a decoder does with a source that names a speaker for each channel.
 struct ChannelOrder {
     /// For AudioFormat::channelMask, by sourceChannelMask's rule.
-    std::uint16_t mask = 0;
+    std::uint32_t mask = 0;
     /// Whether the channels must move to reach ascending bit order.
     bool reorder = false;
     /// The stream's channel count, and the source channel each output channel
@@ -306,7 +318,8 @@ constexpr void reorderChannels(float* interleaved, std::size_t frames,
 /// kMaxPositionedChannels channels; empty for 0 or anything larger, which a sink
 /// reads as "declare unpositioned". A nonzero mask is used when every bit is one
 /// the table names and it has one bit per channel; any other mask is ignored and
-/// the count's default order applies.
+/// the count's default order applies, so beyond kMaxDefaultOrderChannels, where
+/// there is none, the list is empty too.
 [[nodiscard]] constexpr ChannelPositionList
 channelPositionsFor(const AudioFormat& format) noexcept {
     ChannelPositionList list;
@@ -314,7 +327,7 @@ channelPositionsFor(const AudioFormat& format) noexcept {
     if (channels == 0 || channels > kMaxPositionedChannels) {
         return list;
     }
-    const std::uint16_t mask = format.channelMask;
+    const std::uint32_t mask = format.channelMask;
     if (mask != 0 && (mask & ~kNamedChannelMask) == 0 &&
         std::popcount(mask) == channels) {
         for (const ChannelPosition p : detail::kMaskOrder) {
@@ -322,6 +335,9 @@ channelPositionsFor(const AudioFormat& format) noexcept {
                 list.push_back(p);
             }
         }
+        return list;
+    }
+    if (channels > kMaxDefaultOrderChannels) {
         return list;
     }
     for (std::size_t i = 0; i < channels; ++i) {

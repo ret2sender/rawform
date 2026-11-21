@@ -143,18 +143,22 @@ std::uint64_t speakerBit(int sfChannel) noexcept {
             return channelBit(ChannelPosition::TopFrontRight);
         case SF_CHANNEL_MAP_TOP_REAR_LEFT:
             return channelBit(ChannelPosition::TopBackLeft);
+        case SF_CHANNEL_MAP_TOP_REAR_CENTER:
+            return channelBit(ChannelPosition::TopBackCenter);
+        case SF_CHANNEL_MAP_TOP_REAR_RIGHT:
+            return channelBit(ChannelPosition::TopBackRight);
         default:                          return 0;
     }
 }
 
-using Row = std::array<ChannelPosition, kMaxPositionedChannels>;
+using Row = std::array<ChannelPosition, kMaxDefaultOrderChannels>;
 
 // The Vorbis I channel order, which Opus channel mapping 1 shares: row n-2 holds
 // the n-channel order, for 2 to 8 channels; unused tail slots are never read.
 // libsndfile hands Vorbis and Opus channels back as libvorbis and libopus decode
 // them, in this order, and reports no channel map for them, so this table is
 // what tells the decoder where they go.
-constexpr std::array<Row, kMaxPositionedChannels - 1> kVorbisOrder{{
+constexpr std::array<Row, kMaxDefaultOrderChannels - 1> kVorbisOrder{{
     {ChannelPosition::FrontLeft, ChannelPosition::FrontRight},
     {ChannelPosition::FrontLeft, ChannelPosition::FrontCenter,
      ChannelPosition::FrontRight},
@@ -374,9 +378,9 @@ bool opusInVorbisOrder(const std::string& path) {
 // a CAF or AIFF channel layout chunk, which need not list the channels in
 // ascending order. libsndfile reads a layout chunk's tag only, so a layout given
 // as a bitmap or as descriptions is read from the file here. Ogg Vorbis and Opus
-// carry no map but a fixed order, the Vorbis one, unless an Opus file's mapping
-// family defines none. No mask and no reorder for any other file, and for
-// anything the table cannot declare.
+// carry no map but a fixed order, the Vorbis one, for 2 to 8 channels, unless an
+// Opus file's mapping family defines none. No mask and no reorder for any other
+// file, and for anything the table cannot declare.
 ChannelOrder channelOrderOf(SNDFILE* snd, const SF_INFO& info, const std::string& path) {
     const int channels = info.channels;
     if (channels < 2 || channels > kMaxPositionedChannels) {
@@ -391,8 +395,9 @@ ChannelOrder channelOrderOf(SNDFILE* snd, const SF_INFO& info, const std::string
     if (sf_command(snd, SFC_GET_CHANNEL_MAP_INFO, map.data(),
                    static_cast<int>(sizeof(int)) * channels) == SF_TRUE) {
         std::ranges::transform(std::span(map).first(count), named.begin(), speakerBit);
-    } else if (subtype == SF_FORMAT_VORBIS ||
-               (subtype == SF_FORMAT_OPUS && opusInVorbisOrder(path))) {
+    } else if (count <= kMaxDefaultOrderChannels &&
+               (subtype == SF_FORMAT_VORBIS ||
+                (subtype == SF_FORMAT_OPUS && opusInVorbisOrder(path)))) {
         std::ranges::transform(std::span(kVorbisOrder[count - 2]).first(count),
                                named.begin(), channelBit);
     } else if ((major == SF_FORMAT_CAF || major == SF_FORMAT_AIFF) &&

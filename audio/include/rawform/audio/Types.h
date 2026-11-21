@@ -46,19 +46,21 @@ namespace rawform::audio {
 /// so the degrees of freedom are how fast frames arrive (sampleRate), how many
 /// samples make up one frame (channels), and which speaker each channel is for
 /// (channelMask). A "frame" throughout the engine means one sample per channel;
-/// a stereo frame is two contiguous floats. Eight bytes, no padding: the engine
-/// publishes it to the controlling thread as one packed 64-bit word.
+/// a stereo frame is two contiguous floats. The engine publishes it to the
+/// controlling thread as one packed 64-bit word: the rate and the mask whole,
+/// the channel count in 14 bits.
 struct AudioFormat {
     std::uint32_t sampleRate  = 0;  ///< frames per second, e.g. 44100, 48000, 96000
     std::uint16_t channels    = 0;  ///< samples per frame, e.g. 2 for stereo
     /// The speakers the channels are for, as WAVEFORMATEXTENSIBLE speaker bits
     /// (FL 0x1, FR 0x2, FC 0x4, LFE 0x8, BL 0x10, BR 0x20, FLC 0x40, FRC 0x80,
     /// BC 0x100, SL 0x200, SR 0x400, TC 0x800, TFL 0x1000, TFC 0x2000,
-    /// TFR 0x4000, TBL 0x8000), with the channels interleaved in ascending bit
-    /// order. 0 means the default order for the channel count, the one FLAC and
-    /// WAVE share; a decoder reports a mask only for a source whose speakers
-    /// differ from it.
-    std::uint16_t channelMask = 0;
+    /// TFR 0x4000, TBL 0x8000, TBC 0x10000, TBR 0x20000), with the channels
+    /// interleaved in ascending bit order. 0 means the default order for the
+    /// channel count, the one FLAC and WAVE share; beyond 8 channels there is
+    /// none, and 0 declares no positions. A decoder reports a mask only for a
+    /// source whose speakers differ from the default order.
+    std::uint32_t channelMask = 0;
 
     /// A format is usable only once a decoder has reported real values. Zero
     /// rate or channels means "not yet known", so a default-constructed

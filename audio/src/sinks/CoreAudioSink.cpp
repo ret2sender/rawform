@@ -361,6 +361,9 @@ AudioChannelLabel labelFor(ChannelPosition p) {
         case ChannelPosition::TopFrontRight:
             return kAudioChannelLabel_VerticalHeightRight;
         case ChannelPosition::TopBackLeft:        return kAudioChannelLabel_TopBackLeft;
+        case ChannelPosition::TopBackCenter:
+            return kAudioChannelLabel_TopBackCenter;
+        case ChannelPosition::TopBackRight:       return kAudioChannelLabel_TopBackRight;
     }
     return kAudioChannelLabel_Unknown;
 }
@@ -373,10 +376,10 @@ AudioChannelLabel labelFor(ChannelPosition p) {
 // identity except for mono, which is sent to the first two device channels so
 // it reaches both speakers. The AUHAL does not downmix, so a source with more
 // channels than the device keeps its first channels and loses the rest; the
-// layout still tells the truth about what they are. A channel count the table
-// does not cover gets no layout and the identity map. Either property
-// failing is a breadcrumb, never a failed open: the stream then plays without
-// the layout or the map.
+// layout still tells the truth about what they are. A stream the table cannot
+// position (more than 8 channels with no speakers named, or more than 18) gets
+// no layout and the identity map. Either property failing is a breadcrumb,
+// never a failed open: the stream then plays without the layout or the map.
 void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
                         ILogOutput* out) {
     const ChannelPositionList positions = channelPositionsFor(sourceFormat);

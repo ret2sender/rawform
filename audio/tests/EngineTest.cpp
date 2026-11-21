@@ -158,7 +158,7 @@ public:
                 std::uint64_t totalFrames, bool seekable,
                 std::uint64_t valueBase = 0, bool seekFails = false,
                 RampFault fault = RampFault::None, std::uint16_t depthBits = 0,
-                std::uint16_t channelMask = 0)
+                std::uint32_t channelMask = 0)
         : m_fmt{.sampleRate = rate, .channels = channels, .channelMask = channelMask},
           m_total(totalFrames), m_seekable(seekable),
           m_valueBase(valueBase), m_seekFails(seekFails), m_fault(fault),
@@ -282,12 +282,12 @@ public:
         bool          seekFails = false;
         RampFault     fault     = RampFault::None;
         std::uint16_t depthBits = 0;
-        std::uint16_t mask      = 0;
+        std::uint32_t mask      = 0;
         if (!parts.empty() && parts[0].rfind("depth", 0) == 0 && parts[0].size() > 5) {
             depthBits = static_cast<std::uint16_t>(parseU64(parts[0].substr(5)));
         } else if (!parts.empty() && parts[0].rfind("mask", 0) == 0 &&
                    parts[0].size() > 4) {
-            mask = static_cast<std::uint16_t>(parseU64(parts[0].substr(4)));
+            mask = static_cast<std::uint32_t>(parseU64(parts[0].substr(4)));
         } else if (!parts.empty() && parts[0] == "ramp") {
             seekable = true;
         } else if (!parts.empty() && parts[0] == "noseek") {
@@ -2923,6 +2923,32 @@ void testGaplessNoStitchDifferentLayout() {
     CHECK(listener.errors() == 0);
 }
 
+// A 7.1.4 track names twelve speakers, one of them (TBR, 0x20000) above the low
+// 16 mask bits. The format the engine publishes to the controlling thread must
+// carry the whole mask, with the rate and the channel count intact beside it.
+void testPublishedFormatKeepsWideMask() {
+    RampDecoderFactory factory;
+    RecordingListener  listener;
+    Engine             engine;
+    configure(engine, factory, listener, NullSink::Mode::Paced);
+
+    engine.enqueue("mask185919:48000:12:5000000");  // 185919 == 0x2D63F, 7.1.4
+    engine.play();
+    CHECK(waitForState(engine, State::Playing));
+
+    const AudioFormat f = engine.currentFormat();
+    if (f.channelMask != 0x2D63F) {
+        std::fprintf(stderr, "  published mask 0x%X, expected 0x2D63F\n",
+                     static_cast<unsigned>(f.channelMask));
+    }
+    CHECK(f.sampleRate == 48000);
+    CHECK(f.channels == 12);
+    CHECK(f.channelMask == 0x2D63F);
+
+    engine.stop();
+    CHECK(waitForState(engine, State::Stopped));
+}
+
 // Three same-format tracks all inside the ring stitch into one continuous stream:
 // one open, two pending seam markers, crossed in order, three tracks announced,
 // and a fully contiguous channel-0 stream across both seams.
@@ -3700,6 +3726,7 @@ int main() {
     testGaplessStitchSameFormat();
     testGaplessNoStitchDifferentRate();
     testGaplessNoStitchDifferentLayout();
+    testPublishedFormatKeepsWideMask();
     testGaplessMultipleSeams();
     testGaplessPositionResetsPerTrack();
     testGaplessFreeRunSoak();

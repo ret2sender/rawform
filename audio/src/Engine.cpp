@@ -162,6 +162,7 @@
 #include "rawform/audio/RateManager.h"
 #include "rawform/audio/Types.h"
 
+#include "ChannelPositions.h"
 #include "EngineRingSource.h"
 #include "DecoderFactory.h"
 
@@ -241,19 +242,32 @@ std::size_t computeCapacityFrames(std::uint32_t sampleRate,
 
 // Pack an AudioFormat into one 64-bit word so the controlling thread can read a
 // consistent {rate, channels, layout} from a single atomic, with no torn-read
-// window between separate atomics. channelMask occupies the top 16 bits,
-// sampleRate the 32 below them, channels the low 16.
-static_assert(sizeof(AudioFormat) == 8, "packFormat fills 64 bits with 32 + 16 + 16");
+// window between separate atomics. sampleRate occupies the top 32 bits whole,
+// since position() and duration() divide by it; channelMask the 18 below them,
+// every speaker bit a mask may carry; channels the low 14. A larger count would
+// saturate, but no decoder reports one: libsndfile stops at 1024 channels and
+// FFmpeg at 512.
+constexpr unsigned      kPackedMaskBits  = 18;
+constexpr unsigned      kPackedCountBits = 14;
+constexpr unsigned      kPackedRateShift = kPackedMaskBits + kPackedCountBits;
+constexpr std::uint64_t kPackedMaskMax   = (std::uint64_t{1} << kPackedMaskBits) - 1u;
+constexpr std::uint64_t kPackedCountMax  = (std::uint64_t{1} << kPackedCountBits) - 1u;
+static_assert(32 + kPackedMaskBits + kPackedCountBits == 64,
+              "packFormat fills 64 bits with rate 32 + mask 18 + count 14");
+static_assert((kNamedChannelMask & ~kPackedMaskMax) == 0,
+              "every speaker bit a mask may carry fits the packed mask");
 std::uint64_t packFormat(const AudioFormat& f) noexcept {
-    return (static_cast<std::uint64_t>(f.channelMask) << 48) |
-           (static_cast<std::uint64_t>(f.sampleRate) << 16) |
-           static_cast<std::uint64_t>(f.channels);
+    const std::uint64_t channels = std::min<std::uint64_t>(f.channels, kPackedCountMax);
+    return (std::uint64_t{f.sampleRate} << kPackedRateShift) |
+           ((std::uint64_t{f.channelMask} & kPackedMaskMax) << kPackedCountBits) |
+           channels;
 }
 AudioFormat unpackFormat(std::uint64_t bits) noexcept {
     AudioFormat f;
-    f.channels    = static_cast<std::uint16_t>(bits & 0xFFFFu);
-    f.sampleRate  = static_cast<std::uint32_t>((bits >> 16) & 0xFFFFFFFFu);
-    f.channelMask = static_cast<std::uint16_t>(bits >> 48);
+    f.channels    = static_cast<std::uint16_t>(bits & kPackedCountMax);
+    f.channelMask =
+        static_cast<std::uint32_t>((bits >> kPackedCountBits) & kPackedMaskMax);
+    f.sampleRate  = static_cast<std::uint32_t>(bits >> kPackedRateShift);
     return f;
 }
 
