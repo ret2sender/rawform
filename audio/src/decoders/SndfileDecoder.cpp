@@ -35,13 +35,18 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>  // SEEK_SET
+#include <cstring>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // libsndfile declares its SF_FORMAT_* codes as ENUM values, not preprocessor
 // macros, so an #ifdef on one is always false and cannot guard a case label. We
@@ -156,32 +161,233 @@ constexpr std::array<Row, kMaxPositionedChannels - 1> kVorbisOrder{{
      ChannelPosition::BackRight, ChannelPosition::Lfe},
 }};
 
+// ---------------------------------------------------------------------------
+// Header facts libsndfile does not report, read from the file itself. Each
+// reader looks at a bounded number of chunks, reads a payload only as far as it
+// needs, and gives up with nothing on anything it does not expect, which
+// leaves the file as libsndfile alone describes it.
+
+using FilePtr = std::unique_ptr<std::FILE, int (*)(std::FILE*)>;
+
+FilePtr openForHeader(const std::string& path) {
+    return {std::fopen(path.c_str(), "rb"), &std::fclose};
+}
+
+bool readExact(std::FILE* f, unsigned char* out, std::size_t n) {
+    return std::fread(out, 1, n, f) == n;
+}
+
+std::uint32_t be32(const unsigned char* p) noexcept {
+    return (std::uint32_t{p[0]} << 24) | (std::uint32_t{p[1]} << 16) |
+           (std::uint32_t{p[2]} << 8) | std::uint32_t{p[3]};
+}
+
+std::uint64_t be64(const unsigned char* p) noexcept {
+    return (std::uint64_t{be32(p)} << 32) | be32(p + 4);
+}
+
+// Enough for any real file's chunks before its channel layout.
+constexpr int kMaxHeaderChunks = 64;
+
+// Skip a chunk payload of size bytes, padded to an even size when pad is set.
+bool skipChunk(std::FILE* f, std::uint64_t size, bool pad) {
+    const std::uint64_t span = size + (pad ? (size & 1u) : 0u);
+    if (span > static_cast<std::uint64_t>(std::numeric_limits<long>::max())) {
+        return false;
+    }
+    return std::fseek(f, static_cast<long>(span), SEEK_CUR) == 0;
+}
+
+// The first bytes (at most maxBytes) of a chunk payload of size bytes.
+std::vector<unsigned char> readPayload(std::FILE* f, std::uint64_t size,
+                                       std::size_t maxBytes) {
+    std::vector<unsigned char> payload(
+        static_cast<std::size_t>(std::min<std::uint64_t>(size, maxBytes)));
+    if (!readExact(f, payload.data(), payload.size())) {
+        payload.clear();
+    }
+    return payload;
+}
+
+// The payload of a CAF file's channel layout chunk ('chan'): big-endian 64-bit
+// chunk sizes, and a data chunk of size -1 runs to the end of the file.
+std::vector<unsigned char> cafLayoutChunk(std::FILE* f, std::size_t maxBytes) {
+    std::array<unsigned char, 12> head{};
+    if (!readExact(f, head.data(), 8) || std::memcmp(head.data(), "caff", 4) != 0) {
+        return {};
+    }
+    for (int i = 0; i < kMaxHeaderChunks && readExact(f, head.data(), 12); ++i) {
+        const std::uint64_t size = be64(head.data() + 4);
+        if (std::memcmp(head.data(), "chan", 4) == 0) {
+            return readPayload(f, size, maxBytes);
+        }
+        if (!skipChunk(f, size, /*pad=*/false)) {
+            break;
+        }
+    }
+    return {};
+}
+
+// The payload of an AIFF or AIFF-C file's channel layout chunk ('CHAN', Apple's
+// addition): big-endian 32-bit chunk sizes, each payload padded to even.
+std::vector<unsigned char> aiffLayoutChunk(std::FILE* f, std::size_t maxBytes) {
+    std::array<unsigned char, 12> head{};
+    if (!readExact(f, head.data(), 12) || std::memcmp(head.data(), "FORM", 4) != 0 ||
+        (std::memcmp(head.data() + 8, "AIFF", 4) != 0 &&
+         std::memcmp(head.data() + 8, "AIFC", 4) != 0)) {
+        return {};
+    }
+    for (int i = 0; i < kMaxHeaderChunks && readExact(f, head.data(), 8); ++i) {
+        const std::uint64_t size = be32(head.data() + 4);
+        if (std::memcmp(head.data(), "CHAN", 4) == 0) {
+            return readPayload(f, size, maxBytes);
+        }
+        if (!skipChunk(f, size, /*pad=*/true)) {
+            break;
+        }
+    }
+    return {};
+}
+
+// CoreAudio's layout tags for a layout that names its speakers one by one
+// (CoreAudioBaseTypes.h): every other tag names a whole layout, which is
+// libsndfile's to read.
+constexpr std::uint32_t kLayoutTagUseChannelDescriptions = 0;
+constexpr std::uint32_t kLayoutTagUseChannelBitmap       = 1u << 16;
+
+// Bytes of a channel layout payload before its descriptions, and of each one.
+constexpr std::size_t kLayoutHeaderBytes      = 12;
+constexpr std::size_t kLayoutDescriptionBytes = 20;
+
+// The speakers of a CAF or AIFF channel layout given as a channel bitmap or as
+// one description per channel, in stream order, from the chunk's payload
+// (CoreAudio's AudioChannelLayout, big-endian). libsndfile reads layout tags
+// only, so it reports no map for these. A bitmap's bits are the
+// WAVEFORMATEXTENSIBLE bits, and it names its channels in ascending bit order.
+// Labels 1 to 18 are the same speakers in the same order; any other label names
+// a speaker with no such bit. False for any other tag, or for a layout that
+// names a different number of channels.
+bool appleLayoutSpeakers(std::span<const unsigned char> payload,
+                         std::span<std::uint64_t>       speakers) {
+    const std::size_t count = speakers.size();
+    if (payload.size() < kLayoutHeaderBytes) {
+        return false;
+    }
+    const std::uint32_t tag = be32(payload.data());
+    if (tag == kLayoutTagUseChannelBitmap) {
+        const std::uint32_t bitmap = be32(payload.data() + 4);
+        if (static_cast<std::size_t>(std::popcount(bitmap)) != count) {
+            return false;
+        }
+        std::size_t c = 0;
+        for (unsigned bit = 0; bit < 32; ++bit) {
+            if ((bitmap & (1u << bit)) != 0) {
+                speakers[c++] = std::uint64_t{1} << bit;
+            }
+        }
+        return true;
+    }
+    if (tag == kLayoutTagUseChannelDescriptions) {
+        if (be32(payload.data() + 8) != count ||
+            payload.size() < kLayoutHeaderBytes + count * kLayoutDescriptionBytes) {
+            return false;
+        }
+        for (std::size_t c = 0; c < count; ++c) {
+            const std::uint32_t label =
+                be32(payload.data() + kLayoutHeaderBytes + c * kLayoutDescriptionBytes);
+            speakers[c] = label >= 1 && label <= 18 ? std::uint64_t{1} << (label - 1) : 0;
+        }
+        return true;
+    }
+    return false;
+}
+
+// The speakers a CAF or AIFF file names in a channel layout chunk that
+// libsndfile does not read (appleLayoutSpeakers); false when it has none.
+bool layoutChunkSpeakers(const std::string& path, int major,
+                         std::span<std::uint64_t> speakers) {
+    const FilePtr f = openForHeader(path);
+    if (!f) {
+        return false;
+    }
+    const std::size_t maxBytes =
+        kLayoutHeaderBytes + speakers.size() * kLayoutDescriptionBytes;
+    const std::vector<unsigned char> payload = major == SF_FORMAT_CAF
+                                                   ? cafLayoutChunk(f.get(), maxBytes)
+                                                   : aiffLayoutChunk(f.get(), maxBytes);
+    return appleLayoutSpeakers(payload, speakers);
+}
+
+// The channel mapping family of an Ogg Opus file: byte 18 of its ID header
+// (OpusHead), which RFC 7845 puts alone on the first page. Empty when the first
+// page does not hold one.
+std::optional<unsigned> opusMappingFamily(const std::string& path) {
+    const FilePtr f = openForHeader(path);
+    std::array<unsigned char, 27>  page{};
+    std::array<unsigned char, 255> lacing{};
+    std::array<unsigned char, 19>  head{};
+    if (!f || !readExact(f.get(), page.data(), page.size()) ||
+        std::memcmp(page.data(), "OggS", 4) != 0) {
+        return std::nullopt;
+    }
+    const std::size_t segments = page[26];
+    if (!readExact(f.get(), lacing.data(), segments)) {
+        return std::nullopt;
+    }
+    std::size_t length = 0;
+    for (std::size_t i = 0; i < segments; ++i) {
+        length += lacing[i];
+    }
+    if (length < head.size() || !readExact(f.get(), head.data(), head.size()) ||
+        std::memcmp(head.data(), "OpusHead", 8) != 0) {
+        return std::nullopt;
+    }
+    return head[18];
+}
+
+// Whether an Ogg Opus file's channels come in Vorbis order. Mapping families 0
+// (mono or stereo) and 1 define it. Any other family (255, which defines no
+// positions; 2 and 3, ambisonics) does not, and its channels keep their stream
+// order with no mask, as FFmpeg delivers them. A first page with no ID header is
+// taken as family 1, the one family that names the speakers of a layout.
+bool opusInVorbisOrder(const std::string& path) {
+    const std::optional<unsigned> family = opusMappingFamily(path);
+    return !family || *family <= 1;
+}
+
 // The speakers a file names, in the order sf_readf_float delivers its channels.
-// A header's channel map comes first: WAVE's channel mask (WAVEX, RF64) or a CAF
-// or AIFF channel layout chunk, which need not list the channels in ascending
-// order. Ogg Vorbis and Opus carry no map but a fixed order, the Vorbis one. No
-// mask and no reorder for any other file, and for anything the table cannot
-// declare.
-ChannelOrder channelOrderOf(SNDFILE* snd, const SF_INFO& info) {
+// A header's channel map comes first: WAVE's channel mask (WAVEX, RF64, W64) or
+// a CAF or AIFF channel layout chunk, which need not list the channels in
+// ascending order. libsndfile reads a layout chunk's tag only, so a layout given
+// as a bitmap or as descriptions is read from the file here. Ogg Vorbis and Opus
+// carry no map but a fixed order, the Vorbis one, unless an Opus file's mapping
+// family defines none. No mask and no reorder for any other file, and for
+// anything the table cannot declare.
+ChannelOrder channelOrderOf(SNDFILE* snd, const SF_INFO& info, const std::string& path) {
     const int channels = info.channels;
     if (channels < 2 || channels > kMaxPositionedChannels) {
         return {};
     }
     const auto count   = static_cast<std::size_t>(channels);
+    const int  major   = info.format & SF_FORMAT_TYPEMASK;
     const int  subtype = info.format & SF_FORMAT_SUBMASK;
     std::array<int, kMaxPositionedChannels>           map{};
     std::array<std::uint64_t, kMaxPositionedChannels> speakers{};
+    const std::span<std::uint64_t> named = std::span(speakers).first(count);
     if (sf_command(snd, SFC_GET_CHANNEL_MAP_INFO, map.data(),
                    static_cast<int>(sizeof(int)) * channels) == SF_TRUE) {
-        std::ranges::transform(std::span(map).first(count), speakers.begin(),
-                               speakerBit);
-    } else if (subtype == SF_FORMAT_VORBIS || subtype == SF_FORMAT_OPUS) {
+        std::ranges::transform(std::span(map).first(count), named.begin(), speakerBit);
+    } else if (subtype == SF_FORMAT_VORBIS ||
+               (subtype == SF_FORMAT_OPUS && opusInVorbisOrder(path))) {
         std::ranges::transform(std::span(kVorbisOrder[count - 2]).first(count),
-                               speakers.begin(), channelBit);
+                               named.begin(), channelBit);
+    } else if ((major == SF_FORMAT_CAF || major == SF_FORMAT_AIFF) &&
+               layoutChunkSpeakers(path, major, named)) {
+        // named holds the layout chunk's speakers.
     } else {
         return {};
     }
-    return channelOrderFor(std::span<const std::uint64_t>(speakers.data(), count));
+    return channelOrderFor(named);
 }
 
 }  // namespace
@@ -267,7 +473,7 @@ std::unique_ptr<IDecoder> SndfileDecoder::open(const std::string& path,
     auto impl      = std::make_unique<Impl>();
     impl->snd      = snd;
     impl->channels = info.channels;
-    impl->order    = channelOrderOf(snd, info);
+    impl->order    = channelOrderOf(snd, info, path);
     impl->fmt      = AudioFormat{
         .sampleRate  = static_cast<std::uint32_t>(info.samplerate),
         .channels    = static_cast<std::uint16_t>(info.channels),

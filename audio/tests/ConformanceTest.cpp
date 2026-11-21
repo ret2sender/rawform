@@ -94,6 +94,7 @@
 #include <cstddef>
 #include <cstdint>  // IWYU pragma: keep (std::int*_t)
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <numbers>
@@ -870,11 +871,14 @@ auto positionTones(std::initializer_list<ChannelPosition> positions) {
 
 // The layout check proper, on a decoder opened on a fixture, which it removes.
 // A mask, when given, is also asserted, for the rows whose point is the mask
-// the decoder reports.
+// the decoder reports. Each decoded channel must hold the tone of its declared
+// position, or, when holds is given, the tone holds names for it: a source
+// with no positions keeps its channels where they were stored.
 void checkLayoutOf(const char* name, const std::string& path,
                    std::unique_ptr<IDecoder> dec, DecoderKind decoder,
                    std::optional<std::uint16_t>           mask,
-                   std::initializer_list<ChannelPosition> expected) {
+                   std::initializer_list<ChannelPosition> expected,
+                   std::initializer_list<ChannelPosition> holds = {}) {
     CHECK(dec != nullptr);
     if (!dec) {
         std::remove(path.c_str());
@@ -910,17 +914,23 @@ void checkLayoutOf(const char* name, const std::string& path,
     }
     const std::size_t frames = ch == 0 ? 0 : all.size() / ch;
     CHECK(frames > 0);
-    for (std::size_t c = 0; c < ch && c < declared.size(); ++c) {
+    const std::size_t heldCount = holds.size() == 0 ? declared.size() : holds.size();
+    for (std::size_t c = 0; c < ch && c < heldCount; ++c) {
         std::vector<float> x;
         for (std::size_t f = frames / 4; f < (3 * frames) / 4; ++f) {
             x.push_back(all[f * ch + c]);
         }
+        const ChannelPosition want =
+            holds.size() == 0 ? declared[c] : *(holds.begin() + c);
         const ChannelPosition heard = loudestPosition(x, fmt.sampleRate);
-        if (heard != declared[c]) {
-            std::fprintf(stderr, "  %s channel %zu: declared %s, holds the %s tone\n",
-                         name, c, positionName(declared[c]), positionName(heard));
+        if (heard != want) {
+            std::fprintf(stderr,
+                         "  %s channel %zu: declared %s, expected the %s tone, "
+                         "holds the %s tone\n",
+                         name, c, c < declared.size() ? positionName(declared[c]) : "-",
+                         positionName(want), positionName(heard));
         }
-        CHECK(heard == declared[c]);
+        CHECK(heard == want);
     }
 
     dec.reset();
@@ -930,8 +940,9 @@ void checkLayoutOf(const char* name, const std::string& path,
 // The same check on a fixture opened through the factory.
 void checkDecodedLayout(const char* name, const std::string& path,
                         DecoderKind decoder, std::optional<std::uint16_t> mask,
-                        std::initializer_list<ChannelPosition> expected) {
-    checkLayoutOf(name, path, openLayoutFixture(path), decoder, mask, expected);
+                        std::initializer_list<ChannelPosition> expected,
+                        std::initializer_list<ChannelPosition> holds = {}) {
+    checkLayoutOf(name, path, openLayoutFixture(path), decoder, mask, expected, holds);
 }
 
 // A 16-bit 48 kHz FLAC layout fixture, half a second of one tone per channel,
@@ -1008,6 +1019,219 @@ void checkSndfileLayout(const char* name, const char* ext, int sfFormat,
     checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, declared);
 }
 
+// ---------------------------------------------------------------------------
+// Layout fixtures libsndfile cannot write, assembled byte by byte: a W64 whose
+// format chunk carries a WAVEFORMATEXTENSIBLE mask, as FFmpeg writes one, and
+// CAF and AIFF channel layout chunks that name the speakers with a channel
+// bitmap or with one description per channel instead of a layout tag. Each
+// holds 16-bit PCM at kLayoutRate, one tone per source channel.
+
+// Integers appended in either byte order.
+struct ByteWriter {
+    std::vector<unsigned char> bytes;
+
+    void put(std::uint64_t v, int size, bool bigEndian) {
+        for (int i = 0; i < size; ++i) {
+            const int shift = 8 * (bigEndian ? size - 1 - i : i);
+            bytes.push_back(static_cast<unsigned char>((v >> shift) & 0xFFu));
+        }
+    }
+    void be16(std::uint64_t v) { put(v, 2, true); }
+    void be32(std::uint64_t v) { put(v, 4, true); }
+    void be64(std::uint64_t v) { put(v, 8, true); }
+    void le16(std::uint64_t v) { put(v, 2, false); }
+    void le32(std::uint64_t v) { put(v, 4, false); }
+    void le64(std::uint64_t v) { put(v, 8, false); }
+    void tag(const char* fourcc) { bytes.insert(bytes.end(), fourcc, fourcc + 4); }
+    void raw(std::span<const unsigned char> b) {
+        bytes.insert(bytes.end(), b.begin(), b.end());
+    }
+};
+
+// kLayoutFrames frames of 16-bit PCM, channel c carrying the tone of the c-th
+// source position.
+std::vector<unsigned char> pcm16(std::initializer_list<ChannelPosition> source,
+                                 bool bigEndian) {
+    const auto tone = positionTones(source);
+    const int  ch   = static_cast<int>(source.size());
+    ByteWriter w;
+    for (std::uint64_t f = 0; f < kLayoutFrames; ++f) {
+        for (int c = 0; c < ch; ++c) {
+            const long v = std::lround(static_cast<double>(tone(f, c)) * 32767.0);
+            w.put(static_cast<std::uint16_t>(static_cast<std::int16_t>(v)), 2, bigEndian);
+        }
+    }
+    return std::move(w.bytes);
+}
+
+// A W64 with a WAVE_FORMAT_EXTENSIBLE format chunk naming mask. W64 chunks are
+// identified by GUIDs, the first four bytes of each spelling the RIFF name.
+bool writeW64(const std::string& path, std::uint32_t mask,
+              std::initializer_list<ChannelPosition> source) {
+    constexpr std::array<unsigned char, 12> kRiffTail = {
+        0x2E, 0x91, 0xCF, 0x11, 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00};
+    constexpr std::array<unsigned char, 12> kWaveTail = {
+        0xF3, 0xAC, 0xD3, 0x11, 0x8C, 0xD1, 0x00, 0xC0, 0x4F, 0x8E, 0xDB, 0x8A};
+    constexpr std::array<unsigned char, 16> kPcmSubformat = {
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+        0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71};
+    const auto                       ch      = static_cast<std::uint32_t>(source.size());
+    const std::vector<unsigned char> samples = pcm16(source, /*bigEndian=*/false);
+    constexpr std::uint64_t          kHeader = 24;  // GUID and 64-bit size
+    constexpr std::uint64_t          kFmt    = 40;  // WAVEFORMATEXTENSIBLE
+
+    ByteWriter w;
+    w.tag("riff");
+    w.raw(kRiffTail);
+    w.le64(kHeader + 16 + kHeader + kFmt + kHeader + samples.size());
+    w.tag("wave");
+    w.raw(kWaveTail);
+    w.tag("fmt ");
+    w.raw(kWaveTail);
+    w.le64(kHeader + kFmt);
+    w.le16(0xFFFE);
+    w.le16(ch);
+    w.le32(kLayoutRate);
+    w.le32(kLayoutRate * ch * 2);
+    w.le16(ch * 2);
+    w.le16(16);
+    w.le16(22);
+    w.le16(16);
+    w.le32(mask);
+    w.raw(kPcmSubformat);
+    w.tag("data");
+    w.raw(kWaveTail);
+    w.le64(kHeader + samples.size());
+    w.raw(samples);
+    return writeBytes(path, w.bytes.data(), w.bytes.size());
+}
+
+// CoreAudio's channel labels and channel bitmap bits (CoreAudioBaseTypes.h) for
+// the speakers these fixtures name, and its two layout tags that name speakers
+// one by one rather than by layout.
+constexpr std::uint32_t kLabelLeft                 = 1;
+constexpr std::uint32_t kLabelRight                = 2;
+constexpr std::uint32_t kLabelCenter               = 3;
+constexpr std::uint32_t kLabelCenterSurround       = 9;
+constexpr std::uint32_t kLabelUnknown              = 0xFFFFFFFFu;
+constexpr std::uint32_t kBitLeft                   = 1u << 0;
+constexpr std::uint32_t kBitRight                  = 1u << 1;
+constexpr std::uint32_t kBitCenter                 = 1u << 2;
+constexpr std::uint32_t kBitCenterSurround         = 1u << 8;
+constexpr std::uint32_t kTagUseChannelDescriptions = 0;
+constexpr std::uint32_t kTagUseChannelBitmap       = 1u << 16;
+
+// The payload of a CAF or AIFF channel layout chunk (CoreAudio's
+// AudioChannelLayout, big-endian) naming the speakers with a bitmap.
+ByteWriter bitmapLayout(std::uint32_t bitmap) {
+    ByteWriter w;
+    w.be32(kTagUseChannelBitmap);
+    w.be32(bitmap);
+    w.be32(0);
+    return w;
+}
+
+// The same payload naming one speaker label per channel, in stream order.
+ByteWriter descriptionLayout(std::initializer_list<std::uint32_t> labels) {
+    ByteWriter w;
+    w.be32(kTagUseChannelDescriptions);
+    w.be32(0);
+    w.be32(labels.size());
+    for (const std::uint32_t label : labels) {
+        w.be32(label);
+        w.be32(0);           // flags
+        w.be32(0);           // three float coordinates, unused
+        w.be32(0);
+        w.be32(0);
+    }
+    return w;
+}
+
+// A CAF holding big-endian 16-bit PCM and the channel layout chunk layout.
+bool writeCaf(const std::string& path, const ByteWriter& layout,
+              std::initializer_list<ChannelPosition> source) {
+    const auto                       ch      = static_cast<std::uint32_t>(source.size());
+    const std::vector<unsigned char> samples = pcm16(source, /*bigEndian=*/true);
+    ByteWriter                       w;
+    w.tag("caff");
+    w.be16(1);  // version
+    w.be16(0);  // flags
+    w.tag("desc");
+    w.be64(32);
+    w.be64(std::bit_cast<std::uint64_t>(static_cast<double>(kLayoutRate)));
+    w.tag("lpcm");
+    w.be32(0);  // format flags: big-endian integer
+    w.be32(ch * 2);
+    w.be32(1);
+    w.be32(ch);
+    w.be32(16);
+    w.tag("chan");
+    w.be64(layout.bytes.size());
+    w.raw(layout.bytes);
+    w.tag("data");
+    w.be64(4 + samples.size());
+    w.be32(0);  // edit count
+    w.raw(samples);
+    return writeBytes(path, w.bytes.data(), w.bytes.size());
+}
+
+// An AIFF holding big-endian 16-bit PCM and the channel layout chunk layout.
+bool writeAiff(const std::string& path, const ByteWriter& layout,
+               std::initializer_list<ChannelPosition> source) {
+    static_assert(kLayoutRate == 48000, "the COMM chunk spells 48000 below");
+    constexpr std::array<unsigned char, 10> kRate48000 = {  // 80-bit IEEE extended
+        0x40, 0x0E, 0xBB, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    const auto                       ch      = static_cast<std::uint32_t>(source.size());
+    const std::vector<unsigned char> samples = pcm16(source, /*bigEndian=*/true);
+    ByteWriter                       body;
+    body.tag("AIFF");
+    body.tag("COMM");
+    body.be32(18);
+    body.be16(ch);
+    body.be32(kLayoutFrames);
+    body.be16(16);
+    body.raw(kRate48000);
+    body.tag("CHAN");  // every layout payload has an even size, so no pad byte
+    body.be32(layout.bytes.size());
+    body.raw(layout.bytes);
+    body.tag("SSND");
+    body.be32(8 + samples.size());
+    body.be32(0);  // offset
+    body.be32(0);  // block size
+    body.raw(samples);
+    ByteWriter w;
+    w.tag("FORM");
+    w.be32(body.bytes.size());
+    w.raw(body.bytes);
+    return writeBytes(path, w.bytes.data(), w.bytes.size());
+}
+
+// A fixture write(path) assembles, opened through the factory, which hands
+// these containers to libsndfile. In FFmpeg builds a second copy goes to FFmpeg
+// directly, which reads the same headers on its own, so the two readings of a
+// fixture are held to one answer. Each must report mask and declare the
+// declared positions, with the tones checkLayoutOf expects.
+template <typename Write>
+void checkByteLayout(const char* name, const char* ext, Write write, std::uint16_t mask,
+                     std::initializer_list<ChannelPosition> declared,
+                     std::initializer_list<ChannelPosition> holds = {}) {
+    const std::string path = std::string("rawform_layout_") + name + ext;
+    CHECK(write(path));
+    checkDecodedLayout(name, path, DecoderKind::Sndfile, mask, declared, holds);
+#if RAWFORM_HAVE_FFMPEG
+    const std::string ffName = std::string("ffmpeg_") + name;
+    const std::string ffPath = std::string("rawform_layout_") + ffName + ext;
+    CHECK(write(ffPath));
+    std::string               err;
+    std::unique_ptr<IDecoder> dec = rawform::audio::FfmpegDecoder::open(ffPath, &err);
+    if (!dec) {
+        std::fprintf(stderr, "open failed for %s: %s\n", ffPath.c_str(), err.c_str());
+    }
+    checkLayoutOf(ffName.c_str(), ffPath, std::move(dec), DecoderKind::Ffmpeg, mask,
+                  declared, holds);
+#endif
+}
+
 // An Ogg Vorbis or Opus layout fixture, written by libsndfile with its channels
 // in Vorbis order, the order libvorbis and libopus take them in; no channel map,
 // since Ogg carries none. Without FFmpeg libsndfile decodes it. With FFmpeg the
@@ -1024,6 +1248,89 @@ void checkVorbisOrderLayout(const char* name, const char* ext, int sfFormat,
     constexpr DecoderKind decoder = DecoderKind::Sndfile;
 #endif
     checkDecodedLayout(name, path, decoder, 0, declared);
+}
+
+// A whole file's bytes, empty when it cannot be read.
+std::vector<unsigned char> readBytes(const std::string& path) {
+    std::vector<unsigned char> bytes;
+    std::FILE*                 f = std::fopen(path.c_str(), "rb");
+    if (f == nullptr) {
+        return bytes;
+    }
+    std::array<unsigned char, 4096> buf{};
+    for (;;) {
+        const std::size_t got = std::fread(buf.data(), 1, buf.size(), f);
+        bytes.insert(bytes.end(), buf.begin(),
+                     buf.begin() + static_cast<std::ptrdiff_t>(got));
+        if (got < buf.size()) {
+            break;
+        }
+    }
+    std::fclose(f);
+    return bytes;
+}
+
+// The Ogg page checksum: CRC-32 with polynomial 0x04C11DB7, no reflection and
+// a zero initial value, over a page whose own checksum field reads zero.
+std::uint32_t oggCrc(std::span<const unsigned char> page) {
+    std::uint32_t crc = 0;
+    for (const unsigned char b : page) {
+        crc ^= static_cast<std::uint32_t>(b) << 24;
+        for (int i = 0; i < 8; ++i) {
+            crc = (crc & 0x80000000u) != 0 ? (crc << 1) ^ 0x04C11DB7u : crc << 1;
+        }
+    }
+    return crc;
+}
+
+// Sets an Ogg Opus file's channel mapping family: byte 18 of its ID header
+// (OpusHead), which RFC 7845 puts alone on the first page, whose checksum is
+// then computed again. Families 1 and 255 share the mapping table's layout, so
+// the streams still decode as before; only the positions the family promises
+// change.
+bool setOpusMappingFamily(const std::string& path, unsigned char family) {
+    std::vector<unsigned char> bytes = readBytes(path);
+    if (bytes.size() < 27 || std::memcmp(bytes.data(), "OggS", 4) != 0) {
+        return false;
+    }
+    const std::size_t segments = bytes[26];
+    const std::size_t start    = 27 + segments;
+    if (bytes.size() < start) {
+        return false;
+    }
+    std::size_t length = 0;
+    for (std::size_t i = 0; i < segments; ++i) {
+        length += bytes[27 + i];
+    }
+    if (length < 19 || bytes.size() < start + length ||
+        std::memcmp(bytes.data() + start, "OpusHead", 8) != 0) {
+        return false;
+    }
+    bytes[start + 18] = family;
+    std::fill_n(bytes.begin() + 22, 4, static_cast<unsigned char>(0));
+    const std::uint32_t crc = oggCrc(std::span(bytes).first(start + length));
+    for (std::size_t i = 0; i < 4; ++i) {
+        bytes[22 + i] = static_cast<unsigned char>((crc >> (8 * i)) & 0xFFu);
+    }
+    return writeBytes(path, bytes.data(), bytes.size());
+}
+
+// A 5.1 Ogg Opus written by libsndfile in Vorbis order, then given mapping
+// family 255, which defines no positions. Without FFmpeg libsndfile decodes it;
+// with FFmpeg the factory hands it to FFmpeg, so the same row holds the two
+// builds to one answer: no mask, the default order's positions declared, and
+// the channels left where they were stored.
+void checkOpusUndefinedMapping(std::initializer_list<ChannelPosition> stored,
+                               std::initializer_list<ChannelPosition> declared) {
+    const std::string path = "rawform_layout_opus_51_m255.opus";
+    writeSndfileLayout("opus_51_m255", path, SF_FORMAT_OGG | SF_FORMAT_OPUS, {}, stored);
+    CHECK(setOpusMappingFamily(path, 255));
+#if RAWFORM_HAVE_FFMPEG
+    constexpr DecoderKind decoder = DecoderKind::Ffmpeg;
+#else
+    constexpr DecoderKind decoder = DecoderKind::Sndfile;
+#endif
+    checkDecodedLayout("opus_51_m255", path, decoder, 0, declared, stored);
 }
 
 // A float ramp in a CAF whose map is out of ascending order (C L R Cs). The
@@ -1177,10 +1484,10 @@ int main() {
         checkFlacLayout("flac_no_mask", Container::Native, nullptr, 0, quad);
 
         // Files whose container carries a channel map naming 4.0: WAVE's channel
-        // mask in WAVEX and RF64, a channel layout chunk in CAF and AIFF (W64 is
-        // absent: libsndfile writes no map into it). libsndfile spells the front
-        // speakers with Apple's names in every one of them. Then a WAVE mask
-        // naming the default order, and a WAV with no map at all.
+        // mask in WAVEX and RF64, a channel layout chunk in CAF and AIFF.
+        // libsndfile spells the front speakers with Apple's names in every one
+        // of them. Then a WAVE mask naming the default order, a WAV with no map
+        // at all, and a W64, into which libsndfile writes no map.
         const std::initializer_list<int> map40 = {
             SF_CHANNEL_MAP_LEFT, SF_CHANNEL_MAP_RIGHT, SF_CHANNEL_MAP_CENTER,
             SF_CHANNEL_MAP_REAR_CENTER};
@@ -1198,6 +1505,8 @@ int main() {
         checkSndfileLayout("wavex_quad_map", ".wav", SF_FORMAT_WAVEX | SF_FORMAT_FLOAT,
                            mapQuad, 0, quad, quad);
         checkSndfileLayout("wav_no_map", ".wav", SF_FORMAT_WAV | SF_FORMAT_FLOAT, {}, 0,
+                           quad, quad);
+        checkSndfileLayout("w64_no_map", ".w64", SF_FORMAT_W64 | SF_FORMAT_FLOAT, {}, 0,
                            quad, quad);
 
         // Layouts whose channels are not in ascending speaker order, from the
@@ -1224,6 +1533,53 @@ int main() {
              P::BackRight});
         checkReorderExact();
 
+        // Headers libsndfile cannot write, assembled here. A W64 whose format
+        // chunk names 4.0 in its mask, as FFmpeg writes one. CAF and AIFF
+        // layout chunks naming 4.0 with a channel bitmap, and C L R Cs with one
+        // description per channel, which is moved to 4.0. Then descriptions
+        // with a label that is no speaker, which leave the channels where they
+        // are, under the default order's positions.
+        checkByteLayout(
+            "w64_40", ".w64",
+            [&](const std::string& p) { return writeW64(p, 0x0107, p40); }, 0x0107, p40);
+        const std::uint32_t bitmap40 = kBitLeft | kBitRight | kBitCenter |
+                                       kBitCenterSurround;
+        const std::initializer_list<std::uint32_t> labels40b = {
+            kLabelCenter, kLabelLeft, kLabelRight, kLabelCenterSurround};
+        checkByteLayout(
+            "caf_bitmap_40", ".caf",
+            [&](const std::string& p) {
+                return writeCaf(p, bitmapLayout(bitmap40), p40);
+            },
+            0x0107, p40);
+        checkByteLayout(
+            "caf_desc_40b", ".caf",
+            [&](const std::string& p) {
+                return writeCaf(p, descriptionLayout(labels40b), src40b);
+            },
+            0x0107, p40);
+        checkByteLayout(
+            "aiff_bitmap_40", ".aiff",
+            [&](const std::string& p) {
+                return writeAiff(p, bitmapLayout(bitmap40), p40);
+            },
+            0x0107, p40);
+        checkByteLayout(
+            "aiff_desc_40b", ".aiff",
+            [&](const std::string& p) {
+                return writeAiff(p, descriptionLayout(labels40b), src40b);
+            },
+            0x0107, p40);
+        checkByteLayout(
+            "caf_desc_unknown", ".caf",
+            [&](const std::string& p) {
+                return writeCaf(p,
+                                descriptionLayout({kLabelLeft, kLabelRight, kLabelCenter,
+                                                   kLabelUnknown}),
+                                p40);
+            },
+            0, quad, p40);
+
         // Ogg Vorbis and Opus in Vorbis order (3.0 as L C R, 5.1 as L C R BL BR
         // LFE), delivered in the default order for their count, so with no mask.
         const std::initializer_list<P> vorbis51 = {P::FrontLeft, P::FrontCenter,
@@ -1238,6 +1594,9 @@ int main() {
                                vorbis51, p51);
         checkVorbisOrderLayout("opus_51", ".opus", SF_FORMAT_OGG | SF_FORMAT_OPUS,
                                vorbis51, p51);
+
+        // The same Opus stream under mapping family 255, which defines no order.
+        checkOpusUndefinedMapping(vorbis51, p51);
     }
 
 #if RAWFORM_HAVE_FFMPEG
