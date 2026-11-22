@@ -28,6 +28,7 @@
 
 #include "media/TrackReader.h"
 #include "utils/FutureRelease.h" // releaseFuture: drop the result stores after a request
+#include "utils/HeapTrim.h"      // releaseFreeHeap: the trim after a completed scan
 #include "utils/PerfLog.h"       // the enumeration and read timing lines
 
 #include <QChar>
@@ -44,12 +45,6 @@
 
 #include <algorithm>
 #include <utility>
-
-// glibc-only (not ISO C, not POSIX): malloc_trim, used once per completed scan
-// request; see onScanFinished. Absent on macOS, where the branch compiles out.
-#ifdef __GLIBC__
-#include <malloc.h>
-#endif
 
 namespace rawform {
 namespace {
@@ -363,7 +358,7 @@ void TrackScanner::onScanFinished() {
     // few ms. Once per completed request chain (not per queued handoff), on
     // the GUI thread, with the pool idle. The macOS allocator has no such
     // residue and no such call.
-    malloc_trim(0);
+    releaseFreeHeap("scan");
 #endif
 }
 

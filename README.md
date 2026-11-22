@@ -382,7 +382,9 @@ ctest --test-dir build/app -L ui
   applies: playlist removals and moves, the reloader's drain slices, the
   Find index build, the audio sink's construction at startup, each scan's
   enumeration and read, and each cover decode. The spectrum display's
-  parking and resuming with the window's exposure is logged there too.
+  parking and resuming with the window's exposure is logged there too, and
+  on Linux, each heap trim (after a scan, and after a tool window closes)
+  with the resident set before and after it.
 - Engine knobs read from the environment: `RAWFORM_OUTPUT_STALL_MS` (the
   output stall watchdog in milliseconds, default 10000, 0 disables),
   `RAWFORM_NO_GAPLESS` (any value other than empty or 0 disables the

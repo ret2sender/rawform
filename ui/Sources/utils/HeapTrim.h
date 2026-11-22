@@ -20,8 +20,9 @@
 
 // HeapTrim.h
 //
-// A QML singleton that hands the process heap's free pages back to the OS
-// after a tool window goes away. The dialogs call it from their close paths:
+// Handing the process heap's free pages back to the OS. releaseFreeHeap makes
+// the call; the HeapTrim QML singleton defers it until a tool window has gone
+// away. The dialogs call the singleton from their close paths:
 //
 //     onClosing: { ...; propertiesWindow.destroy(); HeapTrim.trimSoon() }
 //
@@ -38,7 +39,8 @@
 // the QML heap ruled out by QV4_MM_AGGRESSIVE_GC and the per-track models
 // ruled out by a 1-track control). malloc_trim walks every arena and
 // releases its completely free pages, mid-heap included, in a few ms; the
-// same call TrackScanner makes once per completed scan, for the same reason.
+// same call TrackScanner makes once per completed scan, through
+// releaseFreeHeap, for the same reason.
 //
 // Deferred, not inline: destroy() is a deferred delete, and the window's
 // render thread is stopped and its scene graph freed inside that delete, so
@@ -48,9 +50,19 @@
 // merely less effective, never wrong), and the pending flag coalesces a
 // burst of closes into one trim. GUI thread only, like the scanner's call.
 //
-// The call compiles to a no-op where there is no glibc (macOS, Windows);
-// the method keeps its real signature so the QML call sites never branch.
-// Header-only (the Clipboard.h pattern): one invokable and one flag.
+// With rawform.perf enabled (PerfLog.h), releaseFreeHeap also reads the
+// resident set before and after the trim, from /proc/self/statm (the counter
+// /proc/<pid>/status reports as VmRSS), and logs
+//
+//     heap trim (<site>): RSS <before> -> <after> MB, released <delta> MB in <t> ms
+//
+// with MB as 2^20 bytes. Reading inside the call gives both figures on the
+// same heap state, which no outside sampler can time. With the category off,
+// the cost over the bare call is the category check.
+//
+// Both compile to no-ops where there is no glibc (macOS, Windows) and keep
+// their real signatures, so the QML call sites never branch. Header-only (the
+// Clipboard.h pattern): one function, one invokable and one flag.
 
 #pragma once
 
@@ -59,12 +71,60 @@
 #include <QTimer>
 
 // glibc-only (not ISO C, not POSIX): malloc_trim. Absent on macOS, where the
-// branch compiles out.
+// branch compiles out, along with what only the perf line needs.
 #ifdef __GLIBC__
+#include "utils/PerfLog.h" // lcPerf: the resident-set line
+
+#include <QElapsedTimer>
+
+#include <fstream>
+#include <optional>
+
 #include <malloc.h>
+#include <unistd.h> // sysconf: the page size statm counts in
 #endif
 
 namespace rawform {
+
+/// Hand the heap's completely free pages back to the OS. `site` names the
+/// caller in the rawform.perf line ("scan", "window"); the resident set is
+/// read only while that category is enabled.
+inline void releaseFreeHeap([[maybe_unused]] const char* site) {
+#ifdef __GLIBC__
+    if (!lcPerf().isDebugEnabled()) {
+        malloc_trim(0);
+        return;
+    }
+    // The second field of statm is the resident set in pages.
+    const auto residentMB = []() -> std::optional<double> {
+        std::ifstream statm("/proc/self/statm");
+        long long sizePages = 0;
+        long long residentPages = 0;
+        if (!(statm >> sizePages >> residentPages)) {
+            return std::nullopt;
+        }
+        const long pageBytes = sysconf(_SC_PAGESIZE);
+        if (pageBytes <= 0) {
+            return std::nullopt;
+        }
+        return static_cast<double>(residentPages) * static_cast<double>(pageBytes)
+               / (1024.0 * 1024.0);
+    };
+    const std::optional<double> before = residentMB();
+    QElapsedTimer clock;
+    clock.start();
+    malloc_trim(0);
+    const auto elapsedMs = static_cast<long long>(clock.elapsed());
+    const std::optional<double> after = residentMB();
+    if (before && after) {
+        qCDebug(lcPerf, "heap trim (%s): RSS %.1f -> %.1f MB, released %.1f MB in %lld ms",
+                site, *before, *after, *before - *after, elapsedMs);
+    } else {
+        qCDebug(lcPerf, "heap trim (%s): RSS unreadable, trim took %lld ms", site,
+                elapsedMs);
+    }
+#endif
+}
 
 class HeapTrim : public QObject {
     Q_OBJECT
@@ -85,7 +145,7 @@ public:
         m_pending = true;
         QTimer::singleShot(kDelayMs, this, [this] {
             m_pending = false;
-            malloc_trim(0);
+            releaseFreeHeap("window");
         });
 #endif
     }
