@@ -31,8 +31,9 @@
 //     QT_LOGGING_RULES="rawform.perf.debug=true"
 //
 // (and QT_LOGGING_TO_CONSOLE=1 when stderr is not a terminal, or the lines go
-// to the journal). Each timing line names the operation, its count or size and
-// the elapsed time, so a before/after pair reads off one grep.
+// to the journal). Each timing line names the operation and the elapsed time,
+// with a count or size where one applies, so a before/after pair reads off one
+// grep.
 
 #pragma once
 

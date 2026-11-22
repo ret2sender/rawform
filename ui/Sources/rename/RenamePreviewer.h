@@ -61,11 +61,10 @@
 #pragma once
 
 #include "playlist/PlaylistModel.h" // complete type: preview() takes the
-                                    // pointer (same marshaling rule as
-                                    // MetadataModel::setSelection; a typed
-                                    // QObject pointer, not a var round-trip,
-                                    // so a destroyed model arrives as null
-                                    // instead of a dangling wrapper)
+                                    // pointer (a typed QObject pointer, not a
+                                    // var round-trip, so a destroyed model
+                                    // arrives as null instead of a dangling
+                                    // wrapper)
 
 #include <QObject>
 #include <QQmlEngine>  // QML_ELEMENT

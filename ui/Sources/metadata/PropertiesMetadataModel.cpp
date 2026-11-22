@@ -28,6 +28,8 @@
 
 #include "metadata/PropertiesMetadataModel.h"
 
+#include "playlist/PlaylistModel.h"
+
 #include <QChar>
 #include <QFileInfo>
 #include <QRegularExpression>

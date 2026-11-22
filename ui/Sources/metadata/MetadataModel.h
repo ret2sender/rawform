@@ -74,11 +74,6 @@
 #pragma once
 
 #include "media/TrackData.h"
-#include "playlist/PlaylistModel.h" // complete type: setSelection() is a
-                                    // Q_INVOKABLE taking PlaylistModel*, which
-                                    // moc must see fully defined to build the
-                                    // meta-type QML marshals into. (The sibling
-                                    // models include it for the same reason.)
 #include "utils/QmlSingletonInstance.h" // the singleton wrapper at the end
 
 #include <QAbstractTableModel>
@@ -91,6 +86,9 @@
 #include <cstdint> // std::int64_t-style widths via qint64
 
 namespace rawform {
+
+// setSelection() is called from C++ only, so moc never needs the complete type.
+class PlaylistModel;
 
 class MetadataModel : public QAbstractTableModel {
     Q_OBJECT
@@ -135,7 +133,7 @@ public:
     /// their values (a reset only if the visible shape changed). The dock pane
     /// calls it from main.cpp, and PropertiesApplyController calls it for the
     /// Properties window's Details tab.
-    Q_INVOKABLE void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
+    void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
 
     /// Clear the selection (drops to the no-selection visible set: always-on
     /// rows with blank values; conditional and single-only rows hidden).

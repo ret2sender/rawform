@@ -57,13 +57,6 @@
 
 #pragma once
 
-#include "playlist/PlaylistModel.h" // complete type: setSelection() takes a
-                                    // PlaylistModel* and calls replayGainRows()
-                                    // on it C++-to-C++, keeping PlaylistModel
-                                    // the single authority on name rendering
-                                    // and the albumKey grouping rule. (Same
-                                    // include rationale as the sibling models.)
-
 #include <QAbstractListModel>
 #include <QList>
 #include <QQmlEngine>
@@ -74,6 +67,9 @@
 #include <optional>
 
 namespace rawform {
+
+// setSelection() is called from C++ only, so moc never needs the complete type.
+class PlaylistModel;
 
 class ReplayGainRowsModel : public QAbstractListModel {
     Q_OBJECT
@@ -126,7 +122,7 @@ public:
     /// shared, so no per-row JS materialization happens anywhere on this path.
     /// Out-of-range rows were already skipped there. Resets selection, anchor,
     /// staging, and the Summary.
-    Q_INVOKABLE void setSelection(rawform::PlaylistModel* playlist, const QVariantList& rows);
+    void setSelection(rawform::PlaylistModel* playlist, const QVariantList& rows);
 
     /// Empty the model (window teardown).
     Q_INVOKABLE void clear();

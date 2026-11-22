@@ -61,11 +61,6 @@
 #pragma once
 
 #include "media/TrackData.h"
-#include "playlist/PlaylistModel.h" // complete type: setSelection() is a
-                                    // Q_INVOKABLE taking PlaylistModel*, which
-                                    // moc must see fully defined to build the
-                                    // QML-marshaled meta-type. (Same reason
-                                    // MetadataModel includes it.)
 
 #include <QAbstractTableModel>
 #include <QHash>
@@ -76,6 +71,9 @@
 #include <QVariantList>
 
 namespace rawform {
+
+// setSelection() is called from C++ only, so moc never needs the complete type.
+class PlaylistModel;
 
 class PropertiesMetadataModel : public QAbstractTableModel {
     Q_OBJECT
@@ -117,7 +115,7 @@ public:
     /// Snapshot the given playlist rows as the editing selection and rebuild the
     /// visible rows + values. PropertiesApplyController calls it on open and on
     /// every re-pull.
-    Q_INVOKABLE void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
+    void setSelection(rawform::PlaylistModel* playlist, const QList<int>& rows);
 
     // Row-kind probes for the pane's delegate (plain ints, no meta-type concerns).
     Q_INVOKABLE [[nodiscard]] bool isSectionRow(int row) const;

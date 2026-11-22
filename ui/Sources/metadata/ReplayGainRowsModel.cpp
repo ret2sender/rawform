@@ -29,6 +29,7 @@
 #include "ReplayGainRowsModel.h"
 
 #include "media/ReplayGainTags.h"
+#include "playlist/PlaylistModel.h"
 
 #include <QHash>
 #include <QSet>

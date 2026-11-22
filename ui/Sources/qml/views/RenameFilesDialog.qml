@@ -425,10 +425,10 @@ Window {
                             font.pixelSize: Theme.fontSizeSmall
                             elide: Text.ElideRight
                         }
-                        // The column divider + its drag handle. The visible
-                        // line spans header and list (the list draws its own
-                        // segment per row is overkill; one full-height line
-                        // lives in the list container below the header).
+                        // The column divider and its drag handle: a 1 px line
+                        // in the header, centered in an 8 px grab area. The
+                        // list rows draw no divider; their text columns follow
+                        // the same split.
                         MouseArea {
                             id: splitHandle
                             x: previewHeader.width * renameDialog._colSplit - 4
