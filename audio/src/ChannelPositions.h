@@ -45,8 +45,10 @@
 // Why the sinks need it: a graph told "8 unpositioned channels" cannot mix. On
 // PipeWire an unpositioned 5.1 stream on a stereo sink keeps FL and FR and drops
 // the center, the LFE and the surrounds; with positions declared the channel
-// mixer downmixes them. On CoreAudio the AUHAL does not downmix at all, but a
-// declared mono stream can at least be mapped onto both device channels.
+// mixer downmixes them. On CoreAudio the AUHAL does not downmix at all, and with
+// an explicit channel map it does not route by the declared layout either, so the
+// sink builds that map itself from the device's speaker configuration
+// (routeToDevice); a declared mono stream is mapped onto both device channels.
 //
 // Private to the audio library: the public headers carry the mask as a plain
 // integer and stay free of this vocabulary, a sink implementation detail shared
@@ -61,6 +63,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace rawform::audio {
@@ -344,6 +347,41 @@ channelPositionsFor(const AudioFormat& format) noexcept {
         list.push_back(detail::kPositionRows[channels - 1u][i]);
     }
     return list;
+}
+
+/// Routes a stream's channels onto a device's. device holds, for each device
+/// channel, the position the device's speaker configuration names there, or
+/// nullopt where it names none of the table's. map gets one entry per device
+/// channel: the source channel to play there, or -1 for silence. A source speaker
+/// the device names exactly once goes to that channel. Every other speaker keeps
+/// its own index while that channel is still free, and is dropped otherwise, so
+/// a device that names nothing gets the identity and a source wider than the
+/// device keeps its first channels.
+constexpr void routeToDevice(const ChannelPositionList&                      source,
+                             std::span<const std::optional<ChannelPosition>> device,
+                             std::span<std::int32_t> map) noexcept {
+    const std::size_t channels = std::min(device.size(), map.size());
+    std::ranges::fill(map, -1);
+    std::array<bool, kMaxPositionedChannels> placed{};
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        std::size_t hits = 0;
+        std::size_t at   = 0;
+        for (std::size_t d = 0; d < channels; ++d) {
+            if (device[d] == source[i]) {
+                ++hits;
+                at = d;
+            }
+        }
+        if (hits == 1) {
+            map[at]   = static_cast<std::int32_t>(i);
+            placed[i] = true;
+        }
+    }
+    for (std::size_t i = 0; i < source.size() && i < channels; ++i) {
+        if (!placed[i] && map[i] == -1) {
+            map[i] = static_cast<std::int32_t>(i);
+        }
+    }
 }
 
 }  // namespace rawform::audio

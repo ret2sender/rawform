@@ -146,6 +146,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>  // IWYU pragma: keep (std::fabs, std::lround, etc.)
+#include <algorithm>  // std::min, the bound on a layout's descriptions
 #include <condition_variable>
 #include <cstddef>  // offsetof for the variable-length channel layout
 #include <cstdint>  // IWYU pragma: keep (std::uintN_t)
@@ -368,20 +369,108 @@ AudioChannelLabel labelFor(ChannelPosition p) {
     return kAudioChannelLabel_Unknown;
 }
 
+// The table position a device channel's label names, nullopt for any other
+// label. It inverts labelFor, so the label table lives in one place; macOS's
+// alternate names for a speaker (LeftTopRear beside TopBackLeft) are not equal.
+std::optional<ChannelPosition> positionForLabel(AudioChannelLabel label) {
+    for (const ChannelPosition p : detail::kMaskOrder) {
+        if (labelFor(p) == label) {
+            return p;
+        }
+    }
+    return std::nullopt;
+}
+
+// The labels of a variable-length AudioChannelLayout, bounded by the bytes the
+// storage actually holds.
+std::vector<AudioChannelLabel> descriptionLabels(const std::vector<unsigned char>& storage) {
+    constexpr std::size_t header = offsetof(AudioChannelLayout, mChannelDescriptions);
+    if (storage.size() < header) {
+        return {};
+    }
+    const auto* layout = reinterpret_cast<const AudioChannelLayout*>(storage.data());
+    const std::size_t room  = (storage.size() - header) / sizeof(AudioChannelDescription);
+    const std::size_t count = std::min<std::size_t>(layout->mNumberChannelDescriptions, room);
+    std::vector<AudioChannelLabel> labels(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        labels[i] = layout->mChannelDescriptions[i].mChannelLabel;
+    }
+    return labels;
+}
+
+// A layout AudioToolbox builds from a tag or a bitmap, which name their speakers
+// only implicitly; empty on failure.
+std::vector<unsigned char> expandedLayout(AudioFormatPropertyID property,
+                                          UInt32                specifier) {
+    UInt32 size = 0;
+    if (AudioFormatGetPropertyInfo(property, sizeof(specifier), &specifier, &size) !=
+        noErr) {
+        return {};
+    }
+    std::vector<unsigned char> storage(size, 0);
+    if (AudioFormatGetProperty(property, sizeof(specifier), &specifier, &size,
+                               storage.data()) != noErr) {
+        return {};
+    }
+    storage.resize(size);
+    return storage;
+}
+
+// What the device's speaker configuration (its preferred channel layout, which
+// Audio MIDI Setup's Configure Speakers edits) names on each of its first
+// `channels` output channels, as table positions. A channel it leaves unnamed or
+// names outside the table is nullopt, and so is every channel when the device
+// reports no configuration.
+std::vector<std::optional<ChannelPosition>> deviceSpeakers(AudioDeviceID dev,
+                                                           UInt32        channels) {
+    std::vector<std::optional<ChannelPosition>> speakers(channels);
+    const AudioObjectPropertyAddress addr{kAudioDevicePropertyPreferredChannelLayout,
+                                          kAudioObjectPropertyScopeOutput,
+                                          kAudioObjectPropertyElementMain};
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(dev, &addr, 0, nullptr, &size) != noErr ||
+        size < offsetof(AudioChannelLayout, mChannelDescriptions)) {
+        return speakers;
+    }
+    std::vector<unsigned char> storage(size, 0);
+    if (AudioObjectGetPropertyData(dev, &addr, 0, nullptr, &size, storage.data()) !=
+        noErr) {
+        return speakers;
+    }
+    storage.resize(size);
+    const auto* layout = reinterpret_cast<const AudioChannelLayout*>(storage.data());
+    const AudioChannelLayoutTag tag = layout->mChannelLayoutTag;
+    if (tag == kAudioChannelLayoutTag_UseChannelBitmap) {
+        storage = expandedLayout(kAudioFormatProperty_ChannelLayoutForBitmap,
+                                 layout->mChannelBitmap);
+    } else if (tag != kAudioChannelLayoutTag_UseChannelDescriptions) {
+        storage = expandedLayout(kAudioFormatProperty_ChannelLayoutForTag, tag);
+    }
+    const std::vector<AudioChannelLabel> labels = descriptionLabels(storage);
+    for (std::size_t d = 0; d < speakers.size() && d < labels.size(); ++d) {
+        speakers[d] = positionForLabel(labels[d]);
+    }
+    return speakers;
+}
+
 // Describe the stream's channels to the unit, on an UNINITIALIZED unit whose
 // input-scope format is already set: an input-scope AudioChannelLayout naming
 // each channel's speaker position from the format (ChannelPositions.h: its
 // speaker mask, or the default order for its channel count), and an output-scope
-// channel map (device channel -> input channel, -1 for silence) that is the
-// identity except for mono, which is sent to the first two device channels so
-// it reaches both speakers. The AUHAL does not downmix, so a source with more
-// channels than the device keeps its first channels and loses the rest; the
-// layout still tells the truth about what they are. A stream the table cannot
-// position (more than 8 channels with no speakers named, or more than 18) gets
-// no layout and the identity map. Either property failing is a breadcrumb,
-// never a failed open: the stream then plays without the layout or the map.
-void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
-                        ILogOutput* out) {
+// channel map (device channel -> input channel, -1 for silence). The AUHAL routes
+// by the map, not by the declared layout, so for three or more positioned
+// channels the map comes from the device's speaker configuration (routeToDevice):
+// each speaker goes to the device channel configured for it, and a speaker the
+// configuration does not name keeps its own channel number while that channel is
+// free. Mono goes to the first two device channels so it reaches both speakers.
+// Stereo keeps the identity, and so does a stream the table cannot position (more
+// than 8 channels with no speakers named, or more than 18), which also gets no
+// layout. The AUHAL does not downmix, so a source with more channels than the
+// device loses the ones it cannot place; the layout still tells the truth about
+// what they are. Either property failing is a breadcrumb, never a failed open:
+// the stream then plays without the layout or the map.
+void applyChannelLayout(AudioUnit unit, AudioDeviceID dev,
+                        const AudioFormat& sourceFormat, ILogOutput* out) {
     const ChannelPositionList positions = channelPositionsFor(sourceFormat);
     if (!positions.empty()) {
         const std::size_t bytes =
@@ -406,13 +495,36 @@ void applyChannelLayout(AudioUnit unit, const AudioFormat& sourceFormat,
         return;
     }
     std::vector<SInt32> map(deviceChannels, -1);
-    for (UInt32 d = 0; d < deviceChannels; ++d) {
-        if (sourceFormat.channels == 1) {
-            map[d] = d < 2 ? 0 : -1;
-        } else if (d < sourceFormat.channels) {
-            map[d] = static_cast<SInt32>(d);
+    if (positions.size() >= 3) {
+        routeToDevice(positions, deviceSpeakers(dev, deviceChannels), map);
+    } else {
+        for (UInt32 d = 0; d < deviceChannels; ++d) {
+            if (sourceFormat.channels == 1) {
+                map[d] = d < 2 ? 0 : -1;
+            } else if (d < sourceFormat.channels) {
+                map[d] = static_cast<SInt32>(d);
+            }
         }
     }
+
+    // One line when the routing moves a channel, so a run shows where each went.
+    std::string routing;
+    bool        moved = false;
+    for (UInt32 d = 0; d < deviceChannels; ++d) {
+        const bool identity = d < sourceFormat.channels
+                                  ? map[d] == static_cast<SInt32>(d)
+                                  : map[d] == -1;
+        moved = moved || (positions.size() >= 3 && !identity);
+        if (map[d] >= 0) {
+            routing += " " + std::to_string(d + 1) + "<-" + std::to_string(map[d] + 1);
+        }
+    }
+    if (moved) {
+        sinkLog(out, "CoreAudioSink: routed by the device's speaker configuration "
+                     "(output<-source):%s",
+                routing.c_str());
+    }
+
     osOk(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_ChannelMap,
                               kAudioUnitScope_Output, 0, map.data(),
                               static_cast<UInt32>(map.size() * sizeof(SInt32))),
@@ -1233,7 +1345,7 @@ bool CoreAudioSink::open(const AudioFormat& sourceFormat,
         close();
         return false;
     }
-    applyChannelLayout(m_impl->unit, sourceFormat, m_impl->logOut);
+    applyChannelLayout(m_impl->unit, dev, sourceFormat, m_impl->logOut);
 
     AURenderCallbackStruct cb{};
     cb.inputProc       = &renderCallback;
@@ -1369,7 +1481,7 @@ bool CoreAudioSink::reconfigure(const AudioFormat& sourceFormat,
               "set StreamFormat (reconfigure)", m_impl->logOut)) {
         return false;
     }
-    applyChannelLayout(m_impl->unit, sourceFormat, m_impl->logOut);
+    applyChannelLayout(m_impl->unit, dev, sourceFormat, m_impl->logOut);
 
     // 4. Re-initialize; only now commit the working format and channel count
     // (the render callback's memset math), so a failed retune leaves them

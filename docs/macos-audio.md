@@ -55,9 +55,14 @@ its unique identifier.
   device '...' disconnected" in the console, and the pin is kept so the
   choice stays visible.
 
-Channel layouts: mono reaches both speakers. A source with more channels
-than the device (a 5.1 track on a stereo device) plays its first channels
-only; the AUHAL does not downmix, and rawform does not add a mixer stage on
+Channel layouts: mono reaches both speakers. A source with three or more
+channels follows the device's speaker configuration (Audio MIDI Setup,
+Configure Speakers): each channel plays on the output configured for its
+speaker, so a 4.0 track's back center reaches the back center speaker, not
+the LFE. A speaker the configuration does not name keeps its channel number.
+A source with more channels than the device (a 5.1 track on a stereo device)
+plays only what the device has outputs for, the front pair on a stereo
+device; the AUHAL does not downmix, and rawform does not add a mixer stage on
 this backend.
 
 ## Crash recovery: `rate_ledger.yaml`

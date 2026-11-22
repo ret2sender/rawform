@@ -816,6 +816,52 @@ void checkChannelPositions() {
     CHECK((frame714 == std::array<float, 12>{4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3}));
 }
 
+// Routing onto a device's speaker configuration (routeToDevice), the channel map
+// CoreAudioSink sets on the AUHAL: one entry per device channel, holding the
+// source channel played there, or -1.
+void checkDeviceRouting() {
+    using P        = ChannelPosition;
+    using Speakers = std::vector<std::optional<P>>;
+    using Map      = std::vector<std::int32_t>;
+    const auto route = [](std::uint16_t channels, std::uint32_t mask,
+                          const Speakers& device) {
+        Map map(device.size());
+        rawform::audio::routeToDevice(
+            rawform::audio::channelPositionsFor(AudioFormat{
+                .sampleRate = 48000, .channels = channels, .channelMask = mask}),
+            device, map);
+        return map;
+    };
+    // A device whose channel n carries CoreAudio label n, BlackHole 16ch's default:
+    // the first 16 speakers in WAVE order.
+    const auto& order = rawform::audio::detail::kMaskOrder;
+    const Speakers wave16(order.begin(), order.begin() + 16);
+
+    // 4.0's back center goes to the channel configured for it; the LFE stays silent.
+    CHECK((route(4, 0x0107, wave16) ==
+           Map{0, 1, 2, -1, -1, -1, -1, -1, 3, -1, -1, -1, -1, -1, -1, -1}));
+    // 7.1.4: the sides and the height row go to their channels; the top back right,
+    // which the device does not name, keeps its own index, channel 12.
+    CHECK((route(12, 0x2D63F, wave16) ==
+           Map{0, 1, 2, 3, 4, 5, -1, -1, -1, 6, 7, 11, 8, -1, 9, 10}));
+    // Every speaker named, in reverse order: each goes to its own label.
+    CHECK((route(6, 0x3F,
+                 {P::BackRight, P::BackLeft, P::Lfe, P::FrontCenter, P::FrontRight,
+                  P::FrontLeft}) == Map{5, 4, 3, 2, 1, 0}));
+    // A device that names nothing gets the identity.
+    CHECK((route(6, 0, Speakers(8)) == Map{0, 1, 2, 3, 4, 5, -1, -1}));
+    // A source wider than the device keeps its first channels.
+    CHECK((route(8, 0, Speakers(4)) == Map{0, 1, 2, 3}));
+    // An unnamed speaker whose own channel is taken is dropped: 4.0's FC here.
+    CHECK((route(4, 0x0107,
+                 {P::BackCenter, P::FrontRight, P::FrontLeft, std::nullopt}) ==
+           Map{3, 1, 0, -1}));
+    // A speaker the device names twice keeps its index; the others find theirs.
+    CHECK((route(6, 0x3F,
+                 {P::FrontLeft, P::FrontRight, P::FrontLeft, P::Lfe, P::BackLeft,
+                  P::BackRight, P::FrontCenter}) == Map{0, 1, -1, 3, 4, 5, 2}));
+}
+
 // ---------------------------------------------------------------------------
 // Speaker layouts end to end: what each decoded channel holds is what a sink is
 // told it is. Each layout fixture carries one tone per source channel, placed by
@@ -1525,6 +1571,7 @@ void checkLayoutControl(const char* name, int channels,
 int main() {
     std::printf("[conformance] channel positions\n");
     checkChannelPositions();
+    checkDeviceRouting();
 
     // The fixture table is positional on purpose: nine columns per row read as a
     // table, and designated initializers would triple the row width.
