@@ -68,6 +68,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QGuiApplication>
 #include <QLatin1StringView>
@@ -78,20 +79,26 @@
 /// lifecycle events that reset a window's title bar. One instance is created per
 /// styled window in applyMacOSStyling() and lives for the app's lifetime.
 ///
-/// Neither Qt pointer is owned: the QQuickWindow and its NSWindow both outlive
-/// this helper in a single-window app (closing the window ends the app), so
-/// plain non-owning pointers are correct and keep this code independent of
-/// whether the build enables ARC.
+/// Neither Qt pointer is owned, and neither window outlives this helper: Qt
+/// releases the NSWindow when the window closes, and main.cpp destroys the
+/// QQuickWindow after the event loop returns. So the helper detaches first, on
+/// the main thread, when the NSWindow is about to close or the app is about to
+/// quit, whichever comes first: detach removes every observation and nulls both
+/// pointers, and each handler returns early once they are null. Plain
+/// non-owning pointers keep this code independent of whether the build enables
+/// ARC.
 @interface RawformWindowStyler : NSObject {
-    QQuickWindow* _quickWindow;  // not owned
-    NSWindow* _nsWindow;         // not owned
+    QQuickWindow* _quickWindow;  // not owned; null once detached
+    NSWindow* _nsWindow;         // not owned; nil once detached
     NSRect _windowedFrame;       // frame captured just before entering fullscreen
     BOOL _haveWindowedFrame;     // whether _windowedFrame is currently valid
+    BOOL _attached;              // observations registered and not yet removed
 }
 - (instancetype)initWithQuickWindow:(QQuickWindow*)quickWindow
                            nsWindow:(NSWindow*)nsWindow;
 - (void)applyTitleBarStyling;
 - (void)publishDoubleClickAction;
+- (void)detach;
 @end
 
 /// The global-domain defaults key behind "Double-click a window's title bar
@@ -107,11 +114,13 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
         _quickWindow = quickWindow;
         _nsWindow = nsWindow;
         _haveWindowedFrame = NO;
+        _attached = YES;
 
         // NSNotificationCenter does not retain its observers, so this object
         // must be kept alive by the caller (see applyMacOSStyling). We register
         // for the transitions that clobber our styling (or our geometry) and
-        // react to each.
+        // react to each, and for the window's close, which ends the observation
+        // (detach removes all of these).
         NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
         [center addObserver:self
                    selector:@selector(onWillEnterFullScreen:)
@@ -129,12 +138,15 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
                    selector:@selector(onDeminiaturize:)
                        name:NSWindowDidDeminiaturizeNotification
                      object:nsWindow];
+        [center addObserver:self
+                   selector:@selector(onWillClose:)
+                       name:NSWindowWillCloseNotification
+                     object:nsWindow];
 
         // The double-click preference lives in the global defaults domain,
         // which standardUserDefaults searches, and NSUserDefaults is
         // KVO-compliant for defaults keys, including changes made by another
-        // process (System Settings). Never removed: this object lives for the
-        // app's lifetime (see applyMacOSStyling).
+        // process (System Settings). Removed in detach.
         [[NSUserDefaults standardUserDefaults] addObserver:self
                                                 forKeyPath:kDoubleClickActionKey
                                                    options:0
@@ -150,8 +162,32 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
     (void)object;
     (void)change;
     (void)context;
+    // A change made by another process is not promised on the main thread. The
+    // window lives there and detach runs there, so the publish runs there too
+    // and never races the teardown.
     if ([keyPath isEqualToString:kDoubleClickActionKey])
-        [self publishDoubleClickAction];
+        [self performSelectorOnMainThread:@selector(publishDoubleClickAction)
+                               withObject:nil
+                            waitUntilDone:NO];
+}
+
+- (void)detach {
+    // Idempotent: the close notification and aboutToQuit can both arrive, and
+    // removing a key-value observer that is not registered throws.
+    if (!_attached)
+        return;
+    _attached = NO;
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[NSUserDefaults standardUserDefaults] removeObserver:self
+                                               forKeyPath:kDoubleClickActionKey];
+    _quickWindow = nullptr;
+    _nsWindow = nil;
+    _haveWindowedFrame = NO;
+}
+
+- (void)onWillClose:(__unused NSNotification*)notification {
+    // Posted while the NSWindow is still valid, before Qt releases it.
+    [self detach];
 }
 
 - (void)publishDoubleClickAction {
@@ -175,6 +211,8 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
     // Capture the true windowed frame BEFORE the transition, while the window is
     // still windowed. We stamp this exact frame back on exit so the window
     // cannot drift shorter on each fullscreen round trip.
+    if (!_nsWindow)
+        return;
     _windowedFrame = [_nsWindow frame];
     _haveWindowedFrame = YES;
 }
@@ -203,6 +241,9 @@ static NSString* const kDoubleClickActionKey = @"AppleActionOnDoubleClick";
 }
 
 - (void)reapplyAfterFullScreenExit {
+    // Queued one runloop pass back, so the window may have closed since.
+    if (!_nsWindow)
+        return;
     [self applyTitleBarStyling];
     if (_haveWindowedFrame) {
         [_nsWindow setFrame:_windowedFrame display:YES];
@@ -292,12 +333,20 @@ void applyMacOSStyling(QQuickWindow* window) {
     // static strong reference is what keeps it alive: NSNotificationCenter does
     // not retain observers, so without this the object would be reclaimed and
     // the fullscreen-exit re-styling would silently stop working. This is a
-    // deliberate app-lifetime singleton, not a leak.
+    // deliberate app-lifetime singleton, not a leak; its observation ends
+    // earlier, at detach.
     static RawformWindowStyler* s_styler = nil;
     s_styler = [[RawformWindowStyler alloc] initWithQuickWindow:window
                                                        nsWindow:nsWindow];
     [s_styler applyTitleBarStyling];
     [s_styler publishDoubleClickAction];
+
+    // The backstop for a window torn down without a close notification:
+    // aboutToQuit is emitted on the main thread before exec() returns, while
+    // main.cpp still owns the window. The window is the connection's context,
+    // so the connection goes with it.
+    QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+                     window, [] { [s_styler detach]; });
 
     qDebug().noquote() << "applyMacOSStyling: styling applied and observer installed";
 }
