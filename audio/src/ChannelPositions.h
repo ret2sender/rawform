@@ -38,9 +38,11 @@
 // custom order, Ogg Vorbis or Opus as libsndfile decodes them, in the Vorbis
 // order L C R) is moved to it as it is decoded (channelOrderFor,
 // reorderChannels): the samples only change places, so a mask always describes
-// the order the channels arrive in. The layout rides in AudioFormat rather
-// than beside it because every path that must agree on it already carries one:
-// the gapless stitch gate, the hold gate, the sink's open and reconfigure.
+// the order the channels arrive in. A later block that names the same speakers
+// in yet another order moves to the declared one the same way
+// (channelOrderBetween). The layout rides in AudioFormat rather than beside it
+// because every path that must agree on it already carries one: the gapless
+// stitch gate, the hold gate, the sink's open and reconfigure.
 //
 // Why the sinks need it: a graph told "8 unpositioned channels" cannot mix. On
 // PipeWire an unpositioned 5.1 stream on a stereo sink keeps FL and FR and drops
@@ -315,6 +317,41 @@ constexpr void reorderChannels(float* interleaved, std::size_t frames,
             p[i] = frame[order.from[i]];
         }
     }
+}
+
+/// The order, for reorderChannels, that moves channels whose speakers source
+/// lists to the order target lists: output channel i takes the source channel
+/// holding target[i]. Speakers compare as plain values, so a decoder can pass its
+/// own channel ids, including speakers this table cannot name. nullopt when the
+/// lists name different speakers, when either repeats one, or beyond
+/// kMaxPositionedChannels, where a ChannelOrder cannot hold the move. The mask is
+/// left 0, since the stream keeps the one it declared.
+template <typename Speaker>
+[[nodiscard]] constexpr std::optional<ChannelOrder>
+channelOrderBetween(std::span<const Speaker> source,
+                    std::span<const Speaker> target) noexcept {
+    const std::size_t count = source.size();
+    if (count != target.size() || count > kMaxPositionedChannels) {
+        return std::nullopt;
+    }
+    ChannelOrder order;
+    order.channels = static_cast<std::uint16_t>(count);
+    std::array<bool, kMaxPositionedChannels> taken{};
+    for (std::size_t i = 0; i < count; ++i) {
+        std::size_t hits = 0;
+        for (std::size_t s = 0; s < count; ++s) {
+            if (source[s] == target[i]) {
+                ++hits;
+                order.from[i] = static_cast<std::uint8_t>(s);
+            }
+        }
+        if (hits != 1 || taken[order.from[i]]) {
+            return std::nullopt;
+        }
+        taken[order.from[i]] = true;
+        order.reorder         = order.reorder || order.from[i] != i;
+    }
+    return order;
 }
 
 /// The positions of a stream's channels, in order, for 1 to

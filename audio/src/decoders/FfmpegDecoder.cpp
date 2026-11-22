@@ -55,7 +55,8 @@
 //      than where the default order for the count would. The channels keep the
 //      source's order, except that a custom order is moved to ascending speaker
 //      order once converted: a copy of each sample to its speaker's place,
-//      never a remix.
+//      never a remix. A later frame that lists the declared speakers in another
+//      order is moved to the declared order the same way.
 //
 // Seek mirrors FlacDecoder's shape: a raw seek lands at or before the target, we
 // flush the decoder, then decode-and-discard forward to the exact target frame
@@ -68,9 +69,11 @@
 // the pump moves to the next one, so a damaged file plays to its end with a
 // dropout where the damage is. A decoded frame whose channel count disagrees
 // with the stream's (a mid-stream parameter change the staging math cannot
-// absorb) is dropped the same way. Anything else negative from the demuxer or
-// the codec is a stream the pump cannot continue, which ends the track with
-// the libav* message in lastError().
+// absorb) is dropped the same way, and so is one whose layout names other
+// speakers at the same count, since a track's declared format cannot change
+// while it plays. Anything else negative from the demuxer or the codec is a
+// stream the pump cannot continue, which ends the track with the libav* message
+// in lastError().
 
 #include "decoders/FfmpegDecoder.h"
 
@@ -281,6 +284,15 @@ struct FfmpegDecoder::Impl {
     ChannelOrder  order{};          // a custom order's reorder, applied in staging
     bool          seekable_ = false;
 
+    // A frame's layout against the one open() declared, worked out once per
+    // change of layout rather than per frame: seenLayout is the last layout met,
+    // frameOrder the reorder its frames take, and dropFrames whether they name
+    // other speakers than the declared ones.
+    AVChannelLayout declaredLayout{};
+    AVChannelLayout seenLayout{};
+    ChannelOrder    frameOrder{};
+    bool            dropFrames = false;
+
     // ---- decode/pull state --------------------------------------------------
     // staging holds interleaved float32 produced by the converter but not yet
     // handed to read(); stagePos is the read cursor in FLOATS from the front,
@@ -352,6 +364,8 @@ struct FfmpegDecoder::Impl {
         if (fmtCtx) { avformat_close_input(&fmtCtx); }
         if (frame)  { av_frame_free(&frame); }
         if (pkt)    { av_packet_free(&pkt); }
+        av_channel_layout_uninit(&declaredLayout);
+        av_channel_layout_uninit(&seenLayout);
     }
 
     void clearStaging() {
@@ -542,23 +556,76 @@ struct FfmpegDecoder::Impl {
         }
     }
 
+    // What frames with this layout get, against the layout open() declared. The
+    // declared reorder when the two match, or when either lists no speakers (an
+    // unspecified order), since there is nothing to compare. The same speakers in
+    // another order move to the declared order: the converter passes channels
+    // through by index whatever its configured layout, so the move runs on its
+    // output, a copy of each sample to its speaker's place. Other speakers, or more
+    // channels than a ChannelOrder can move, cannot be declared mid-track, so their
+    // frames are dropped and counted like a channel-count change.
+    void judgeLayout(const AVChannelLayout& layout) {
+        if (av_channel_layout_copy(&seenLayout, &layout) < 0) {
+            av_channel_layout_uninit(&seenLayout);  // judged again on the next frame
+        }
+        frameOrder = order;
+        dropFrames = false;
+        if (layout.order == AV_CHANNEL_ORDER_UNSPEC ||
+            declaredLayout.order == AV_CHANNEL_ORDER_UNSPEC ||
+            av_channel_layout_compare(&layout, &declaredLayout) == 0) {
+            return;
+        }
+        const auto count = static_cast<std::size_t>(layout.nb_channels);
+        if (count > kMaxPositionedChannels) {
+            dropFrames = true;
+            return;
+        }
+        // Output channel i carries the declared speaker open() put there, so the
+        // target is the declared layout with open()'s own reorder applied.
+        std::array<AVChannel, kMaxPositionedChannels> source{};
+        std::array<AVChannel, kMaxPositionedChannels> target{};
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto declared = static_cast<unsigned>(order.reorder ? order.from[i] : i);
+            source[i] = av_channel_layout_channel_from_index(&layout,
+                                                             static_cast<unsigned>(i));
+            target[i] = av_channel_layout_channel_from_index(&declaredLayout, declared);
+        }
+        const std::optional<ChannelOrder> moved =
+            channelOrderBetween(std::span<const AVChannel>(source.data(), count),
+                                std::span<const AVChannel>(target.data(), count));
+        if (moved) {
+            frameOrder = *moved;
+        } else {
+            dropFrames = true;
+        }
+    }
+
     // Convert the frame currently held in `frame` to packed float32 and append
     // it to staging. Returns false only on a conversion failure (the caller
     // ends the track). An empty frame appends nothing and is not an error, and
     // neither is a frame whose channel count disagrees with the stream's: the
     // staging math and the converter are sized for the stream's count, so such
     // a frame (a mid-stream parameter change, a dependent substream) is dropped
-    // and counted rather than written past the staging buffer. swr runs
-    // one-to-one here (equal in/out rate, packed-float out), so the produced
-    // count equals nb_samples; we trim to the actual count defensively. The
-    // staged frames of a custom-order source then move to ascending speaker
-    // order, the one open() declared.
+    // and counted rather than written past the staging buffer. A frame whose
+    // layout names other speakers at the same count is dropped the same way
+    // (judgeLayout). swr runs one-to-one here (equal in/out rate, packed-float
+    // out), so the produced count equals nb_samples; we trim to the actual count
+    // defensively. The staged frames then move to the order open() declared:
+    // ascending speaker order for a custom-order source, and the declared
+    // speakers' places for a frame that lists them in another order.
     bool appendCurrentFrame() {
         const int inSamples = frame->nb_samples;
         if (inSamples <= 0) {
             return true;
         }
         if (frame->ch_layout.nb_channels != static_cast<int>(channels)) {
+            ++recovered;
+            return true;
+        }
+        if (av_channel_layout_compare(&frame->ch_layout, &seenLayout) != 0) {
+            judgeLayout(frame->ch_layout);
+        }
+        if (dropFrames) {
             ++recovered;
             return true;
         }
@@ -578,7 +645,8 @@ struct FfmpegDecoder::Impl {
             return false;
         }
         staging.resize(base + static_cast<std::size_t>(got) * channels);
-        reorderChannels(staging.data() + base, static_cast<std::size_t>(got), order);
+        reorderChannels(staging.data() + base, static_cast<std::size_t>(got),
+                        frameOrder);
         return true;
     }
 };
@@ -671,6 +739,12 @@ std::unique_ptr<IDecoder> FfmpegDecoder::open(const std::string& path,
         return nullptr;
     }
     impl->order       = sourceOrderOf(impl->codecCtx->ch_layout);
+    impl->frameOrder  = impl->order;
+    // The reference each frame's layout is held to. Should the copy fail, the
+    // declared layout reads as unspecified and every frame plays as it comes.
+    if (av_channel_layout_copy(&impl->declaredLayout, &impl->codecCtx->ch_layout) < 0) {
+        av_channel_layout_uninit(&impl->declaredLayout);
+    }
     impl->audioFormat = AudioFormat{
         .sampleRate  = rate,
         .channels    = static_cast<std::uint16_t>(channels),

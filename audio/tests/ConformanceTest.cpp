@@ -56,9 +56,10 @@
 //
 // The FFmpeg-decoded cases (AAC, AC3, DTS, WMA, ALAC as embedded byte blobs;
 // Vorbis and Opus generated through libsndfile's Ogg writers), and the
-// speaker-layout check on four multichannel AC3 blobs (checkLayout), compile in
-// only when the library was built with FFmpeg (RAWFORM_HAVE_FFMPEG); without it they
-// are skipped with a single notice and the suite still runs the three native
+// speaker-layout checks on four multichannel AC3 blobs (checkLayout, and
+// checkLayoutChange on two of them joined into one stream), compile in only when
+// the library was built with FFmpeg (RAWFORM_HAVE_FFMPEG); without it they are
+// skipped with a single notice and the suite still runs the three native
 // decoders. The blobs live in tests/fixtures/<Codec>Blob.h, included below;
 // each header records the ffmpeg command that produced it, except Mp3Blob.h,
 // whose command was not kept. A probe battery (checkProbe) runs beside the
@@ -862,6 +863,67 @@ void checkDeviceRouting() {
                   P::BackRight, P::FrontCenter}) == Map{0, 1, -1, 3, 4, 5, 2}));
 }
 
+// The move between two orders of the same speakers (channelOrderBetween), which
+// FfmpegDecoder applies to a block whose layout lists the declared speakers in
+// another order.
+void checkChannelOrderBetween() {
+    using P            = ChannelPosition;
+    const auto between = [](std::initializer_list<P> source,
+                            std::initializer_list<P> target) {
+        return rawform::audio::channelOrderBetween(
+            std::span<const P>(source.begin(), source.size()),
+            std::span<const P>(target.begin(), target.size()));
+    };
+
+    // C L R Cs to FL FR FC BC: each output channel takes the source channel
+    // holding its speaker, and the samples follow.
+    const auto cs = between({P::FrontCenter, P::FrontLeft, P::FrontRight, P::BackCenter},
+                            {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
+    CHECK(cs.has_value());
+    if (cs) {
+        CHECK(cs->reorder);
+        CHECK(cs->channels == 4);
+        CHECK(cs->mask == 0);
+        CHECK(cs->from[0] == 1 && cs->from[1] == 2 && cs->from[2] == 0 &&
+              cs->from[3] == 3);
+        std::array<float, 4> frame{2, 0, 1, 3};
+        rawform::audio::reorderChannels(frame.data(), 1, *cs);
+        CHECK((frame == std::array<float, 4>{0, 1, 2, 3}));
+    }
+    // The same order needs no move.
+    const auto same = between({P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter},
+                              {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter});
+    CHECK(same.has_value() && !same->reorder);
+    // Other speakers at the same count: 4.0 against quad(side).
+    CHECK(!between({P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter},
+                   {P::FrontLeft, P::FrontRight, P::SideLeft, P::SideRight}));
+    // A repeated speaker, in either list or in both.
+    CHECK(!between({P::FrontLeft, P::FrontLeft, P::FrontRight, P::BackCenter},
+                   {P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter}));
+    CHECK(!between({P::FrontLeft, P::FrontRight, P::FrontCenter, P::BackCenter},
+                   {P::FrontLeft, P::FrontLeft, P::FrontRight, P::BackCenter}));
+    CHECK(!between({P::FrontLeft, P::FrontLeft}, {P::FrontLeft, P::FrontLeft}));
+    // Lists of different lengths.
+    CHECK(!between({P::FrontLeft, P::FrontRight},
+                   {P::FrontLeft, P::FrontRight, P::FrontCenter}));
+
+    // Any comparable id works, as FFmpeg's channel ids do: 18 reversed is the
+    // largest move a ChannelOrder holds, and 19 is past it.
+    const auto reversed = [](int count) {
+        std::vector<int> source(static_cast<std::size_t>(count));
+        std::vector<int> target(static_cast<std::size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            source[static_cast<std::size_t>(i)] = count - 1 - i;
+            target[static_cast<std::size_t>(i)] = i;
+        }
+        return rawform::audio::channelOrderBetween(std::span<const int>(source),
+                                                   std::span<const int>(target));
+    };
+    const auto wide = reversed(18);
+    CHECK(wide.has_value() && wide->from[0] == 17 && wide->from[17] == 0);
+    CHECK(!reversed(19));
+}
+
 // ---------------------------------------------------------------------------
 // Speaker layouts end to end: what each decoded channel holds is what a sink is
 // told it is. Each layout fixture carries one tone per source channel, placed by
@@ -1545,6 +1607,103 @@ void checkLayout(const char* name, const unsigned char* bytes, std::size_t size,
     checkDecodedLayout(name, path, DecoderKind::Ffmpeg, std::nullopt, expected);
 }
 
+// Every frame a decoder delivers, interleaved.
+std::vector<float> decodeAll(IDecoder& dec) {
+    const std::size_t  ch = dec.format().channels;
+    std::vector<float> all;
+    std::vector<float> buf(4096 * ch);
+    for (;;) {
+        const std::size_t got = dec.read(buf.data(), 4096);
+        if (got == 0) {
+            break;
+        }
+        all.insert(all.end(), buf.begin(),
+                   buf.begin() + static_cast<std::ptrdiff_t>(got * ch));
+    }
+    return all;
+}
+
+// One raw AC3 stream whose layout changes partway at the same channel count: the
+// 4.0 blob written kLeadCopies times, then the quad(side) blob once. The lead-in
+// outlasts FFmpeg's default 5 s stream analysis, so open() declares 4.0 however
+// far the probe reads; a lead-in of one copy is declared quad(side), the last
+// layout a probe of the whole file saw. The quad(side) frames name other speakers
+// (SL SR where 4.0 has FC BC), so each one is dropped and counted: what plays is
+// the 4.0 part alone, and its channels hold their own tones up to the end.
+void checkLayoutChange() {
+    constexpr int           kLeadCopies     = 32;    // 6 AC3 frames each, 6.1 s
+    constexpr std::uint64_t kQuadSideFrames = 7;     // AC3 frames in that blob
+    constexpr std::size_t   kAc3FrameLength = 1536;  // samples per AC3 frame
+    const std::string       leadPath        = "rawform_layout_change_lead.ac3";
+    const std::string       path            = "rawform_layout_change.ac3";
+
+    std::vector<unsigned char> bytes;
+    for (int i = 0; i < kLeadCopies; ++i) {
+        bytes.insert(bytes.end(), std::begin(kAc3Layout40), std::end(kAc3Layout40));
+    }
+    CHECK(writeBytes(leadPath, bytes.data(), bytes.size()));
+    bytes.insert(bytes.end(), std::begin(kAc3LayoutQuadSide),
+                 std::end(kAc3LayoutQuadSide));
+    CHECK(writeBytes(path, bytes.data(), bytes.size()));
+
+    std::unique_ptr<IDecoder> lead = openLayoutFixture(leadPath);
+    std::unique_ptr<IDecoder> dec  = openLayoutFixture(path);
+    CHECK(lead != nullptr);
+    CHECK(dec != nullptr);
+    if (lead && dec) {
+        const AudioFormat fmt = dec->format();
+        CHECK(dec->sourceInfo().decoder == DecoderKind::Ffmpeg);
+        CHECK(fmt.channels == 4);
+        if (fmt.channelMask != 0x0107) {
+            std::fprintf(stderr, "  layout_change: mask 0x%04X, expected 0x0107\n",
+                         static_cast<unsigned>(fmt.channelMask));
+        }
+        CHECK(fmt.channelMask == 0x0107);
+
+        const std::vector<float> leadPcm    = decodeAll(*lead);
+        const std::vector<float> all        = decodeAll(*dec);
+        const std::size_t        frames     = all.size() / 4;
+        const std::size_t        leadFrames = leadPcm.size() / 4;
+        if (frames != leadFrames || dec->recoveredErrors() != kQuadSideFrames) {
+            std::fprintf(stderr,
+                         "  layout_change: %zu frames, the 4.0 part alone %zu; %llu "
+                         "frames dropped, expected %llu\n",
+                         frames, leadFrames,
+                         static_cast<unsigned long long>(dec->recoveredErrors()),
+                         static_cast<unsigned long long>(kQuadSideFrames));
+        }
+        CHECK(frames == leadFrames);
+        CHECK(dec->recoveredErrors() == kQuadSideFrames);
+
+        // The last frames delivered, short of the very last one: where the
+        // quad(side) frames would land if they were let through.
+        const auto declared = rawform::audio::channelPositionsFor(fmt);
+        CHECK(declared.size() == 4);
+        CHECK(frames >= 6 * kAc3FrameLength);
+        if (declared.size() == 4 && frames >= 6 * kAc3FrameLength) {
+            for (std::size_t c = 0; c < 4; ++c) {
+                std::vector<float> x;
+                for (std::size_t f = frames - 6 * kAc3FrameLength;
+                     f < frames - kAc3FrameLength; ++f) {
+                    x.push_back(all[f * 4 + c]);
+                }
+                const ChannelPosition heard = loudestPosition(x, fmt.sampleRate);
+                if (heard != declared[c]) {
+                    std::fprintf(stderr,
+                                 "  layout_change channel %zu: declared %s, holds the "
+                                 "%s tone at the end\n",
+                                 c, positionName(declared[c]), positionName(heard));
+                }
+                CHECK(heard == declared[c]);
+            }
+        }
+    }
+    lead.reset();
+    dec.reset();
+    std::remove(leadPath.c_str());
+    std::remove(path.c_str());
+}
+
 // A source FFmpeg decodes in the default order for its channel count reports
 // no mask, so it keeps the table's positions and can still join a stream of a
 // native-decoder source with the same count.
@@ -1572,6 +1731,7 @@ int main() {
     std::printf("[conformance] channel positions\n");
     checkChannelPositions();
     checkDeviceRouting();
+    checkChannelOrderBetween();
 
     // The fixture table is positional on purpose: nine columns per row read as a
     // table, and designated initializers would triple the row width.
@@ -1914,6 +2074,8 @@ int main() {
                            {P::FrontLeft, P::FrontRight, P::BackLeft, P::BackRight});
         // A custom order, delivered in ascending speaker order.
         checkFfmpegCustomOrder();
+        // A layout change partway through one stream.
+        checkLayoutChange();
     }
 #else
     std::printf("[conformance] aac/ac3/dts/vorbis/opus/wma/alac/layouts SKIPPED: built "
