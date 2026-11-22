@@ -348,16 +348,16 @@ void TrackScanner::onScanFinished() {
     // Give the scan's transient heap back to the OS. readTrack opens every file
     // through TagLib, which parses eagerly: a FLAC's PICTURE blocks and an ID3v2
     // APIC are read whole into ByteVectors even though only their presence is
-    // kept. Across the pool that is thousands of multi-MB allocations, freed at
-    // once but spread over one glibc arena per worker thread, and glibc raises
-    // its mmap threshold as large chunks are freed, so later covers land inside
-    // the arenas rather than in their own mappings. Nothing hands those pages
-    // back on its own; RSS then reports the scan's peak, not the live model
-    // (measured: ~50 MB over a cache load of the same 15k tracks). malloc_trim
-    // walks every arena and releases its free pages, mid-heap included, in a
-    // few ms. Once per completed request chain (not per queued handoff), on
-    // the GUI thread, with the pool idle. The macOS allocator has no such
-    // residue and no such call.
+    // kept. With the mmap threshold pinned at 1 MB (main.cpp), a picture that
+    // size or larger gets its own mapping and goes back on free; smaller ones,
+    // and the rest of each parse, are carved from one glibc arena per worker
+    // thread, and nothing hands those mid-heap pages back on its own.
+    // malloc_trim walks every arena and releases its completely free pages
+    // (measured over a scan of 15k tracks: ~8 MB in under 1 ms). That is the
+    // arena residue, not all of the scan's cost: ten seconds later RSS still
+    // sits ~12 MB above a cache load of the same playlist. Once per completed
+    // request chain (not per queued handoff), on the GUI thread, with the pool
+    // idle. The macOS allocator has no such residue and no such call.
     releaseFreeHeap("scan");
 #endif
 }
